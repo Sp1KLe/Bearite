@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-JNI="$ROOT/app/src/main/jni"
+CPP_DIR="$ROOT/app/src/main/cpp"
 NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME не задан}"
 API="${ANDROID_API:-24}"
 REF="${DOBBY_REF:-master}"
@@ -10,13 +10,13 @@ WORK="$(mktemp -d)"
 ABIS=("arm64-v8a" "armeabi-v7a")
 
 echo ">>> Скачиваем исходники Dobby ($REF)"
-curl -fsSL "https://github.com/jmpews/Dobby/archive/${REF}.tar.gz" -o "$WORK/dobby.tar.gz"
+curl -fsSL "https://github.com{REF}.tar.gz" -o "$WORK/dobby.tar.gz"
 tar -xzf "$WORK/dobby.tar.gz" -C "$WORK"
 SRC="$(echo "$WORK"/Dobby-*)"
 
 echo ">>> Копируем заголовок dobby.h"
-mkdir -p "$JNI/dobby/include"
-cp "$SRC/include/dobby.h" "$JNI/dobby/include/"
+mkdir -p "$CPP_DIR/dobby/include"
+cp "$SRC/include/dobby.h" "$CPP_DIR/dobby/include/"
 
 for ABI in "${ABIS[@]}"; do
   echo ">>> Собираем Dobby для $ABI"
@@ -39,12 +39,14 @@ for ABI in "${ABIS[@]}"; do
     exit 1
   fi
 
-  mkdir -p "$JNI/libs/$ABI"
-  cp "$SO" "$JNI/libs/$ABI/libdobby.so"
+  # Копируем для сборщика CMake
+  mkdir -p "$CPP_DIR/libs/$ABI"
+  cp "$SO" "$CPP_DIR/libs/$ABI/libdobby.so"
 
+  # Копируем для упаковки в APK
   mkdir -p "$ROOT/app/src/main/jniLibs/$ABI"
   cp "$SO" "$ROOT/app/src/main/jniLibs/$ABI/libdobby.so"
 done
 
 rm -rf "$WORK"
-echo ">>> Dobby собран для всех архитектур"
+echo ">>> Сборка Dobby завершена."
