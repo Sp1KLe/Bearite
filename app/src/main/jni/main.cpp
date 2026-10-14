@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <thread>
+#include "dobby.h" // Теперь заголовок Dobby подключен!
 
 #define LOG_TAG "BeariteCore"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -25,31 +26,15 @@ bool is_game_loaded(const char* lib_name) {
 }
 
 void load_external_mods() {
-    LOGI("Ядро Bearite успешно запущено во внутреннем процессе игры.");
+    LOGI("Ядро Bearite успешно запущено.");
 
     while (!is_game_loaded("libil2cpp.so")) {
         sleep(1);
     }
-    LOGI("Движок IL2CPP обнаружен. Загружаем сторонние плагины модов...");
+    LOGI("Движок IL2CPP обнаружен. Готовы использовать DobbyHook.");
 
-    std::string path = "/sdcard/Android/data/com.EarthkwakGames.SuperBearAdventure/files/mods/";
-    mkdir(path.c_str(), 0777);
-
-    DIR* dir = opendir(path.c_str());
-    if (dir) {
-        struct dirent* file;
-        while ((file = readdir(dir)) != NULL) {
-            std::string name = file->d_name;
-            if (name.find(".so") != std::string::npos) {
-                std::string full_path = path + name;
-                void* handle = dlopen(full_path.c_str(), RTLD_NOW);
-                if (handle) {
-                    LOGI("Мод %s успешно активирован в памяти!", name.c_str());
-                }
-            }
-        }
-        closedir(dir);
-    }
+    // Здесь внутри модов другие разработчики смогут вызывать функцию DobbyHook
+    // Пример: DobbyHook((void*)target_address, (void*)replacement, (void**)&original);
 }
 
 __attribute__((constructor))
