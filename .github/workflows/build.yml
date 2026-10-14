@@ -25,10 +25,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools   # без устаревшего "tools"
 
       - name: Install NDK and CMake
         run: |
-          yes | sdkmanager --licenses > /dev/null
           sdkmanager "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
