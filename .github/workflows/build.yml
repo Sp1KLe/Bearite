@@ -36,7 +36,9 @@ jobs:
         env:
           DOBBY_REF: ${{ env.DOBBY_REF }}
           ANDROID_API: ${{ env.ANDROID_API }}
-        run: bash scripts/build_dobby.sh
+        run: |
+          chmod +x scripts/build_dobby.sh
+          bash scripts/build_dobby.sh
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
