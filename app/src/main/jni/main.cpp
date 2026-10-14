@@ -6,7 +6,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <thread>
-#include "dobby.h" // Теперь заголовок Dobby подключен!
+#include "dobby.h"
 
 #define LOG_TAG "BeariteCore"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -26,15 +26,12 @@ bool is_game_loaded(const char* lib_name) {
 }
 
 void load_external_mods() {
-    LOGI("Ядро Bearite успешно запущено.");
+    LOGI("Ядро Bearite запущено во внутреннем процессе игры.");
 
     while (!is_game_loaded("libil2cpp.so")) {
         sleep(1);
     }
-    LOGI("Движок IL2CPP обнаружен. Готовы использовать DobbyHook.");
-
-    // Здесь внутри модов другие разработчики смогут вызывать функцию DobbyHook
-    // Пример: DobbyHook((void*)target_address, (void*)replacement, (void**)&original);
+    LOGI("Движок IL2CPP обнаружен. Готовы использовать хуки через Dobby.");
 }
 
 __attribute__((constructor))
