@@ -27,7 +27,6 @@ bool is_game_loaded(const char* lib_name) {
 void load_external_mods() {
     LOGI("Ядро Bearite успешно запущено во внутреннем процессе игры.");
 
-    // Ожидаем полной инициализации игрового движка
     while (!is_game_loaded("libil2cpp.so")) {
         sleep(1);
     }
