@@ -1,35 +1,51 @@
-name: Build Bearite Patcher
+name: Build APK
 
 on:
   push:
-    branches: [ main ]
   workflow_dispatch:
+
+env:
+  NDK_VERSION: "26.1.10909125"
+  CMAKE_VERSION: "3.22.1"
+  ANDROID_API: "24"
+  DOBBY_REF: "master"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'zulu'
-        java-version: '17'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-    - name: Setup Android SDK & Wrapper
-      uses: android-actions/setup-android@v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: Create Gradle Wrapper
-      run: gradle wrapper --gradle-version 8.2
+      - name: Install NDK and CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
-    - name: Build App with Gradle
-      run: ./gradlew assembleDebug
+      - name: Download and build Dobby
+        env:
+          DOBBY_REF: ${{ env.DOBBY_REF }}
+          ANDROID_API: ${{ env.ANDROID_API }}
+        run: bash scripts/build_dobby.sh
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: Bearite-Launcher
-        path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
