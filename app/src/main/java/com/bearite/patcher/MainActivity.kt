@@ -1,119 +1,135 @@
 package com.bearite.patcher
 
+import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import java.io.File
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Switch
+import android.widget.TextView
+import android.widget.Toast
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
+    private lateinit var mods: ModManager
+    private lateinit var root: LinearLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme(colorScheme = dynamicDarkColorScheme(this)) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    BeariteScreen(onLaunchGame = { runGameProcess() })
-                }
-            }
+        BLog.init(this)
+        mods = ModManager(this)
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(32), dp(16), dp(24))
         }
+        setContentView(ScrollView(this).apply { addView(root) })
     }
 
-    private fun runGameProcess() {
-        val launchIntent = packageManager.getLaunchIntentForPackage("com.EarthkwakGames.SuperBearAdventure")
-        if (launchIntent != null) {
-            startActivity(launchIntent)
+    override fun onResume() {
+        super.onResume()
+        render()
+    }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun gameInstalled(): String? = try {
+        packageManager.getPackageInfo(GAME_PKG, 0).versionName ?: "?"
+    } catch (_: PackageManager.NameNotFoundException) {
+        null
+    }
+
+    private fun text(s: String, size: Float = 14f, bold: Boolean = false, mono: Boolean = false) =
+        TextView(this).apply {
+            text = s
+            textSize = size
+            if (bold) setTypeface(typeface, Typeface.BOLD)
+            if (mono) typeface = Typeface.MONOSPACE
+            setPadding(0, dp(6), 0, dp(6))
+        }
+
+    private fun render() {
+        root.removeAllViews()
+        root.addView(text("Bearite", 28f, bold = true))
+
+        val ver = gameInstalled()
+        if (ver == null) {
+            root.addView(text("Super Bear Adventure не найдена. Установи игру из магазина: оригинал мы не трогаем."))
         } else {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.EarthkwakGames.SuperBearAdventure"))
-            startActivity(intent)
+            root.addView(text("Игра найдена, версия $ver. Оригинал не изменяется."))
         }
-    }
-}
 
-data class Mod(val title: String, val author: String, var isEnabled: Boolean)
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun BeariteScreen(onLaunchGame: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var isProcessing by remember { mutableStateOf(false) }
-    val installedMods = remember {
-        mutableStateListOf(
-            Mod("Infinite Coins", "BeariteTeam", true),
-            Mod("Fly & Speed Mod", "DevBear", false),
-            Mod("Custom Skin Pack", "Community", true)
-        )
-    }
-
-    Scaffold(
-        topBar = {
-            LargeTopAppBar(
-                title = { Text("Bearite Patcher") },
-                colors = TopAppBarDefaults.largeTopAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    scope.launch {
-                        isProcessing = true
-                        kotlinx.coroutines.delay(2500)
-                        isProcessing = false
-                        onLaunchGame()
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Text(if (isProcessing) "Инжектирование..." else "Запустить Bear Adventure")
+        root.addView(Button(this).apply {
+            text = "Запустить с модами"
+            isEnabled = ver != null
+            setOnClickListener {
+                BLog.i("запуск из лаунчера")
+                mods.writeConfig()
+                startActivity(Intent(this@MainActivity, GameActivity::class.java))
             }
+        })
+
+        root.addView(text("Моды", 20f, bold = true))
+        val list = mods.scan()
+        if (list.isEmpty()) {
+            root.addView(text("Модов нет. Установи zip с модом кнопкой ниже или положи папку мода сюда:\n${mods.modsDir.absolutePath}"))
         }
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (isProcessing) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(installedMods) { mod ->
-                        ModItemCard(mod)
-                    }
+        for (m in list) {
+            root.addView(Switch(this).apply {
+                text = "${m.name}  v${m.version}" +
+                    (if (m.author.isNotEmpty()) "  (${m.author})" else "") +
+                    "\nбандлов: ${m.bundles.size}"
+                isChecked = m.enabled
+                setPadding(0, dp(8), 0, dp(8))
+                setOnCheckedChangeListener { _, on -> mods.setEnabled(m.id, on) }
+            })
+        }
+        root.addView(Button(this).apply {
+            text = "Установить мод из zip"
+            setOnClickListener {
+                val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
                 }
+                startActivityForResult(i, REQ_INSTALL)
             }
-        }
-    }
-}
+        })
 
-@Composable
-fun ModItemCard(mod: Mod) {
-    var state by remember { mutableStateOf(mod.isEnabled) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(mod.title, style = MaterialTheme.typography.titleMedium)
-                Text("Автор: ${mod.author}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        root.addView(text("Лог", 20f, bold = true))
+        val log = BLog.tail(40)
+        root.addView(text(if (log.isEmpty()) "(пусто)" else log, 11f, mono = true))
+        root.addView(Button(this).apply {
+            text = "Обновить / очистить лог"
+            setOnClickListener {
+                BLog.clear()
+                render()
             }
-            Switch(checked = state, onCheckedChange = { state = it; mod.isEnabled = it })
-        }
+        })
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri: Uri = data?.data ?: return
+        if (requestCode != REQ_INSTALL || resultCode != RESULT_OK) return
+        Thread {
+            val msg = try {
+                "Мод установлен: " + mods.installZip(uri)
+            } catch (t: Throwable) {
+                BLog.e("установка мода не удалась", t)
+                "Ошибка: ${t.message}"
+            }
+            runOnUiThread {
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                render()
+            }
+        }.start()
+    }
+
+    companion object {
+        private const val REQ_INSTALL = 1
     }
 }

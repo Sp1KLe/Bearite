@@ -1,52 +1,45 @@
 #!/usr/bin/env bash
+# Собирает статическую libdobby.a для Android и кладёт в app/src/main/cpp/dobby/
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CPP_DIR="$ROOT/app/src/main/cpp"
+OUT="$ROOT/app/src/main/cpp/dobby"
 NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME не задан}"
 API="${ANDROID_API:-24}"
 REF="${DOBBY_REF:-master}"
+ABIS=(${DOBBY_ABIS:-arm64-v8a})
 WORK="$(mktemp -d)"
-ABIS=("arm64-v8a" "armeabi-v7a")
+trap 'rm -rf "$WORK"' EXIT
 
-echo ">>> Скачиваем исходники Dobby ($REF)"
-curl -fsSL "https://github.com{REF}.tar.gz" -o "$WORK/dobby.tar.gz"
-tar -xzf "$WORK/dobby.tar.gz" -C "$WORK"
-SRC="$(echo "$WORK"/Dobby-*)"
+echo ">>> Клонирую Dobby ($REF)"
+git clone --depth 1 --branch "$REF" https://github.com/jmpews/Dobby.git "$WORK/Dobby"
+SRC="$WORK/Dobby"
 
-echo ">>> Копируем заголовок dobby.h"
-mkdir -p "$CPP_DIR/dobby/include"
-cp "$SRC/include/dobby.h" "$CPP_DIR/dobby/include/"
+mkdir -p "$OUT/include"
+cp "$SRC/include/dobby.h" "$OUT/include/"
 
 for ABI in "${ABIS[@]}"; do
-  echo ">>> Собираем Dobby для $ABI"
+  echo ">>> Собираю Dobby для $ABI"
   BUILD="$WORK/build-$ABI"
-
   cmake -S "$SRC" -B "$BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ABI" \
     -DANDROID_PLATFORM="android-$API" \
     -DANDROID_STL=c++_static \
     -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=ON \
-    -DDOBBY_GENERATE_SHARED=ON
-
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DDOBBY_GENERATE_SHARED=OFF \
+    -DDOBBY_DEBUG=OFF \
+    -DPlugin.SymbolResolver=OFF
   cmake --build "$BUILD" -j"$(nproc)"
 
-  SO="$(find "$BUILD" -name libdobby.so | head -n 1)"
-  if [ -z "$SO" ]; then
-    echo "ОШИБКА: libdobby.so не собрался для $ABI."
+  LIB="$(find "$BUILD" -name 'libdobby.a' | head -n 1)"
+  if [ -z "$LIB" ]; then
+    echo "ОШИБКА: libdobby.a не собралась для $ABI"
     exit 1
   fi
-
-  # Копируем для сборщика CMake
-  mkdir -p "$CPP_DIR/libs/$ABI"
-  cp "$SO" "$CPP_DIR/libs/$ABI/libdobby.so"
-
-  # Копируем для упаковки в APK
-  mkdir -p "$ROOT/app/src/main/jniLibs/$ABI"
-  cp "$SO" "$ROOT/app/src/main/jniLibs/$ABI/libdobby.so"
+  mkdir -p "$OUT/lib/$ABI"
+  cp "$LIB" "$OUT/lib/$ABI/libdobby.a"
 done
 
-rm -rf "$WORK"
-echo ">>> Сборка Dobby завершена."
+echo ">>> Готово: $OUT"
