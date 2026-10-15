@@ -25,11 +25,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools   # без устаревшего "tools"
 
       - name: Install NDK and CMake
         run: |
+          yes | sdkmanager --licenses > /dev/null
           sdkmanager "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
@@ -41,11 +40,14 @@ jobs:
           chmod +x scripts/build_dobby.sh
           bash scripts/build_dobby.sh
 
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.2
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
