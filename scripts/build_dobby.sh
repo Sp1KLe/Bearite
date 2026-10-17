@@ -12,7 +12,11 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo ">>> Клонирую Dobby ($REF)"
-git clone --depth 1 --branch "$REF" https://github.com/jmpews/Dobby.git "$WORK/Dobby"
+mkdir -p "$WORK/Dobby"
+git -C "$WORK/Dobby" init -q
+git -C "$WORK/Dobby" remote add origin https://github.com/jmpews/Dobby.git
+git -C "$WORK/Dobby" fetch -q --depth 1 origin "$REF"   # ветка, тег или полный SHA
+git -C "$WORK/Dobby" checkout -q FETCH_HEAD
 SRC="$WORK/Dobby"
 
 echo ">>> Патчу Dobby (циклический include на Android)"

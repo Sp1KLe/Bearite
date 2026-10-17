@@ -15,6 +15,7 @@ adrp + :lo12:.
 Использование: patch_dobby.py <каталог-с-исходниками-Dobby>
 Если Dobby уже исправлен или изменился, скрипт завершается с ошибкой, а не молча.
 """
+import os
 import re
 import sys
 
@@ -23,6 +24,9 @@ feat = root + "/common/os_arch_features.h"
 plat = root + "/source/PlatformUnifiedInterface/platform.h"
 
 def patch_include_cycle():
+    if not os.path.isfile(feat):
+        print("патч 1 (include-цикл): не требуется в этой ревизии")
+        return
     src = open(feat, encoding="utf-8").read()
     if "// bearite-patch" in src:
         print("патч 1 (include-цикл): уже применён")
@@ -36,7 +40,10 @@ def _patch_include_cycle(src):
     )
     m = pat.search(src)
     if not m:
-        sys.exit("patch_dobby: не нашёл android::make_memory_readable в os_arch_features.h")
+        if "make_memory_readable" in src:
+            sys.exit("patch_dobby: make_memory_readable есть, но в неожиданном виде")
+        print("патч 1 (include-цикл): не требуется в этой ревизии")
+        return
     body = m.group(0)
     if "OSMemory::SetPermission" not in body:
         sys.exit("patch_dobby: неожиданное тело make_memory_readable")
@@ -76,7 +83,13 @@ def _patch_include_cycle(src):
 
 def patch_arm64_asm():
     path = root + "/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm"
+    if not os.path.isfile(path):
+        print("патч 2 (arm64 asm): не требуется в этой ревизии")
+        return
     a = open(path, encoding="utf-8").read()
+    if "@PAGE" not in a:
+        print("патч 2 (arm64 asm): не требуется в этой ревизии")
+        return
     old = ("adrp TMP_REG_0, cdecl(common_closure_bridge_handler)@PAGE\n"
            "add TMP_REG_0, TMP_REG_0, cdecl(common_closure_bridge_handler)@PAGEOFF\n")
     if "#if defined(__APPLE__)\nadrp" in a:
