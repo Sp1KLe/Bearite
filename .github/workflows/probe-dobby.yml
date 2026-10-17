@@ -1,0 +1,49 @@
+name: Probe Dobby revisions
+
+on:
+  push:
+    branches: [probe]
+
+env:
+  NDK_VERSION: "26.1.10909125"
+  CMAKE_VERSION: "3.22.1"
+  ANDROID_API: "24"
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ref:
+          - aed1a0763d423d9490b7857dff803027c891ccad   # 2024-01
+          - 49c3a653bd54613a75632caeed27f824e56192dd   # 2023-11
+          - ac15eadd265ae7d40cbd808cd2627ca4627c77b3   # 2023-08
+          - 01267cb914c01bcae5b6a33aae84c134a2cb97e8   # 2023-05
+          - 6f065cfcce47e5aa43901910eb702884f3cf4777   # 2023-03
+          - d353eea7594d1ac85db84065aeb4d1300d9f3248   # 2023-01
+          - 6a80a61ea062424d1595613058a174c64454fa57   # 2022-09
+          - 565d76157b19ca36870738ac66bbc908a13021e0   # 2022-06
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NDK and CMake
+        run: |
+          SDKM="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n 1)"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build Dobby at ${{ matrix.ref }}
+        env:
+          DOBBY_REF: ${{ matrix.ref }}
+        run: |
+          set +e
+          bash scripts/build_dobby.sh 2>&1 | tee dobby_build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -E -i "error|fatal" dobby_build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error::[${DOBBY_REF:0:7}] ${l}"; done
+          else
+            echo "::notice::[${DOBBY_REF:0:7}] BUILD OK"
+          fi
+          exit "$rc"
