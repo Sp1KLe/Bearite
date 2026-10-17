@@ -9,7 +9,8 @@ env:
   NDK_VERSION: "26.1.10909125"
   CMAKE_VERSION: "3.22.1"
   ANDROID_API: "24"
-  DOBBY_REF: "master"
+  # master Dobby (2024-03) не собирается под Android; проверено матрицей: рабочие 6f065cf, d353eea, 6a80a61
+  DOBBY_REF: "6f065cfcce47e5aa43901910eb702884f3cf4777"
 
 jobs:
   build:

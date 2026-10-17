@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/app/src/main/cpp/dobby"
 NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME не задан}"
 API="${ANDROID_API:-24}"
-REF="${DOBBY_REF:-master}"
+REF="${DOBBY_REF:-6f065cfcce47e5aa43901910eb702884f3cf4777}"
 ABIS=(${DOBBY_ABIS:-arm64-v8a})
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -18,9 +18,6 @@ git -C "$WORK/Dobby" remote add origin https://github.com/jmpews/Dobby.git
 git -C "$WORK/Dobby" fetch -q --depth 1 origin "$REF"   # ветка, тег или полный SHA
 git -C "$WORK/Dobby" checkout -q FETCH_HEAD
 SRC="$WORK/Dobby"
-
-echo ">>> Патчу Dobby (циклический include на Android)"
-python3 "$ROOT/scripts/patch_dobby.py" "$SRC"
 
 mkdir -p "$OUT/include"
 cp "$SRC/include/dobby.h" "$OUT/include/"
