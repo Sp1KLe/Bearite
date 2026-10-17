@@ -1,0 +1,9 @@
+{
+  "id": "visuals",
+  "name": "Visual Styles",
+  "version": "0.8.0",
+  "author": "spikle",
+  "settings": [
+    {"key": "enabled", "type": "bool", "label": "Включено", "default": true},
+    {"key": "speed", "type": "int", "label": "Скорость", "min": 1, "max": 10, "step": 1, "default": 5}]
+}
