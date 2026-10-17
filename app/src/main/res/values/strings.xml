@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bearite</string>
+    <string name="tab_game">Игра</string>
+    <string name="tab_mods">Моды</string>
+    <string name="tab_log">Лог</string>
+    <string name="play">Играть с модами</string>
+    <string name="install_mod">Установить мод</string>
+    <string name="delete_mod">Удалить мод</string>
+    <string name="log_refresh">Обновить</string>
+    <string name="log_clear">Очистить</string>
+    <string name="mods_empty">Модов пока нет. Нажми «Установить мод» и выбери zip с mod.json.</string>
+    <string name="note_original">Оригинальная игра не изменяется и не удаляется. Сохранения запуска через Bearite хранятся отдельно от неё.</string>
+</resources>

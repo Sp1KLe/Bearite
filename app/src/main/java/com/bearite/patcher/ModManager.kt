@@ -75,6 +75,19 @@ class ModManager(private val ctx: Context) {
         prefs.edit().putBoolean("enabled_$id", enabled).apply()
     }
 
+    /** Удаляет папку мода (только внутри папки модов) и его настройку. */
+    fun delete(mod: Mod): Boolean {
+        val dir = mod.dir.canonicalFile
+        if (!dir.path.startsWith(modsDir.canonicalPath + File.separator)) {
+            BLog.e("отказ удалять ${dir.path}: вне папки модов")
+            return false
+        }
+        val ok = dir.deleteRecursively()
+        prefs.edit().remove("enabled_${mod.id}").apply()
+        BLog.i("мод удалён: ${mod.id} (${if (ok) "ok" else "не полностью"})")
+        return ok
+    }
+
     /** Пишет конфиг для нативной части: по одному пути бандла на строку. */
     fun writeConfig(): File {
         val lines = scan().filter { it.enabled }.flatMap { m -> m.bundles.map { it.absolutePath } }

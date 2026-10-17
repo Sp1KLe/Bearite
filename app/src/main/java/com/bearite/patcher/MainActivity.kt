@@ -1,120 +1,162 @@
 package com.bearite.patcher
 
-import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Button
+import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.color.DynamicColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+import com.google.android.material.materialswitch.MaterialSwitch
 
-class MainActivity : Activity() {
+/** Три вкладки: Игра (запуск), Моды (управление), Лог. Стиль Material Design 3. */
+class MainActivity : AppCompatActivity() {
     private lateinit var mods: ModManager
-    private lateinit var root: LinearLayout
+
+    private lateinit var pageGame: View
+    private lateinit var pageMods: View
+    private lateinit var pageLog: View
+    private lateinit var nav: BottomNavigationView
+
+    private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) installMod(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // на Android 12+ берём цвета обоев пользователя, иначе работает наша палитра
+        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
         BLog.init(this)
         mods = ModManager(this)
-        root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(32), dp(16), dp(24))
+        setContentView(R.layout.activity_main)
+
+        pageGame = findViewById(R.id.page_game)
+        pageMods = findViewById(R.id.page_mods)
+        pageLog = findViewById(R.id.page_log)
+        nav = findViewById(R.id.nav)
+
+        nav.setOnItemSelectedListener { item ->
+            showPage(item.itemId)
+            true
         }
-        setContentView(ScrollView(this).apply { addView(root) })
+        findViewById<MaterialButton>(R.id.btn_play).setOnClickListener { play() }
+        findViewById<ExtendedFloatingActionButton>(R.id.fab_install).setOnClickListener {
+            pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        }
+        findViewById<MaterialButton>(R.id.btn_log_refresh).setOnClickListener { refreshLog() }
+        findViewById<MaterialButton>(R.id.btn_log_clear).setOnClickListener {
+            BLog.clear()
+            refreshLog()
+        }
+
+        if (savedInstanceState == null) {
+            nav.selectedItemId = R.id.nav_game  // сработает и слушатель -> showPage
+        } else {
+            showPage(nav.selectedItemId)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        render()
+        refreshAll()
     }
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-    private fun gameInstalled(): String? = try {
-        packageManager.getPackageInfo(GAME_PKG, 0).versionName ?: "?"
-    } catch (_: PackageManager.NameNotFoundException) {
-        null
+    private fun showPage(id: Int) {
+        pageGame.visibility = if (id == R.id.nav_game) View.VISIBLE else View.GONE
+        pageMods.visibility = if (id == R.id.nav_mods) View.VISIBLE else View.GONE
+        pageLog.visibility = if (id == R.id.nav_log) View.VISIBLE else View.GONE
     }
 
-    private fun text(s: String, size: Float = 14f, bold: Boolean = false, mono: Boolean = false) =
-        TextView(this).apply {
-            text = s
-            textSize = size
-            if (bold) setTypeface(typeface, Typeface.BOLD)
-            if (mono) typeface = Typeface.MONOSPACE
-            setPadding(0, dp(6), 0, dp(6))
-        }
+    private fun refreshAll() {
+        refreshGame()
+        refreshMods()
+        refreshLog()
+    }
 
-    private fun render() {
-        root.removeAllViews()
-        root.addView(text("Bearite", 28f, bold = true))
+    // ----------------------------------------------------------------- игра
 
-        val ver = gameInstalled()
-        if (ver == null) {
-            root.addView(text("Super Bear Adventure не найдена. Установи игру из магазина: оригинал мы не трогаем."))
+    private fun refreshGame() {
+        val game = Game.find(packageManager)
+        val icon = findViewById<ImageView>(R.id.status_icon)
+        val title = findViewById<TextView>(R.id.status_title)
+        val sub = findViewById<TextView>(R.id.status_sub)
+        val play = findViewById<MaterialButton>(R.id.btn_play)
+
+        if (game == null) {
+            icon.setImageResource(R.drawable.ic_error)
+            title.text = "Игра не найдена"
+            sub.text = "Установи Super Bear Adventure из магазина. Оригинал мы не трогаем."
         } else {
-            root.addView(text("Игра найдена, версия $ver. Оригинал не изменяется."))
+            icon.setImageResource(R.drawable.ic_ok)
+            title.text = "Super Bear Adventure найдена"
+            sub.text = "Версия ${game.version} · ${game.pkg}"
         }
+        play.isEnabled = game != null
 
-        root.addView(Button(this).apply {
-            text = "Запустить с модами"
-            isEnabled = ver != null
-            setOnClickListener {
-                BLog.i("запуск из лаунчера")
-                mods.writeConfig()
-                startActivity(Intent(this@MainActivity, GameActivity::class.java))
-            }
-        })
-
-        root.addView(text("Моды", 20f, bold = true))
-        val list = mods.scan()
-        if (list.isEmpty()) {
-            root.addView(text("Модов нет. Установи zip с модом кнопкой ниже или положи папку мода сюда:\n${mods.modsDir.absolutePath}"))
-        }
-        for (m in list) {
-            root.addView(Switch(this).apply {
-                text = "${m.name}  v${m.version}" +
-                    (if (m.author.isNotEmpty()) "  (${m.author})" else "") +
-                    "\nбандлов: ${m.bundles.size}"
-                isChecked = m.enabled
-                setPadding(0, dp(8), 0, dp(8))
-                setOnCheckedChangeListener { _, on -> mods.setEnabled(m.id, on) }
-            })
-        }
-        root.addView(Button(this).apply {
-            text = "Установить мод из zip"
-            setOnClickListener {
-                val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                }
-                startActivityForResult(i, REQ_INSTALL)
-            }
-        })
-
-        root.addView(text("Лог", 20f, bold = true))
-        val log = BLog.tail(40)
-        root.addView(text(if (log.isEmpty()) "(пусто)" else log, 11f, mono = true))
-        root.addView(Button(this).apply {
-            text = "Обновить / очистить лог"
-            setOnClickListener {
-                BLog.clear()
-                render()
-            }
-        })
+        val all = mods.scan()
+        findViewById<TextView>(R.id.game_mods_info).text =
+            "Включено модов: ${all.count { it.enabled }} из ${all.size}"
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        val uri: Uri = data?.data ?: return
-        if (requestCode != REQ_INSTALL || resultCode != RESULT_OK) return
+    private fun play() {
+        val game = Game.find(packageManager) ?: return
+        BLog.i("запуск из лаунчера, пакет ${game.pkg}")
+        mods.writeConfig()
+        startActivity(
+            Intent(this, GameActivity::class.java).putExtra(GameActivity.EXTRA_PKG, game.pkg)
+        )
+    }
+
+    // ----------------------------------------------------------------- моды
+
+    private fun refreshMods() {
+        val list = mods.scan()
+        val container = findViewById<LinearLayout>(R.id.mods_list)
+        container.removeAllViews()
+        findViewById<View>(R.id.mods_empty).visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.mods_path).text = "Папка модов:\n${mods.modsDir.absolutePath}"
+
+        for (m in list) {
+            val row = layoutInflater.inflate(R.layout.item_mod, container, false)
+            row.findViewById<TextView>(R.id.mod_name).text = m.name
+            row.findViewById<TextView>(R.id.mod_meta).text = buildString {
+                append("v").append(m.version)
+                if (m.author.isNotEmpty()) append(" · ").append(m.author)
+                append(" · бандлов: ").append(m.bundles.size)
+            }
+            row.findViewById<MaterialSwitch>(R.id.mod_switch).apply {
+                isChecked = m.enabled
+                setOnCheckedChangeListener { _, on ->
+                    mods.setEnabled(m.id, on)
+                    refreshGame()
+                }
+            }
+            row.findViewById<View>(R.id.mod_delete).setOnClickListener { confirmDelete(m) }
+            container.addView(row)
+        }
+    }
+
+    private fun confirmDelete(m: Mod) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Удалить мод?")
+            .setMessage("«${m.name}» будет удалён вместе с файлами.")
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Удалить") { _, _ ->
+                mods.delete(m)
+                refreshAll()
+            }
+            .show()
+    }
+
+    private fun installMod(uri: Uri) {
         Thread {
             val msg = try {
                 "Мод установлен: " + mods.installZip(uri)
@@ -124,12 +166,15 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                render()
+                refreshAll()
             }
         }.start()
     }
 
-    companion object {
-        private const val REQ_INSTALL = 1
+    // ------------------------------------------------------------------ лог
+
+    private fun refreshLog() {
+        val log = BLog.tail(200)
+        findViewById<TextView>(R.id.log_text).text = if (log.isEmpty()) "(пусто)" else log
     }
 }

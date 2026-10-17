@@ -18,8 +18,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dalvik.system.PathClassLoader
 
-const val GAME_PKG = "com.EarthkwakGames.SuperBearAdventure"
-
 /**
  * Запускает UnityPlayer из установленной игры, не трогая её саму.
  *
@@ -34,9 +32,11 @@ class GameActivity : Activity() {
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
     private var player: View? = null
+    private var gamePkg: String = GAME_PKG
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        gamePkg = intent.getStringExtra(EXTRA_PKG) ?: GAME_PKG
         BLog.init(this)
         BLog.i("GameActivity: старт, pid=${Process.myPid()}")
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
@@ -53,8 +53,8 @@ class GameActivity : Activity() {
     }
 
     private fun launchGame() {
-        val info = packageManager.getApplicationInfo(GAME_PKG, 0)
-        val ctx = createPackageContext(GAME_PKG, Context.CONTEXT_IGNORE_SECURITY)
+        val info = packageManager.getApplicationInfo(gamePkg, 0)
+        val ctx = createPackageContext(gamePkg, Context.CONTEXT_IGNORE_SECURITY)
         gameCtx = ctx
 
         val abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: Build.SUPPORTED_32_BIT_ABIS.first()
@@ -131,7 +131,7 @@ class GameActivity : Activity() {
     }
 
     override fun getPackageName(): String =
-        if (gameCtx != null && fromGame()) GAME_PKG else super.getPackageName()
+        if (gameCtx != null && fromGame()) gamePkg else super.getPackageName()
 
     override fun getResources(): Resources {
         val g = gameCtx
@@ -218,5 +218,9 @@ class GameActivity : Activity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    companion object {
+        const val EXTRA_PKG = "game_pkg"
     }
 }

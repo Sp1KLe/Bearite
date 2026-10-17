@@ -3,7 +3,12 @@
 
     <!-- Android 11+: без этого установленная игра для нас невидима -->
     <queries>
-        <package android:name="com.EarthkwakGames.SuperBearAdventure" />
+        <package android:name="com.Earthkwak.Platformer" />
+        <!-- запасной поиск по названию среди приложений с иконкой в лаунчере -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <!-- Игра работает в нашем процессе и нашем uid, ей нужны свои разрешения -->
@@ -15,8 +20,9 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:hardwareAccelerated="true"
+        android:icon="@drawable/ic_launcher"
         android:label="Bearite"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:theme="@style/Theme.Bearite">
 
         <activity
             android:name=".MainActivity"
