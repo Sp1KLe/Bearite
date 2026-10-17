@@ -15,6 +15,9 @@ echo ">>> Клонирую Dobby ($REF)"
 git clone --depth 1 --branch "$REF" https://github.com/jmpews/Dobby.git "$WORK/Dobby"
 SRC="$WORK/Dobby"
 
+echo ">>> Патчу Dobby (циклический include на Android)"
+python3 "$ROOT/scripts/patch_dobby.py" "$SRC"
+
 mkdir -p "$OUT/include"
 cp "$SRC/include/dobby.h" "$OUT/include/"
 
