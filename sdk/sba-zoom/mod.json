@@ -1,0 +1,35 @@
+{
+  "id": "sba-zoom",
+  "name": "Зум",
+  "version": "1.0",
+  "author": "Bearite",
+  "description": "Приближает камеру игры",
+  "libs": [ "libs/arm64-v8a/libsbazoom.so" ],
+  "settings": [
+    {
+      "id": "zoom_on",
+      "type": "bool",
+      "name": "Зум включён",
+      "description": "Включи, чтобы приблизить камеру",
+      "default": false
+    },
+    {
+      "id": "zoom_amount",
+      "type": "float",
+      "name": "Сила зума",
+      "description": "Во сколько раз приближается картинка",
+      "min": 1.2,
+      "max": 5,
+      "default": 2
+    },
+    {
+      "id": "smooth",
+      "type": "float",
+      "name": "Плавность",
+      "description": "Чем больше, тем быстрее приближение",
+      "min": 1,
+      "max": 20,
+      "default": 8
+    }
+  ]
+}
