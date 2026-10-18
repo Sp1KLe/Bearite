@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+*.apk
+.cxx/
+# собирается скриптом scripts/build_dobby.sh
+app/src/main/cpp/dobby/

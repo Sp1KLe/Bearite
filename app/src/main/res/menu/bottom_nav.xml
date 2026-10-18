@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_game"
+        android:icon="@drawable/ic_play"
+        android:title="@string/tab_game" />
+    <item
+        android:id="@+id/nav_mods"
+        android:icon="@drawable/ic_extension"
+        android:title="@string/tab_mods" />
+    <item
+        android:id="@+id/nav_log"
+        android:icon="@drawable/ic_log"
+        android:title="@string/tab_log" />
+</menu>

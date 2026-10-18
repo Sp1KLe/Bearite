@@ -2,55 +2,76 @@ name: Build APK
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 env:
   NDK_VERSION: "26.1.10909125"
   CMAKE_VERSION: "3.22.1"
   ANDROID_API: "24"
-  DOBBY_REF: "master"
+  # master Dobby (2024-03) не собирается под Android; проверено матрицей: рабочие 6f065cf, d353eea, 6a80a61
+  DOBBY_REF: "6f065cfcce47e5aa43901910eb702884f3cf4777"
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install NDK and CMake
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          SDKM="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n 1)"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Download and build Dobby
-        env:
-          DOBBY_REF: ${{ env.DOBBY_REF }}
-          ANDROID_API: ${{ env.ANDROID_API }}
+      - name: Build Dobby
         run: |
-          chmod +x scripts/build_dobby.sh
-          bash scripts/build_dobby.sh
+          set +e
+          bash scripts/build_dobby.sh 2>&1 | tee dobby_build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # дублируем ошибки в аннотации, чтобы их было видно без скачивания лога
+            grep -E -i "error|fatal|cannot|not found|undefined" dobby_build.log | head -15 | cut -c1-300 | while IFS= read -r l; do echo "::error::${l}"; done
+          fi
+          exit "$rc"
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.2
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.5"
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          set +e
+          gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # ошибки компиляции и ресурсов дублируем в аннотации
+            grep -E "^e: |error:|AAPT|Resource|What went wrong|Execution failed|> " gradle_build.log | head -25 | cut -c1-400 | while IFS= read -r l; do echo "::error::${l}"; done
+          fi
+          exit "$rc"
 
-      - name: Upload Finished APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Bearite-Launcher
+          name: Bearite-debug
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Build example native mod
+        run: |
+          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p build-mod/libs/arm64-v8a
+          "$TC/aarch64-linux-android24-clang" -shared -fPIC -O2 -Wall -Werror -Isdk \
+            -o build-mod/libs/arm64-v8a/libhello.so sdk/example-mod/hello.c
+          "$TC/llvm-nm" -D --defined-only build-mod/libs/arm64-v8a/libhello.so | grep -w bearite_mod_init
+          cp sdk/example-mod/mod.json build-mod/
+          (cd build-mod && zip -qr ../hello-native.zip mod.json libs)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-mod-hello-native
+          path: hello-native.zip

@@ -1,0 +1,8 @@
+{
+  "id": "hello-native",
+  "name": "Bearite",
+  "version": "1.0",
+  "author": "Bearite",
+  "description": "Пример нативного мода: при запуске игры пишет в лог строку приветствия.",
+  "libs": ["libs/arm64-v8a/libhello.so"]
+}
