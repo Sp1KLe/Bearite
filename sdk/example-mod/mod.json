@@ -1,6 +1,6 @@
 {
   "id": "hello-native",
-  "name": "Bearite",
+  "name": "Hello (пример)",
   "version": "1.0",
   "author": "Bearite",
   "description": "Пример нативного мода: при запуске игры пишет в лог строку приветствия.",

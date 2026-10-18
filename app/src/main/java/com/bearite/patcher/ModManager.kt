@@ -33,6 +33,8 @@ data class Mod(
     val enabled: Boolean,
     /** Картинка мода icon.png из папки мода (если есть). */
     val icon: File? = null,
+    /** Встроенный мод лаунчера: ставить и удалять не нужно, нативный код доверенный. */
+    val builtin: Boolean = false,
 )
 
 /**
@@ -50,6 +52,43 @@ class ModManager(private val ctx: Context) {
         get() = (ctx.getExternalFilesDir("mods") ?: File(ctx.filesDir, "mods")).also { it.mkdirs() }
 
     val configFile: File get() = File(ctx.filesDir, "bearite_bundles.txt")
+
+    /**
+     * Встроенный мод Bearite: его библиотека libbearite_mod.so собирается вместе с лаунчером,
+     * поэтому он есть сразу после установки (как встроенный мод в Geode) и включён по умолчанию.
+     */
+    private fun builtinMod(): Mod {
+        val dir = File(ctx.filesDir, "builtin/$BUILTIN_ID").also { it.mkdirs() }
+        val icon = File(dir, "icon.png")
+        try {
+            val updated = ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime
+            if (!icon.isFile || icon.lastModified() < updated) {
+                ctx.assets.open("builtin/$BUILTIN_ID/icon.png").use { i -> icon.outputStream().use { o -> i.copyTo(o) } }
+            }
+        } catch (t: Throwable) {
+            BLog.e("иконка встроенного мода", t)
+        }
+        val lib = File(ctx.applicationInfo.nativeLibraryDir, "libbearite_mod.so")
+        val version = try {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
+        } catch (_: Throwable) {
+            "?"
+        }
+        return Mod(
+            id = BUILTIN_ID,
+            name = "Bearite",
+            version = version,
+            author = "Bearite",
+            description = "Встроенный мод лаунчера. Загружается вместе с игрой и сообщает в лог, что Bearite работает.",
+            dir = dir,
+            bundles = emptyList(),
+            libs = if (lib.isFile) listOf(lib) else emptyList(),
+            settings = emptyList(),
+            enabled = prefs.getBoolean("enabled_$BUILTIN_ID", true),
+            icon = icon.takeIf { it.isFile },
+            builtin = true,
+        )
+    }
 
     private val idRegex = Regex("[A-Za-z0-9_.-]+")
     private val settingTypes = setOf("bool", "int", "float", "string", "choice")
@@ -93,6 +132,7 @@ class ModManager(private val ctx: Context) {
 
     fun scan(): List<Mod> {
         val out = ArrayList<Mod>()
+        out.add(builtinMod())
         val dirs = modsDir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") } ?: return out
         for (dir in dirs.sortedBy { it.name }) {
             val mf = File(dir, "mod.json")
@@ -102,6 +142,10 @@ class ModManager(private val ctx: Context) {
                 val id = meta.optString("id", dir.name)
                 if (!idRegex.matches(id)) {
                     BLog.e("некорректный id мода '$id' в ${dir.name}")
+                    continue
+                }
+                if (id == BUILTIN_ID) {
+                    BLog.e("id '$id' зарезервирован за встроенным модом, папка ${dir.name} пропущена")
                     continue
                 }
                 val bundles = ArrayList<File>()
@@ -150,7 +194,7 @@ class ModManager(private val ctx: Context) {
         prefs.edit().putBoolean("enabled_$id", enabled).apply()
     }
 
-    fun isNativeAccepted(id: String): Boolean = prefs.getBoolean("native_ok_$id", false)
+    fun isNativeAccepted(id: String): Boolean = id == BUILTIN_ID || prefs.getBoolean("native_ok_$id", false)
 
     fun acceptNative(id: String) {
         prefs.edit().putBoolean("native_ok_$id", true).apply()
@@ -158,6 +202,10 @@ class ModManager(private val ctx: Context) {
 
     /** Удаляет папку мода (только внутри папки модов) и его настройки. */
     fun delete(mod: Mod): Boolean {
+        if (mod.builtin) {
+            BLog.e("встроенный мод ${mod.id} удалить нельзя")
+            return false
+        }
         val dir = mod.dir.canonicalFile
         if (!dir.path.startsWith(modsDir.canonicalPath + File.separator)) {
             BLog.e("отказ удалять ${dir.path}: вне папки модов")
@@ -259,6 +307,10 @@ class ModManager(private val ctx: Context) {
             tmp.deleteRecursively()
             throw IllegalArgumentException("в mod.json нет корректного id")
         }
+        if (id == BUILTIN_ID) {
+            tmp.deleteRecursively()
+            throw IllegalArgumentException("id «$BUILTIN_ID» занят встроенным модом Bearite")
+        }
         val dest = File(modsDir, id)
         // сохраняем настройки пользователя при обновлении мода
         val oldSettings = File(dest, "settings.json").takeIf { it.isFile }?.readBytes()
@@ -272,5 +324,9 @@ class ModManager(private val ctx: Context) {
         prefs.edit().remove("native_ok_$id").apply()
         BLog.i("мод установлен: $id")
         return id
+    }
+
+    companion object {
+        const val BUILTIN_ID = "bearite"
     }
 }

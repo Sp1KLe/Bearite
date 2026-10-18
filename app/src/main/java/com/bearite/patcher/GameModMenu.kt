@@ -291,7 +291,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     private fun meta(m: Mod): String = buildString {
         append("v").append(m.version)
         if (m.author.isNotEmpty()) append(" · ").append(m.author)
-        if (m.libs.isNotEmpty()) append(" · нативный код")
+        if (m.builtin) append(" · встроенный") else if (m.libs.isNotEmpty()) append(" · нативный код")
     }
 
     /** Раскрыть/свернуть карточку с плавной анимацией. */

@@ -34,6 +34,7 @@ object ModListUi {
             row.findViewById<TextView>(R.id.mod_meta).text = buildString {
                 append("v").append(m.version)
                 if (m.author.isNotEmpty()) append(" · ").append(m.author)
+                if (m.builtin) append(" · встроенный")
                 if (m.bundles.isNotEmpty()) append(" · бандлов: ").append(m.bundles.size)
                 if (m.libs.isNotEmpty()) append(" · нативных: ").append(m.libs.size)
                 if (m.settings.isNotEmpty()) append(" · настроек: ").append(m.settings.size)
@@ -78,7 +79,7 @@ object ModListUi {
             }
 
             val del = row.findViewById<View>(R.id.mod_delete)
-            if (allowDelete) del.setOnClickListener { confirmDelete(activity, mods, m, onListChanged) }
+            if (allowDelete && !m.builtin) del.setOnClickListener { confirmDelete(activity, mods, m, onListChanged) }
             else del.visibility = View.GONE
 
             row.isClickable = true

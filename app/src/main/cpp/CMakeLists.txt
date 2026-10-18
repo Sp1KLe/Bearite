@@ -17,3 +17,8 @@ set_target_properties(dobby PROPERTIES
 add_library(bearite SHARED bearite.cpp)
 target_include_directories(bearite PRIVATE "${DOBBY_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sdk")
 target_link_libraries(bearite dobby log)
+
+# Встроенный мод Bearite: попадает в APK, лаунчер грузит его сам
+add_library(bearite_mod SHARED bearite_mod.c)
+target_include_directories(bearite_mod PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sdk")
+target_compile_options(bearite_mod PRIVATE -fvisibility=hidden)
