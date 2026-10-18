@@ -9,6 +9,7 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -21,7 +22,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ScrollView
 import android.widget.TextView
 import dalvik.system.PathClassLoader
@@ -39,7 +39,7 @@ import java.lang.reflect.Proxy
  * (имя пакета, ресурсы, assets, путь к APK), мы подменяем на данные игры,
  * а системе отдаём настоящие значения лаунчера.
  *
- * Поверх игры рисуется кнопка «Моды», она открывает ModMenuActivity.
+ * Поверх игры на паузе рисуется кнопка «Моды», она открывает GameModMenu (панель в стиле игры).
  */
 class GameActivity : Activity() {
     private var gameCtx: Context? = null
@@ -48,6 +48,11 @@ class GameActivity : Activity() {
     /** Объект плеера Unity: View (старые версии) или UnityPlayerForActivityOrService (Unity 6). */
     private var player: Any? = null
     private var gamePkg: String = GAME_PKG
+
+    private var modMenu: GameModMenu? = null
+    private var modButton: View? = null
+    /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
+    private var nativeCls: Class<*>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,9 +104,10 @@ class GameActivity : Activity() {
         gameLoader = loader
 
         val cfg = ModManager(this).configFile.absolutePath
-        loader.loadClass("com.bearite.patcher.Native")
-            .getMethod("init", String::class.java)
-            .invoke(null, cfg)
+        val nat = loader.loadClass("com.bearite.patcher.Native")
+        nativeCls = nat
+        nat.getField("pauseListener").set(null, Runnable { runOnUiThread { updateModButton() } })
+        nat.getMethod("init", String::class.java).invoke(null, cfg)
 
         // как в стандартном UnityPlayerActivity
         window.takeSurface(null)
@@ -116,7 +122,12 @@ class GameActivity : Activity() {
             view,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
-        root.addView(menuButton())
+        val menu = GameModMenu(this, ModManager(this))
+        modMenu = menu
+        val btn = menuButton()
+        modButton = btn
+        root.addView(btn)
+        root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         view.requestFocus()
         BLog.i("UnityPlayer создан: ${p.javaClass.name}")
@@ -177,22 +188,39 @@ class GameActivity : Activity() {
         return m.invoke(p) as View
     }
 
+    /** Кнопка «Моды» в стиле кнопок игры: видна на паузе (или пока состояние паузы неизвестно). */
     private fun menuButton(): View {
         val d = resources.displayMetrics.density
-        val size = (44 * d).toInt()
-        val b = ImageButton(this)
-        b.setImageResource(R.drawable.ic_mods_white)
+        val b = TextView(this)
+        b.text = "Моды"
+        b.textSize = 20f
+        b.typeface = Typeface.DEFAULT_BOLD
+        b.setTextColor(0xFF3A2A00.toInt())
+        b.gravity = Gravity.CENTER
         b.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(0x66000000)
+            setColor(0xFFFFC21A.toInt())
+            cornerRadius = 16 * d
+            setStroke((3 * d).toInt(), 0xFFB07A00.toInt())
         }
-        b.alpha = 0.75f
-        b.contentDescription = "Моды"
-        b.setOnClickListener { startActivity(Intent(this, ModMenuActivity::class.java)) }
-        val lp = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
-        lp.setMargins(0, (12 * d).toInt(), (12 * d).toInt(), 0)
+        b.setOnClickListener { modMenu?.show() }
+        val lp = FrameLayout.LayoutParams((130 * d).toInt(), (48 * d).toInt(), Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+        lp.topMargin = (10 * d).toInt()
         b.layoutParams = lp
         return b
+    }
+
+    /** -1 неизвестно, 0 игра идёт, 1 пауза. */
+    private fun pauseState(): Int = try {
+        nativeCls?.getField("pauseState")?.getInt(null) ?: -1
+    } catch (_: Throwable) {
+        -1
+    }
+
+    private fun updateModButton() {
+        val btn = modButton ?: return
+        val st = pauseState()
+        btn.visibility = if (st == 0) View.GONE else View.VISIBLE
+        if (st == 0 && modMenu?.isOpen == true) modMenu?.hide()
     }
 
     private fun showError(t: Throwable) {
@@ -327,11 +355,18 @@ class GameActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
-        inject(event) || super.onKeyUp(keyCode, event)
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && modMenu?.isOpen == true) {
+            modMenu?.hide()
+            return true
+        }
+        return inject(event) || super.onKeyUp(keyCode, event)
+    }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
-        inject(event) || super.onKeyDown(keyCode, event)
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && modMenu?.isOpen == true) return true
+        return inject(event) || super.onKeyDown(keyCode, event)
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean =
         inject(event) || super.onTouchEvent(event)

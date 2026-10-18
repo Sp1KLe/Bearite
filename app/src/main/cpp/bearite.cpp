@@ -76,6 +76,7 @@ static void blog(const char* fmt, ...) {
     X(il2cpp_runtime_invoke, void*, (void*, void*, void**, void**))           \
     X(il2cpp_gchandle_new, uint32_t, (void*, int))                            \
     X(il2cpp_array_length, size_t, (void*))                                   \
+    X(il2cpp_object_unbox, void*, (void*))                                    \
     X(il2cpp_thread_attach, void*, (void*))                                   \
     X(il2cpp_thread_detach, void, (void*))
 
@@ -362,6 +363,67 @@ static void run_mods() {
     blog("загрузка модов завершена");
 }
 
+// ------------------------------------------------------------ состояние паузы
+
+static JavaVM* g_vm = nullptr;
+static jclass g_nativeCls = nullptr;
+static jmethodID g_onPause = nullptr;
+
+// Сообщает Java: -1 неизвестно, 0 игра идёт, 1 пауза
+static void notify_pause(int state) {
+    if (!g_vm || !g_nativeCls || !g_onPause) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+        attached = true;
+    }
+    env->CallStaticVoidMethod(g_nativeCls, g_onPause, static_cast<jint>(state));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (attached) g_vm->DetachCurrentThread();
+}
+
+// Пауза = UnityEngine.Time.timeScale == 0. Опрашиваем пять раз в секунду.
+// Если Unity не даёт читать timeScale из этого потока, говорим Java «неизвестно»
+// (кнопка «Моды» тогда остаётся видимой всегда).
+static void pause_watcher() {
+    void* timeCls = find_class("UnityEngine", "Time");
+    void* getter = timeCls ? p_il2cpp_class_get_method_from_name(timeCls, "get_timeScale", 0) : nullptr;
+    if (!getter) {
+        blog("UnityEngine.Time.get_timeScale не найден, пауза не определяется");
+        notify_pause(-1);
+        return;
+    }
+    blog("слежу за паузой (Time.timeScale)");
+    int fails = 0;
+    int last = -2;
+    while (true) {
+        void* exc = nullptr;
+        void* r = p_il2cpp_runtime_invoke(getter, nullptr, nullptr, &exc);
+        if (exc || !r) {
+            if (exc) {
+                void* k = p_il2cpp_object_get_class(exc);
+                if (fails == 0) blog("timeScale: исключение %s", k ? p_il2cpp_class_get_name(k) : "?");
+            }
+            if (++fails >= 5) {
+                blog("timeScale не читается из потока модов, пауза не определяется");
+                notify_pause(-1);
+                return;
+            }
+        } else {
+            fails = 0;
+            float ts = *static_cast<float*>(p_il2cpp_object_unbox(r));
+            int st = ts <= 0.0001f ? 1 : 0;
+            if (st != last) {
+                last = st;
+                blog("пауза: %d (timeScale=%.2f)", st, ts);
+                notify_pause(st);
+            }
+        }
+        usleep(200 * 1000);
+    }
+}
+
 // Сколько секунд после появления libil2cpp не трогаем IL2CPP: движок инициализируется
 static const int kWarmupSec = 10;
 
@@ -393,12 +455,20 @@ static void waiter() {
     // ждём, пока загрузятся сборки Unity (до 60 с)
     for (int i = 0; i < 120 && !find_class("UnityEngine", "Object"); ++i) usleep(500 * 1000);
     run_mods();
+    pause_watcher();  // работает, пока жив процесс (или до первой неудачи)
     p_il2cpp_thread_detach(thread);  // поток завершается: обязательно отсоединить
     blog("поток модов завершён");
 }
 
-extern "C" JNIEXPORT void JNICALL Java_com_bearite_patcher_Native_init(JNIEnv* env, jclass,
+extern "C" JNIEXPORT void JNICALL Java_com_bearite_patcher_Native_init(JNIEnv* env, jclass cls,
                                                                        jstring cfg) {
+    // Класс Native из загрузчика игры: из него потом зовём onPauseState из нативных потоков
+    if (!g_nativeCls) {
+        env->GetJavaVM(&g_vm);
+        g_nativeCls = static_cast<jclass>(env->NewGlobalRef(cls));
+        g_onPause = env->GetStaticMethodID(cls, "onPauseState", "(I)V");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
     const char* c = env->GetStringUTFChars(cfg, nullptr);
     g_cfgPath = c ? c : "";
     if (c) env->ReleaseStringUTFChars(cfg, c);
