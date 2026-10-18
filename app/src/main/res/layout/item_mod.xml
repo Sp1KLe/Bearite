@@ -16,6 +16,15 @@
         android:paddingEnd="8dp"
         android:paddingBottom="12dp">
 
+        <ImageView
+            android:id="@+id/mod_icon"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="12dp"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"

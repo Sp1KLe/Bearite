@@ -302,6 +302,7 @@ class GameActivity : Activity() {
     private fun callPlayer(name: String, vararg args: Any?) = callPlayer(listOf(name), *args)
 
     private fun inject(e: InputEvent): Boolean {
+        if (modMenu?.isOpen == true) return false  // пока открыто меню модов, ввод не уходит в игру
         val p = player ?: return false
         return try {
             val m = p.javaClass.methods.firstOrNull { it.name == "injectEvent" && it.parameterTypes.size == 1 }

@@ -1,15 +1,8 @@
 {
   "id": "hello-native",
-  "name": "Hello (пример)",
+  "name": "Bearite",
   "version": "1.0",
   "author": "Bearite",
-  "description": "Пример нативного мода: при запуске игры пишет в лог значения своих настроек.",
-  "libs": ["libs/arm64-v8a/libhello.so"],
-  "settings": [
-    { "id": "greeting", "type": "string", "name": "Приветствие", "default": "Привет из мода!" },
-    { "id": "loud", "type": "bool", "name": "Громко", "description": "Просто пример переключателя", "default": false },
-    { "id": "times", "type": "int", "name": "Сколько раз написать", "min": 1, "max": 5, "default": 1 },
-    { "id": "gain", "type": "float", "name": "Множитель", "min": 0.5, "max": 3.0, "default": 1.0 },
-    { "id": "mode", "type": "choice", "name": "Режим", "options": ["тихий", "обычный", "подробный"], "default": "обычный" }
-  ]
+  "description": "Пример нативного мода: при запуске игры пишет в лог строку приветствия.",
+  "libs": ["libs/arm64-v8a/libhello.so"]
 }

@@ -1,8 +1,12 @@
 package com.bearite.patcher
 
 import android.app.Activity
+import android.graphics.BitmapFactory
+import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewOutlineProvider
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -33,6 +37,20 @@ object ModListUi {
                 if (m.bundles.isNotEmpty()) append(" · бандлов: ").append(m.bundles.size)
                 if (m.libs.isNotEmpty()) append(" · нативных: ").append(m.libs.size)
                 if (m.settings.isNotEmpty()) append(" · настроек: ").append(m.settings.size)
+            }
+
+            val iv = row.findViewById<ImageView>(R.id.mod_icon)
+            val bmp = m.icon?.let { BitmapFactory.decodeFile(it.path) }
+            if (bmp != null) {
+                val dp = row.resources.displayMetrics.density
+                iv.setImageBitmap(bmp)
+                iv.background = GradientDrawable().apply {
+                    setColor(0x33888888)
+                    cornerRadius = 10 * dp
+                }
+                iv.clipToOutline = true
+                iv.outlineProvider = ViewOutlineProvider.BACKGROUND
+                iv.visibility = View.VISIBLE
             }
 
             val sw = row.findViewById<MaterialSwitch>(R.id.mod_switch)

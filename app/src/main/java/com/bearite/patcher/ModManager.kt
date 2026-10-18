@@ -31,6 +31,8 @@ data class Mod(
     val libs: List<File>,
     val settings: List<Setting>,
     val enabled: Boolean,
+    /** Картинка мода icon.png из папки мода (если есть). */
+    val icon: File? = null,
 )
 
 /**
@@ -134,6 +136,7 @@ class ModManager(private val ctx: Context) {
                         settings = parseSettings(meta.optJSONArray("settings")),
                         // моды с нативным кодом выключены, пока пользователь их не подтвердит
                         enabled = prefs.getBoolean("enabled_$id", libs.isEmpty()),
+                        icon = File(dir, "icon.png").takeIf { it.isFile },
                     )
                 )
             } catch (t: Throwable) {
