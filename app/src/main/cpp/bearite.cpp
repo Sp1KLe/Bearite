@@ -1,9 +1,9 @@
 // Bearite native loader.
 //
 // Грузится в процесс игры (в тот же ClassLoader/namespace, что и libil2cpp.so),
-// ждёт запуска IL2CPP, ставит inline-хук на il2cpp_runtime_invoke и из него,
-// то есть уже на потоке Unity, загружает AssetBundle'ы включённых модов и
-// нативные библиотеки модов (SDK: sdk/bearite_api.h).
+// ждёт запуска IL2CPP, затем в собственном потоке (il2cpp_thread_attach) загружает
+// AssetBundle'ы включённых модов и нативные библиотеки модов (SDK: sdk/bearite_api.h).
+// Код игры при этом не патчится: хуки ставят только сами моды через api->hook.
 //
 // Все шаги пишутся в logcat (тег Bearite) и в файл bearite.log рядом с конфигом.
 //
@@ -16,13 +16,10 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <link.h>
-#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
-#include <atomic>
-#include <chrono>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -78,7 +75,9 @@ static void blog(const char* fmt, ...) {
     X(il2cpp_string_new, void*, (const char*))                                \
     X(il2cpp_runtime_invoke, void*, (void*, void*, void**, void**))           \
     X(il2cpp_gchandle_new, uint32_t, (void*, int))                            \
-    X(il2cpp_array_length, size_t, (void*))
+    X(il2cpp_array_length, size_t, (void*))                                   \
+    X(il2cpp_thread_attach, void*, (void*))                                   \
+    X(il2cpp_thread_detach, void, (void*))
 
 #define IL2CPP_DECL(name, ret, args) static ret(*p_##name) args = nullptr;
 IL2CPP_API(IL2CPP_DECL)
@@ -124,15 +123,12 @@ static void* find_class(const char* ns, const char* name) {
     return nullptr;
 }
 
-// ------------------------------------------------------------------- хук
+// ------------------------------------------------------------- вызовы IL2CPP
 
-typedef void* (*invoke_fn)(void*, void*, void**, void**);
-static invoke_fn g_orig_invoke = nullptr;
-
-// Вызов управляемого метода в обход нашего хука
+// Вызов управляемого метода; исключение логируем и возвращаем nullptr
 static void* invoke(void* method, void* obj, void** params) {
     void* exc = nullptr;
-    void* r = g_orig_invoke(method, obj, params, &exc);
+    void* r = p_il2cpp_runtime_invoke(method, obj, params, &exc);
     if (exc) {
         void* k = p_il2cpp_object_get_class(exc);
         blog("управляемое исключение: %s", k ? p_il2cpp_class_get_name(k) : "?");
@@ -354,7 +350,7 @@ static void load_bundles(const std::vector<std::string>& bundles) {
 }
 
 static void run_mods() {
-    blog("загрузка модов на потоке tid=%d", (int)gettid());
+    blog("загрузка модов в потоке tid=%d", (int)gettid());
     Config cfg = read_config();
     {
         std::lock_guard<std::mutex> lk(g_setMu);
@@ -366,61 +362,39 @@ static void run_mods() {
     blog("загрузка модов завершена");
 }
 
-static std::atomic<uint64_t> g_calls{0};
-static std::atomic<int> g_state{0};  // 0 ждём, 1 выполняем, 2 готово
-static std::chrono::steady_clock::time_point g_hookTime;
-
-// Загружать бандлы безопаснее на главном потоке Unity, а не на случайном рабочем.
-static bool on_unity_main_thread() {
-    char name[17] = {0};
-    prctl(PR_GET_NAME, name, 0, 0, 0);
-    return strcmp(name, "UnityMain") == 0;
-}
-
-static void* hook_invoke(void* method, void* obj, void** params, void** exc) {
-    if (g_state.load(std::memory_order_relaxed) == 0) {
-        uint64_t n = g_calls.fetch_add(1) + 1;
-        // даём движку прогреться: достаточно вызовов и прошло несколько секунд;
-        // если поток UnityMain так и не встретился за 40 с, берём любой
-        auto since = std::chrono::steady_clock::now() - g_hookTime;
-        if (n > 1500 && since > std::chrono::seconds(4) &&
-            (on_unity_main_thread() || since > std::chrono::seconds(40))) {
-            int expected = 0;
-            if (g_state.compare_exchange_strong(expected, 1)) {
-                run_mods();
-                g_state.store(2);
-            }
-        }
-    }
-    return g_orig_invoke(method, obj, params, exc);
-}
+// Сколько секунд после появления libil2cpp не трогаем IL2CPP: движок инициализируется
+static const int kWarmupSec = 10;
 
 static void waiter() {
-    blog("жду запуска IL2CPP...");
+    blog("жду загрузки libil2cpp...");
     for (int i = 0; i < 600 && !find_symbol("il2cpp_domain_get"); ++i) usleep(200 * 1000);
     if (!find_symbol("il2cpp_domain_get")) {
         blog("IL2CPP не появился за 120 с, выхожу");
         return;
     }
+    blog("libil2cpp загружена, ждём %d с, пока игра инициализируется", kWarmupSec);
+    sleep(kWarmupSec);
     if (!resolve_api()) {
         blog("не все функции IL2CPP найдены, выхожу");
         return;
     }
-    blog("IL2CPP найден, жду инициализации домена");
-    for (int i = 0; i < 600 && !p_il2cpp_domain_get(); ++i) usleep(200 * 1000);
-    if (!p_il2cpp_domain_get()) {
+    void* domain = nullptr;
+    for (int i = 0; i < 300 && !(domain = p_il2cpp_domain_get()); ++i) usleep(200 * 1000);
+    if (!domain) {
         blog("домен IL2CPP не поднялся, выхожу");
         return;
     }
-    void* target = reinterpret_cast<void*>(p_il2cpp_runtime_invoke);
-    g_hookTime = std::chrono::steady_clock::now();
-    int rc = call_dobby(DobbyHook, target, reinterpret_cast<void*>(hook_invoke),
-                        reinterpret_cast<void*>(&g_orig_invoke));
-    if (rc != 0 || !g_orig_invoke) {
-        blog("DobbyHook не сработал, код %d", rc);
+    blog("домен IL2CPP готов, подключаю свой поток");
+    void* thread = p_il2cpp_thread_attach(domain);
+    if (!thread) {
+        blog("il2cpp_thread_attach вернул null, выхожу");
         return;
     }
-    blog("хук il2cpp_runtime_invoke установлен");
+    // ждём, пока загрузятся сборки Unity (до 60 с)
+    for (int i = 0; i < 120 && !find_class("UnityEngine", "Object"); ++i) usleep(500 * 1000);
+    run_mods();
+    p_il2cpp_thread_detach(thread);  // поток завершается: обязательно отсоединить
+    blog("поток модов завершён");
 }
 
 extern "C" JNIEXPORT void JNICALL Java_com_bearite_patcher_Native_init(JNIEnv* env, jclass,

@@ -25,6 +25,7 @@ import android.widget.ImageButton
 import android.widget.ScrollView
 import android.widget.TextView
 import dalvik.system.PathClassLoader
+import java.io.File
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
 
@@ -53,6 +54,8 @@ class GameActivity : Activity() {
         gamePkg = intent.getStringExtra(EXTRA_PKG) ?: GAME_PKG
         BLog.init(this)
         BLog.i("GameActivity: старт, pid=${Process.myPid()}")
+        // маркер «игра идёт»: если он остался после выхода, процесс убили аварийно
+        try { File(filesDir, RUNNING_MARKER).writeText(System.currentTimeMillis().toString()) } catch (_: Throwable) {}
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             BLog.e("необработанное исключение в потоке ${t.name}", e)
             Process.killProcess(Process.myPid())
@@ -281,13 +284,14 @@ class GameActivity : Activity() {
         }
     }
 
-    override fun onStart() { super.onStart(); callPlayer(listOf("onStart", "start")) }
-    override fun onStop() { callPlayer(listOf("onStop", "stop")); super.onStop() }
-    override fun onResume() { super.onResume(); callPlayer("resume") }
-    override fun onPause() { callPlayer("pause"); super.onPause() }
+    override fun onStart() { BLog.i("lifecycle: onStart"); super.onStart(); callPlayer(listOf("onStart", "start")) }
+    override fun onStop() { BLog.i("lifecycle: onStop"); callPlayer(listOf("onStop", "stop")); super.onStop() }
+    override fun onResume() { BLog.i("lifecycle: onResume"); super.onResume(); callPlayer("resume") }
+    override fun onPause() { BLog.i("lifecycle: onPause"); callPlayer("pause"); super.onPause() }
 
     override fun onDestroy() {
-        BLog.i("GameActivity: выход")
+        BLog.i("GameActivity: нормальный выход")
+        try { File(filesDir, RUNNING_MARKER).delete() } catch (_: Throwable) {}
         val hasDestroy = player?.javaClass?.methods?.any { it.name == "destroy" && it.parameterTypes.isEmpty() } == true
         callPlayer(if (hasDestroy) "destroy" else "quit")
         super.onDestroy()
@@ -308,6 +312,7 @@ class GameActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        BLog.i("lifecycle: фокус окна = $hasFocus")
         callPlayer("windowFocusChanged", hasFocus)
     }
 
@@ -336,5 +341,6 @@ class GameActivity : Activity() {
 
     companion object {
         const val EXTRA_PKG = "game_pkg"
+        const val RUNNING_MARKER = "game_running"
     }
 }

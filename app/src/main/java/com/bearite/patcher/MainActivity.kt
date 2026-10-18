@@ -1,5 +1,8 @@
 package com.bearite.patcher
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -13,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.DynamicColors
+import java.io.File
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 
 /** Три вкладки: Игра (запуск), Моды (управление), Лог. Стиль Material Design 3. */
@@ -50,6 +54,11 @@ class MainActivity : AppCompatActivity() {
             pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         }
         findViewById<MaterialButton>(R.id.btn_log_refresh).setOnClickListener { refreshLog() }
+        findViewById<MaterialButton>(R.id.btn_log_copy).setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Bearite log", BLog.tail(1500)))
+            Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+        }
         findViewById<MaterialButton>(R.id.btn_log_clear).setOnClickListener {
             BLog.clear()
             refreshLog()
@@ -64,7 +73,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        checkPreviousCrash()
         refreshAll()
+    }
+
+    /** Если после прошлого запуска остался маркер, игра завершилась аварийно: снимаем logcat. */
+    private fun checkPreviousCrash() {
+        val marker = File(filesDir, GameActivity.RUNNING_MARKER)
+        if (!marker.exists()) return
+        marker.delete()
+        BLog.e("прошлый запуск игры завершился аварийно (процесс убит без нормального выхода)")
+        Thread {
+            val lines = LogcatCapture.crashLines()
+            BLog.i("--- logcat вокруг аварии (${lines.size} строк) ---\n" + lines.joinToString("\n"))
+            runOnUiThread { refreshLog() }
+        }.start()
     }
 
     private fun showPage(id: Int) {
@@ -148,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ лог
 
     private fun refreshLog() {
-        val log = BLog.tail(200)
+        val log = BLog.tail(400)
         findViewById<TextView>(R.id.log_text).text = if (log.isEmpty()) "(пусто)" else log
     }
 }
