@@ -1,0 +1,38 @@
+name: Build SBA Zoom
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sdk/zoom/**"
+      - ".github/workflows/build-zoom.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачать код
+        uses: actions/checkout@v4
+
+      - name: Собрать .so
+        run: |
+          cmake -S sdk/zoom -B build-zoom \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-zoom
+
+      - name: Собрать папку мода и упаковать в zip
+        run: |
+          mkdir -p out/libs/arm64-v8a
+          cp sdk/zoom/mod.json out/
+          cp build-zoom/libsbazoom.so out/libs/arm64-v8a/
+          cd out
+          zip -r ../sba-zoom.zip .
+
+      - name: Выложить результат
+        uses: actions/upload-artifact@v4
+        with:
+          name: sba-zoom
+          path: sba-zoom.zip
