@@ -3,20 +3,30 @@ package com.bearite.patcher
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.res.AssetManager
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
+import android.view.Gravity
+import android.view.InputEvent
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ScrollView
 import android.widget.TextView
 import dalvik.system.PathClassLoader
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 
 /**
  * Запускает UnityPlayer из установленной игры, не трогая её саму.
@@ -27,11 +37,15 @@ import dalvik.system.PathClassLoader
  * создаются поверх нашей Activity. Всё, что игра спрашивает у Context
  * (имя пакета, ресурсы, assets, путь к APK), мы подменяем на данные игры,
  * а системе отдаём настоящие значения лаунчера.
+ *
+ * Поверх игры рисуется кнопка «Моды», она открывает ModMenuActivity.
  */
 class GameActivity : Activity() {
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
-    private var player: View? = null
+
+    /** Объект плеера Unity: View (старые версии) или UnityPlayerForActivityOrService (Unity 6). */
+    private var player: Any? = null
     private var gamePkg: String = GAME_PKG
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,21 +100,96 @@ class GameActivity : Activity() {
             .getMethod("init", String::class.java)
             .invoke(null, cfg)
 
-        val upClass = loader.loadClass("com.unity3d.player.UnityPlayer")
-        val ctor = upClass.constructors.firstOrNull { c ->
-            val p = c.parameterTypes
-            p.isNotEmpty() && p.size <= 2 && Context::class.java.isAssignableFrom(p[0])
-        } ?: throw IllegalStateException(
-            "у UnityPlayer нет подходящего конструктора: " +
-                upClass.constructors.joinToString { it.toString() }
-        )
-        val args = arrayOfNulls<Any>(ctor.parameterTypes.size)
-        args[0] = this
-        val p = ctor.newInstance(*args) as View
+        // как в стандартном UnityPlayerActivity
+        window.takeSurface(null)
+        window.setFormat(PixelFormat.RGBX_8888)
+
+        val p = createPlayer(loader)
         player = p
-        setContentView(p)
-        p.requestFocus()
-        BLog.i("UnityPlayer создан")
+        val view = playerView(p)
+
+        val root = FrameLayout(this)
+        root.addView(
+            view,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+        root.addView(menuButton())
+        setContentView(root)
+        view.requestFocus()
+        BLog.i("UnityPlayer создан: ${p.javaClass.name}")
+    }
+
+    /**
+     * Unity 6: UnityPlayerForActivityOrService(Context, IUnityPlayerLifecycleEvents),
+     * у самого UnityPlayer конструктор внутренний. Старые версии: UnityPlayer(Context).
+     */
+    private fun createPlayer(loader: ClassLoader): Any {
+        val events = lifecycleEvents(loader)
+        val report = StringBuilder()
+        for (name in listOf(
+            "com.unity3d.player.UnityPlayerForActivityOrService",
+            "com.unity3d.player.UnityPlayer"
+        )) {
+            val cls = try {
+                loader.loadClass(name)
+            } catch (_: ClassNotFoundException) {
+                report.append("нет класса ").append(name).append('\n')
+                continue
+            }
+            for (c in cls.constructors) {
+                val pt = c.parameterTypes
+                if (pt.isEmpty() || !Context::class.java.isAssignableFrom(pt[0])) continue
+                val args: Array<Any?> = when {
+                    pt.size == 1 -> arrayOf(this)
+                    pt.size == 2 && pt[1].name.endsWith("IUnityPlayerLifecycleEvents") -> arrayOf(this, events)
+                    pt.size == 2 -> arrayOf(this, null)
+                    else -> continue
+                }
+                BLog.i("конструктор плеера: ${cls.name}(${pt.joinToString { it.simpleName }})")
+                return c.newInstance(*args)
+            }
+            report.append(cls.name).append(": ").append(cls.constructors.joinToString { it.toString() }).append('\n')
+        }
+        throw IllegalStateException("не нашёл подходящий конструктор плеера Unity:\n$report")
+    }
+
+    /** Реализация IUnityPlayerLifecycleEvents: выгрузка/выход плеера закрывают игру. */
+    private fun lifecycleEvents(loader: ClassLoader): Any? = try {
+        val iface = loader.loadClass("com.unity3d.player.IUnityPlayerLifecycleEvents")
+        Proxy.newProxyInstance(loader, arrayOf(iface), InvocationHandler { _, method, _ ->
+            when (method.name) {
+                "onUnityPlayerQuitted" -> runOnUiThread { finish() }
+                "onUnityPlayerUnloaded" -> runOnUiThread { moveTaskToBack(true) }
+            }
+            null
+        })
+    } catch (_: ClassNotFoundException) {
+        null
+    }
+
+    private fun playerView(p: Any): View {
+        if (p is View) return p
+        val m = p.javaClass.methods.firstOrNull { it.name == "getFrameLayout" && it.parameterTypes.isEmpty() }
+            ?: throw IllegalStateException("${p.javaClass.name} не View и не имеет getFrameLayout()")
+        return m.invoke(p) as View
+    }
+
+    private fun menuButton(): View {
+        val d = resources.displayMetrics.density
+        val size = (44 * d).toInt()
+        val b = ImageButton(this)
+        b.setImageResource(R.drawable.ic_mods_white)
+        b.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0x66000000)
+        }
+        b.alpha = 0.75f
+        b.contentDescription = "Моды"
+        b.setOnClickListener { startActivity(Intent(this, ModMenuActivity::class.java)) }
+        val lp = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
+        lp.setMargins(0, (12 * d).toInt(), (12 * d).toInt(), 0)
+        b.layoutParams = lp
+        return b
     }
 
     private fun showError(t: Throwable) {
@@ -127,6 +216,7 @@ class GameActivity : Activity() {
         return !(c.startsWith("android.") || c.startsWith("com.android.") ||
             c.startsWith("java.") || c.startsWith("javax.") || c.startsWith("dalvik.") ||
             c.startsWith("androidx.") || c.startsWith("com.bearite.") ||
+            c.startsWith("com.google.android.material.") ||
             c.startsWith("kotlin.") || c.startsWith("libcore.") || c.startsWith("sun."))
     }
 
@@ -165,20 +255,34 @@ class GameActivity : Activity() {
 
     // ------------------------------------------------------- жизненный цикл
 
-    private fun callPlayer(name: String, vararg args: Any?) {
+    /** Вызывает первый найденный метод плеера из names (имена разные в версиях Unity). */
+    private fun callPlayer(names: List<String>, vararg args: Any?) {
         val p = player ?: return
         try {
             val m = p.javaClass.methods.firstOrNull {
-                it.name == name && it.parameterTypes.size == args.size
+                it.name in names && it.parameterTypes.size == args.size
             } ?: return
             m.invoke(p, *args)
         } catch (t: Throwable) {
-            BLog.e("UnityPlayer.$name", t)
+            BLog.e("UnityPlayer.${names.first()}", t)
         }
     }
 
-    override fun onStart() { super.onStart(); callPlayer("start") }
-    override fun onStop() { callPlayer("stop"); super.onStop() }
+    private fun callPlayer(name: String, vararg args: Any?) = callPlayer(listOf(name), *args)
+
+    private fun inject(e: InputEvent): Boolean {
+        val p = player ?: return false
+        return try {
+            val m = p.javaClass.methods.firstOrNull { it.name == "injectEvent" && it.parameterTypes.size == 1 }
+                ?: return false
+            (m.invoke(p, e) as? Boolean) ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    override fun onStart() { super.onStart(); callPlayer(listOf("onStart", "start")) }
+    override fun onStop() { callPlayer(listOf("onStop", "stop")); super.onStop() }
     override fun onResume() { super.onResume(); callPlayer("resume") }
     override fun onPause() { callPlayer("pause"); super.onPause() }
 
@@ -212,13 +316,23 @@ class GameActivity : Activity() {
         callPlayer("lowMemory")
     }
 
+    // ввод: как в стандартном UnityPlayerActivity, события отдаём плееру
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_MULTIPLE && player != null) {
-            callPlayer("injectEvent", event)
-            return true
-        }
+        if (event.action == KeyEvent.ACTION_MULTIPLE && player != null) return inject(event)
         return super.dispatchKeyEvent(event)
     }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        inject(event) || super.onKeyUp(keyCode, event)
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        inject(event) || super.onKeyDown(keyCode, event)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean =
+        inject(event) || super.onTouchEvent(event)
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean =
+        inject(event) || super.onGenericMotionEvent(event)
 
     companion object {
         const val EXTRA_PKG = "game_pkg"

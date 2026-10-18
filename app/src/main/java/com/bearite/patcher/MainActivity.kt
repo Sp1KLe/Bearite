@@ -13,9 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.DynamicColors
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-import com.google.android.material.materialswitch.MaterialSwitch
 
 /** Три вкладки: Игра (запуск), Моды (управление), Лог. Стиль Material Design 3. */
 class MainActivity : AppCompatActivity() {
@@ -118,42 +116,18 @@ class MainActivity : AppCompatActivity() {
     // ----------------------------------------------------------------- моды
 
     private fun refreshMods() {
-        val list = mods.scan()
         val container = findViewById<LinearLayout>(R.id.mods_list)
-        container.removeAllViews()
-        findViewById<View>(R.id.mods_empty).visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        ModListUi.populate(
+            activity = this,
+            container = container,
+            mods = mods,
+            allowDelete = true,
+            onToggled = { refreshGame() },
+            onListChanged = { refreshAll() },
+        )
+        findViewById<View>(R.id.mods_empty).visibility =
+            if (container.childCount == 0) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.mods_path).text = "Папка модов:\n${mods.modsDir.absolutePath}"
-
-        for (m in list) {
-            val row = layoutInflater.inflate(R.layout.item_mod, container, false)
-            row.findViewById<TextView>(R.id.mod_name).text = m.name
-            row.findViewById<TextView>(R.id.mod_meta).text = buildString {
-                append("v").append(m.version)
-                if (m.author.isNotEmpty()) append(" · ").append(m.author)
-                append(" · бандлов: ").append(m.bundles.size)
-            }
-            row.findViewById<MaterialSwitch>(R.id.mod_switch).apply {
-                isChecked = m.enabled
-                setOnCheckedChangeListener { _, on ->
-                    mods.setEnabled(m.id, on)
-                    refreshGame()
-                }
-            }
-            row.findViewById<View>(R.id.mod_delete).setOnClickListener { confirmDelete(m) }
-            container.addView(row)
-        }
-    }
-
-    private fun confirmDelete(m: Mod) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Удалить мод?")
-            .setMessage("«${m.name}» будет удалён вместе с файлами.")
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Удалить") { _, _ ->
-                mods.delete(m)
-                refreshAll()
-            }
-            .show()
     }
 
     private fun installMod(uri: Uri) {

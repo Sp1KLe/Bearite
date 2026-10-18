@@ -15,5 +15,5 @@ set_target_properties(dobby PROPERTIES
   IMPORTED_LOCATION "${DOBBY_DIR}/lib/${ANDROID_ABI}/libdobby.a")
 
 add_library(bearite SHARED bearite.cpp)
-target_include_directories(bearite PRIVATE "${DOBBY_DIR}/include")
+target_include_directories(bearite PRIVATE "${DOBBY_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sdk")
 target_link_libraries(bearite dobby log)

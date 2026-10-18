@@ -2,14 +2,22 @@
 //
 // Грузится в процесс игры (в тот же ClassLoader/namespace, что и libil2cpp.so),
 // ждёт запуска IL2CPP, ставит inline-хук на il2cpp_runtime_invoke и из него,
-// то есть уже на потоке Unity, загружает AssetBundle'ы включённых модов.
+// то есть уже на потоке Unity, загружает AssetBundle'ы включённых модов и
+// нативные библиотеки модов (SDK: sdk/bearite_api.h).
 //
 // Все шаги пишутся в logcat (тег Bearite) и в файл bearite.log рядом с конфигом.
+//
+// Формат конфига (строки, поля через TAB):
+//   B <путь бандла>
+//   M <id мода> <путь к settings.txt>
+//   L <id мода> <путь к .so>
 
 #include <android/log.h>
 #include <dlfcn.h>
 #include <jni.h>
+#include <link.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -18,13 +26,17 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "bearite_api.h"
 #include "dobby.h"
 
 #define TAG "Bearite"
@@ -129,23 +141,186 @@ static void* invoke(void* method, void* obj, void** params) {
     return r;
 }
 
-static std::vector<std::string> read_bundle_list() {
+// Подходит и к новой (dobby_dummy_func_t), и к старой (void*) сигнатуре DobbyHook
+template <typename A, typename Fn, typename On>
+static int call_dobby(int (*f)(A, Fn, On), void* target, void* repl, void* orig_out) {
+    return f(target, reinterpret_cast<Fn>(repl), reinterpret_cast<On>(orig_out));
+}
+
+// ------------------------------------------------------------------ конфиг
+
+struct Config {
+    std::vector<std::string> bundles;
+    std::vector<std::pair<std::string, std::string>> libs;  // id, путь .so
+    std::map<std::string, std::string> settingsPaths;        // id -> settings.txt
+};
+
+static std::vector<std::string> split_tab(const std::string& s) {
     std::vector<std::string> out;
-    std::ifstream in(g_cfgPath);
-    std::string line;
-    while (std::getline(in, line)) {
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-        if (!line.empty()) out.push_back(line);
+    size_t start = 0;
+    while (true) {
+        size_t p = s.find('\t', start);
+        if (p == std::string::npos) {
+            out.push_back(s.substr(start));
+            break;
+        }
+        out.push_back(s.substr(start, p - start));
+        start = p + 1;
     }
     return out;
 }
 
-static void run_mods() {
-    blog("загрузка модов на потоке tid=%d", (int)gettid());
-    std::vector<std::string> bundles = read_bundle_list();
-    blog("бандлов в конфиге: %zu", bundles.size());
-    if (bundles.empty()) return;
+static Config read_config() {
+    Config cfg;
+    std::ifstream in(g_cfgPath);
+    std::string line;
+    while (std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (line.empty()) continue;
+        std::vector<std::string> f = split_tab(line);
+        if (f[0] == "B" && f.size() >= 2) {
+            cfg.bundles.push_back(f[1]);
+        } else if (f[0] == "M" && f.size() >= 3) {
+            cfg.settingsPaths[f[1]] = f[2];
+        } else if (f[0] == "L" && f.size() >= 3) {
+            cfg.libs.emplace_back(f[1], f[2]);
+        } else if (f.size() == 1) {
+            cfg.bundles.push_back(f[0]);  // старый формат: просто путь бандла
+        } else {
+            blog("конфиг: не понял строку '%s'", line.c_str());
+        }
+    }
+    return cfg;
+}
 
+// --------------------------------------------------------- настройки модов
+
+struct SettingsFile {
+    long long stamp = -1;
+    std::map<std::string, std::string> kv;
+};
+static std::mutex g_setMu;
+static std::map<std::string, std::string> g_setPath;  // id -> путь
+static std::map<std::string, SettingsFile> g_setCache;
+
+static bool setting_get(const char* mod, const char* key, std::string& out) {
+    if (!mod || !key) return false;
+    std::lock_guard<std::mutex> lk(g_setMu);
+    auto pit = g_setPath.find(mod);
+    if (pit == g_setPath.end()) return false;
+    struct stat st;
+    if (stat(pit->second.c_str(), &st) != 0) return false;
+    SettingsFile& sf = g_setCache[mod];
+    long long stamp = (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec + st.st_size;
+    if (stamp != sf.stamp) {  // файл изменился - перечитываем
+        sf.stamp = stamp;
+        sf.kv.clear();
+        std::ifstream in(pit->second);
+        std::string line;
+        while (std::getline(in, line)) {
+            while (!line.empty() && line.back() == '\r') line.pop_back();
+            size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            sf.kv[line.substr(0, eq)] = line.substr(eq + 1);
+        }
+    }
+    auto it = sf.kv.find(key);
+    if (it == sf.kv.end()) return false;
+    out = it->second;
+    return true;
+}
+
+// ----------------------------------------------------------------- API модов
+
+static void api_log(const char* mod, const char* msg) {
+    blog("[мод %s] %s", mod ? mod : "?", msg ? msg : "");
+}
+
+static void* api_il2cpp_symbol(const char* name) { return name ? find_symbol(name) : nullptr; }
+
+struct BaseQuery {
+    const char* part;
+    void* base;
+};
+
+static int phdr_cb(struct dl_phdr_info* info, size_t, void* data) {
+    auto* q = static_cast<BaseQuery*>(data);
+    if (info->dlpi_name && strstr(info->dlpi_name, q->part)) {
+        q->base = reinterpret_cast<void*>(info->dlpi_addr);
+        return 1;
+    }
+    return 0;
+}
+
+static void* api_module_base(const char* part) {
+    if (!part || !*part) return nullptr;
+    BaseQuery q{part, nullptr};
+    dl_iterate_phdr(phdr_cb, &q);
+    return q.base;
+}
+
+static int api_hook(void* target, void* replacement, void** original) {
+    if (!target || !replacement) return -1;
+    return call_dobby(DobbyHook, target, replacement, reinterpret_cast<void*>(original));
+}
+
+static int api_get_bool(const char* mod, const char* key, int def) {
+    std::string v;
+    if (!setting_get(mod, key, v)) return def;
+    return (v == "true" || v == "1") ? 1 : 0;
+}
+
+static long long api_get_int(const char* mod, const char* key, long long def) {
+    std::string v;
+    if (!setting_get(mod, key, v)) return def;
+    char* end = nullptr;
+    long long r = strtoll(v.c_str(), &end, 10);
+    return (end && end != v.c_str()) ? r : def;
+}
+
+static double api_get_float(const char* mod, const char* key, double def) {
+    std::string v;
+    if (!setting_get(mod, key, v)) return def;
+    char* end = nullptr;
+    double r = strtod(v.c_str(), &end);
+    return (end && end != v.c_str()) ? r : def;
+}
+
+static const char* api_get_string(const char* mod, const char* key, const char* def) {
+    thread_local std::string buf;
+    std::string v;
+    if (!setting_get(mod, key, v)) return def;
+    buf = v;
+    return buf.c_str();
+}
+
+static const BeariteApi g_api = {
+    BEARITE_API_VERSION, api_log,      api_il2cpp_symbol, api_module_base, api_hook,
+    api_get_bool,        api_get_int,  api_get_float,     api_get_string,
+};
+
+static void load_native_mods(const Config& cfg) {
+    for (const auto& m : cfg.libs) {
+        const std::string& id = m.first;
+        const std::string& path = m.second;
+        void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!h) {
+            const char* e = dlerror();
+            blog("мод %s: dlopen не удался: %s", id.c_str(), e ? e : "?");
+            continue;
+        }
+        auto init = reinterpret_cast<BeariteModInitFn>(dlsym(h, BEARITE_MOD_INIT_SYMBOL));
+        if (!init) {
+            blog("мод %s: нет функции %s", id.c_str(), BEARITE_MOD_INIT_SYMBOL);
+            continue;
+        }
+        blog("мод %s: запускаю %s", id.c_str(), BEARITE_MOD_INIT_SYMBOL);
+        init(&g_api, id.c_str());
+        blog("мод %s: готов", id.c_str());
+    }
+}
+
+static void load_bundles(const std::vector<std::string>& bundles) {
     void* abClass = find_class("UnityEngine", "AssetBundle");
     if (!abClass) {
         blog("класс UnityEngine.AssetBundle не найден (нет модуля AssetBundle в игре?)");
@@ -176,6 +351,18 @@ static void run_mods() {
         }
         blog("бандл загружен: %s, ассетов: %zu", path.c_str(), count);
     }
+}
+
+static void run_mods() {
+    blog("загрузка модов на потоке tid=%d", (int)gettid());
+    Config cfg = read_config();
+    {
+        std::lock_guard<std::mutex> lk(g_setMu);
+        g_setPath = cfg.settingsPaths;
+    }
+    blog("в конфиге: бандлов %zu, нативных библиотек %zu", cfg.bundles.size(), cfg.libs.size());
+    if (!cfg.bundles.empty()) load_bundles(cfg.bundles);
+    if (!cfg.libs.empty()) load_native_mods(cfg);
     blog("загрузка модов завершена");
 }
 
@@ -206,12 +393,6 @@ static void* hook_invoke(void* method, void* obj, void** params, void** exc) {
         }
     }
     return g_orig_invoke(method, obj, params, exc);
-}
-
-// Подходит и к новой (dobby_dummy_func_t), и к старой (void*) сигнатуре DobbyHook
-template <typename A, typename Fn, typename On>
-static int call_dobby(int (*f)(A, Fn, On), void* target, void* repl, void* orig_out) {
-    return f(target, reinterpret_cast<Fn>(repl), reinterpret_cast<On>(orig_out));
 }
 
 static void waiter() {

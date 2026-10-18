@@ -46,9 +46,32 @@ jobs:
           gradle-version: "8.5"
 
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            # ошибки компиляции и ресурсов дублируем в аннотации
+            grep -E "^e: |error:|AAPT|Resource|What went wrong|Execution failed|> " gradle_build.log | head -25 | cut -c1-400 | while IFS= read -r l; do echo "::error::${l}"; done
+          fi
+          exit "$rc"
 
       - uses: actions/upload-artifact@v4
         with:
           name: Bearite-debug
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Build example native mod
+        run: |
+          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p build-mod/libs/arm64-v8a
+          "$TC/aarch64-linux-android24-clang" -shared -fPIC -O2 -Wall -Werror -Isdk \
+            -o build-mod/libs/arm64-v8a/libhello.so sdk/example-mod/hello.c
+          "$TC/llvm-nm" -D --defined-only build-mod/libs/arm64-v8a/libhello.so | grep -w bearite_mod_init
+          cp sdk/example-mod/mod.json build-mod/
+          (cd build-mod && zip -qr ../hello-native.zip mod.json libs)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-mod-hello-native
+          path: hello-native.zip

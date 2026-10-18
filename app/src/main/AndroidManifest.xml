@@ -33,6 +33,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Мод-меню поверх игры (открывается кнопкой в GameActivity) -->
+        <activity
+            android:name=".ModMenuActivity"
+            android:exported="false" />
+
         <!-- Игра живёт в отдельном процессе: после выхода он убивается,
              а лаунчер и оригинальная игра остаются нетронутыми -->
         <activity
