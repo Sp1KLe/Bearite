@@ -53,6 +53,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
 
     val isOpen: Boolean get() = root.visibility == View.VISIBLE && !closing
 
+    /** Вызывается, когда меню полностью закрылось. */
+    var onClosed: (() -> Unit)? = null
+
     init {
         root.visibility = View.GONE
         root.setBackgroundColor(0xB3000000.toInt())
@@ -163,6 +166,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
                 root.visibility = View.GONE
                 root.alpha = 1f
                 closing = false
+                onClosed?.invoke()
             }
         }.start()
     }

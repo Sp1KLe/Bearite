@@ -50,6 +50,7 @@ class GameActivity : Activity() {
     private var gamePkg: String = GAME_PKG
 
     private var modMenu: GameModMenu? = null
+    private var hud: GameHud? = null
     private var modButton: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -124,11 +125,16 @@ class GameActivity : Activity() {
         )
         val menu = GameModMenu(this, ModManager(this))
         modMenu = menu
+        val gameHud = GameHud(this, ModManager(this))
+        hud = gameHud
+        menu.onClosed = { updateModButton() }
+        root.addView(gameHud.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
+        updateModButton()
         view.requestFocus()
         BLog.i("UnityPlayer создан: ${p.javaClass.name}")
     }
@@ -202,7 +208,10 @@ class GameActivity : Activity() {
             cornerRadius = 16 * d
             setStroke((3 * d).toInt(), 0xFFB07A00.toInt())
         }
-        b.setOnClickListener { modMenu?.show() }
+        b.setOnClickListener {
+            modMenu?.show()
+            hud?.root?.visibility = View.GONE
+        }
         val lp = FrameLayout.LayoutParams((130 * d).toInt(), (48 * d).toInt(), Gravity.TOP or Gravity.CENTER_HORIZONTAL)
         lp.topMargin = (10 * d).toInt()
         b.layoutParams = lp
@@ -221,6 +230,10 @@ class GameActivity : Activity() {
         val st = pauseState()
         btn.visibility = if (st == 0) View.GONE else View.VISIBLE
         if (st == 0 && modMenu?.isOpen == true) modMenu?.hide()
+        // кнопки модов видны, пока игра идёт (и пока паузу не удаётся определить), и скрыты на паузе и в меню
+        val showHud = st != 1 && modMenu?.isOpen != true
+        hud?.root?.visibility = if (showHud) View.VISIBLE else View.GONE
+        if (showHud) hud?.refresh()
     }
 
     private fun showError(t: Throwable) {

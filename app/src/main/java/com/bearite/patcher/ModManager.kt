@@ -19,6 +19,18 @@ data class Setting(
     val options: List<String>,
 )
 
+/**
+ * Кнопка на экране игры, описывается в mod.json в массиве "hud":
+ *   toggle - переключает bool-настройку, step - прибавляет step к числовой, cycle - листает choice.
+ */
+data class HudButton(
+    val label: String,
+    val setting: String,
+    val action: String,
+    val step: Double,
+    val pos: String,
+)
+
 data class Mod(
     val id: String,
     val name: String,
@@ -35,6 +47,8 @@ data class Mod(
     val icon: File? = null,
     /** Встроенный мод лаунчера: ставить и удалять не нужно, нативный код доверенный. */
     val builtin: Boolean = false,
+    /** Кнопки поверх игры (только у включённых модов). */
+    val hud: List<HudButton> = emptyList(),
 )
 
 /**
@@ -130,6 +144,48 @@ class ModManager(private val ctx: Context) {
         return out
     }
 
+    private fun parseHud(arr: JSONArray?, settings: List<Setting>, modId: String): List<HudButton> {
+        val out = ArrayList<HudButton>()
+        if (arr == null) return out
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val sid = o.optString("setting")
+            val s = settings.firstOrNull { it.id == sid }
+            if (s == null) {
+                BLog.e("мод $modId: кнопка hud #$i: нет настройки '$sid'")
+                continue
+            }
+            val action = o.optString("action").ifEmpty {
+                when (s.type) {
+                    "bool" -> "toggle"
+                    "int", "float" -> "step"
+                    "choice" -> "cycle"
+                    else -> ""
+                }
+            }
+            val fits = when (action) {
+                "toggle" -> s.type == "bool"
+                "step" -> s.type == "int" || s.type == "float"
+                "cycle" -> s.type == "choice"
+                else -> false
+            }
+            if (!fits) {
+                BLog.e("мод $modId: кнопка hud #$i: действие '$action' не подходит настройке '$sid' (${s.type})")
+                continue
+            }
+            out.add(
+                HudButton(
+                    label = o.optString("label", s.name),
+                    setting = sid,
+                    action = action,
+                    step = o.optDouble("step", 1.0).takeIf { !it.isNaN() && it != 0.0 } ?: 1.0,
+                    pos = o.optString("pos", "left"),
+                )
+            )
+        }
+        return out
+    }
+
     fun scan(): List<Mod> {
         val out = ArrayList<Mod>()
         out.add(builtinMod())
@@ -167,6 +223,7 @@ class ModManager(private val ctx: Context) {
                         resolveInside(dir, src, id, "библиотека")?.let { libs.add(it) }
                     }
                 }
+                val parsedSettings = parseSettings(meta.optJSONArray("settings"))
                 out.add(
                     Mod(
                         id = id,
@@ -177,7 +234,8 @@ class ModManager(private val ctx: Context) {
                         dir = dir,
                         bundles = bundles,
                         libs = libs,
-                        settings = parseSettings(meta.optJSONArray("settings")),
+                        settings = parsedSettings,
+                        hud = parseHud(meta.optJSONArray("hud"), parsedSettings, id),
                         // моды с нативным кодом выключены, пока пользователь их не подтвердит
                         enabled = prefs.getBoolean("enabled_$id", libs.isEmpty()),
                         icon = File(dir, "icon.png").takeIf { it.isFile },
