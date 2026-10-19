@@ -124,7 +124,7 @@ Android/data/com.bearite.patcher/files/mods/<id-мода>/
 ### Быстрый старт
 
 Всё для нативного мода лежит в папке [`sdk/`](sdk/): заголовки, скрипт сборки, шаблон и готовый мод
-«Зум камеры». Брать что-то ещё из репозитория не нужно, а собирать мод можно прямо в браузере:
+«Зум» (`sdk/sba-zoom/`). Брать что-то ещё из репозитория не нужно, а собирать мод можно прямо в браузере:
 
 1. Создай папку `sdk/mods/мой-мод/` с файлами `mod.json` и `src/mod.c` (скопируй из `sdk/mods/template/`).
 2. Сохрани. GitHub Actions соберёт все моды из `sdk/mods/`.
@@ -268,9 +268,10 @@ bearite_hook_method(api, mod_id, "UnityEngine", "Camera", "set_fieldOfView", 1,
                     (void*)my_hook, (void**)&orig);
 ```
 
-Готовые примеры, они же собираются в CI:
-- `sdk/mods/template/` — пустой мод, с него начинают;
-- `sdk/mods/zoom/` — «Зум камеры»: хук на `Camera.set_fieldOfView` и настройка «Зум» (не проверено в игре).
+Готовые примеры:
+- `sdk/mods/template/` — пустой мод, с него начинают (собирается в CI вместе со всем из `sdk/mods/`);
+- `sdk/sba-zoom/` — «Зум»: хуки на `Camera.set_fieldOfView` и `Camera.get_main`, плавное приближение,
+  настройки в мод-меню. Это отдельный мод со своей сборкой (`.github/workflows/build-zoom.yml`).
 
 Правила для нативного кода:
 - Строки от `get_string` действительны только до следующего вызова `get_string` в этом потоке. Копируй их сразу.
@@ -301,7 +302,7 @@ APK собирает GitHub Actions (`.github/workflows/build.yml`), локал�
 
 - Вкладка **Actions** → последний успешный запуск → **Artifacts**:
   - `Bearite-debug` — APK лаунчера;
-  - `Bearite-mods` — готовые zip модов из `sdk/mods/` (шаблон и «Зум камеры»);
+  - `Bearite-mods` — готовые zip модов из `sdk/mods/` (сейчас шаблон);
   - `Bearite-ModKit` — набор для создания модов одним архивом.
 
 Локально (если всё же нужно): NDK 26, `bash scripts/build_dobby.sh`, затем `gradle :app:assembleDebug`.
