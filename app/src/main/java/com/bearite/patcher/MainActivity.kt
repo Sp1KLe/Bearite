@@ -82,10 +82,14 @@ class MainActivity : AppCompatActivity() {
         val marker = File(filesDir, GameActivity.RUNNING_MARKER)
         if (!marker.exists()) return
         marker.delete()
-        BLog.e("прошлый запуск игры завершился аварийно (процесс убит без нормального выхода)")
         Thread {
             val lines = LogcatCapture.crashLines()
-            BLog.i("--- logcat вокруг аварии (${lines.size} строк) ---\n" + lines.joinToString("\n"))
+            if (LogcatCapture.hasCrash(lines)) {
+                BLog.e("прошлый запуск игры завершился аварийно")
+                BLog.i("--- logcat вокруг аварии (${lines.size} строк) ---\n" + lines.joinToString("\n"))
+            } else {
+                BLog.i("прошлый запуск закончился без нормального выхода, но аварии в logcat нет: игру, скорее всего, закрыли из списка недавних")
+            }
             runOnUiThread { refreshLog() }
         }.start()
     }

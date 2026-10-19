@@ -44,6 +44,7 @@ typedef struct BeariteApi {
 /* ---- Состояние ---- */
 static const BeariteApi* g_api = nullptr;
 static const char* g_id = "sba-zoom";
+static char g_idbuf[64];
 
 /* Типы функций IL2CPP */
 typedef void*  (*DomainGetFn)();
@@ -267,7 +268,11 @@ static void watchdog() {
 extern "C" __attribute__((visibility("default")))
 void bearite_mod_init(const BeariteApi* api, const char* mod_id) {
     g_api = api;
-    if (mod_id) g_id = mod_id;
+    /* копия id в своей памяти: так мод работает и с загрузчиком, который освобождает строку после init */
+    if (mod_id) {
+        snprintf(g_idbuf, sizeof g_idbuf, "%s", mod_id);
+        g_id = g_idbuf;
+    }
     say("SBA Zoom: запуск");
 
     void* p_set  = find_method("UnityEngine", "Camera", "set_fieldOfView", 1);

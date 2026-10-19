@@ -10,6 +10,10 @@ object LogcatCapture {
         "FATAL", "AndroidRuntime", "JNI DETECTED", "Unity", "il2cpp", "Bearite", "DEBUG",
     )
 
+    /** Есть ли среди строк настоящий краш (а не просто фоновый лог). */
+    fun hasCrash(lines: List<String>): Boolean =
+        lines.any { it.contains("Fatal signal") || it.contains("FATAL EXCEPTION") }
+
     /** Строки вокруг последнего краша или, если краша не видно, самые значимые за последнее время. */
     fun crashLines(): List<String> = try {
         val p = ProcessBuilder("logcat", "-d", "-v", "threadtime", "-t", "5000")

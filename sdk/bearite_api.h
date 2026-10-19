@@ -7,6 +7,7 @@
  *     void bearite_mod_init(const BeariteApi* api, const char* mod_id);
  *
  * Bearite вызывает её один раз после запуска IL2CPP игры (на потоке UnityMain).
+ * Указатель mod_id действителен до конца процесса, его можно запомнить.
  * Библиотека мода указывается в mod.json в поле "libs".
  *
  * Мод не линкуется с Bearite: всё нужное приходит через структуру BeariteApi.

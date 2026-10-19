@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -296,9 +297,14 @@ static const BeariteApi g_api = {
     api_get_bool,        api_get_int,  api_get_float,     api_get_string,
 };
 
+// id модов живут до конца процесса: мод вправе запомнить указатель mod_id и пользоваться им позже
+// (в хуках, в своих потоках). Контейнер deque не перемещает уже добавленные строки.
+static std::deque<std::string> g_modIds;
+
 static void load_native_mods(const Config& cfg) {
     for (const auto& m : cfg.libs) {
-        const std::string& id = m.first;
+        g_modIds.push_back(m.first);
+        const std::string& id = g_modIds.back();
         const std::string& path = m.second;
         void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!h) {
