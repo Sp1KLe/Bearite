@@ -4,6 +4,11 @@
  * Включается кнопкой «Зум» на экране игры, «+» и «−» меняют силу (см. "hud" в mod.json).
  * Методы игры ищутся по имени через IL2CPP, смещения из dump.cs не нужны.
  *
+ * Центр зума: ползунки «Центр по X/Y» (−1…1, 0 = центр экрана) выбирают, в какую точку экрана приближает.
+ * Для этого камере включается «физическая камера» и сдвигается объектив (lensShift): так картинка
+ * смещается без перемещения самой камеры, и скрипты игры ей не мешают. Если смещение идёт не в ту
+ * сторону, включи настройку «Инвертировать смещение».
+ *
  * Как работает:
  *  - хук Camera.set_fieldOfView: когда игра сама задаёт угол главной камеры, делим его на зум;
  *  - хук Camera.get_main: игра зовёт его постоянно, так что он служит «тиком каждый кадр»:
@@ -47,15 +52,25 @@ typedef void*  (*AssemblyGetImageFn)(void* assembly);
 typedef void*  (*ClassFromNameFn)(void* image, const char* ns, const char* name);
 typedef void*  (*ClassGetMethodFn)(void* klass, const char* name, int argc);
 
+struct Vec2 { float x, y; };
+
 /* Методы Unity: последний аргумент - служебный MethodInfo* */
 typedef void  (*SetFovFn)(void* self, float value, void* mi);
 typedef float (*GetFovFn)(void* self, void* mi);
 typedef void* (*GetMainFn)(void* mi);
+typedef void  (*SetBoolFn)(void* self, bool value, void* mi);
+typedef bool  (*GetBoolFn)(void* self, void* mi);
+typedef void  (*SetVec2Fn)(void* self, Vec2 value, void* mi);
+typedef Vec2  (*GetVec2Fn)(void* self, void* mi);
 
 static SetFovFn  orig_set_fov  = nullptr;  /* оригинал после установки хука */
 static GetMainFn orig_get_main = nullptr;
 static GetMainFn raw_get_main  = nullptr;  /* исходный адрес (пока get_main не перехвачен) */
 static GetFovFn  fn_get_fov    = nullptr;
+static SetBoolFn fn_set_phys   = nullptr;  /* Camera.usePhysicalProperties */
+static GetBoolFn fn_get_phys   = nullptr;
+static SetVec2Fn fn_set_shift  = nullptr;  /* Camera.lensShift */
+static GetVec2Fn fn_get_shift  = nullptr;
 
 static void*  g_cam       = nullptr;  /* главная камера */
 static float  g_baseFov   = 0.0f;     /* угол обзора без зума */
@@ -68,6 +83,17 @@ static double g_cfgT      = 0.0;
 static bool   g_on        = false;
 static double g_amount    = 2.0;
 static double g_smooth    = 8.0;
+static double g_focusX    = 0.0;      /* центр зума, -1...1 */
+static double g_focusY    = 0.0;
+static bool   g_invert    = false;
+
+/* состояние смещения объектива */
+static bool   g_physTaken = false;    /* мы включили физическую камеру и сдвинули объектив */
+static void*  g_physCam   = nullptr;
+static bool   g_origPhys  = false;
+static Vec2   g_origShift = {0.0f, 0.0f};
+static float  g_shiftX    = 0.0f;
+static float  g_shiftY    = 0.0f;
 
 /* счётчики для диагностики */
 static volatile int g_mainCalls = 0;
@@ -124,6 +150,53 @@ static void reload_config(double now) {
     g_smooth = g_api->get_float(g_id, "smooth", 8.0);
     if (g_amount < 1.0) g_amount = 1.0;
     if (g_smooth < 0.5) g_smooth = 0.5;
+    g_focusX = g_api->get_float(g_id, "focus_x", 0.0);
+    g_focusY = g_api->get_float(g_id, "focus_y", 0.0);
+    g_invert = g_api->get_bool(g_id, "invert", 0) != 0;
+    if (g_focusX < -1.0) g_focusX = -1.0;
+    if (g_focusX > 1.0)  g_focusX = 1.0;
+    if (g_focusY < -1.0) g_focusY = -1.0;
+    if (g_focusY > 1.0)  g_focusY = 1.0;
+}
+
+/*
+ * Сдвигает объектив так, чтобы приближение шло к выбранной точке экрана.
+ * При зуме Z точка с координатой u (доля ширины от центра) остаётся на месте, если сдвиг = (Z-1)*u.
+ * Фокус p в диапазоне -1...1 это u = p/2. Когда зум выключен, камера возвращается как была.
+ */
+static void apply_focus(void* cam) {
+    if (!fn_set_shift || !fn_get_shift || !fn_set_phys || !fn_get_phys) return;
+    if (g_physTaken && cam != g_physCam) {  /* камеру пересоздали (смена сцены) */
+        g_physTaken = false;
+        g_shiftX = g_shiftY = 0.0f;
+    }
+    float sign = g_invert ? -1.0f : 1.0f;
+    float wantX = (g_zoom - 1.0f) * (float)g_focusX * 0.5f * sign;
+    float wantY = (g_zoom - 1.0f) * (float)g_focusY * 0.5f * sign;
+    bool idle = fabsf(wantX) < 1e-4f && fabsf(wantY) < 1e-4f;
+    if (idle) {
+        if (g_physTaken) {
+            fn_set_shift(cam, g_origShift, nullptr);
+            fn_set_phys(cam, g_origPhys, nullptr);
+            g_physTaken = false;
+            g_shiftX = g_shiftY = 0.0f;
+            say("SBA Zoom: смещение центра убрано, камера возвращена как была");
+        }
+        return;
+    }
+    if (!g_physTaken) {
+        g_origPhys = fn_get_phys(cam, nullptr);
+        g_origShift = fn_get_shift(cam, nullptr);
+        fn_set_phys(cam, true, nullptr);  /* без физической камеры lensShift не действует */
+        g_physTaken = true;
+        g_physCam = cam;
+        say("SBA Zoom: включил физическую камеру для смещения центра зума");
+    }
+    if (fabsf(wantX - g_shiftX) > 1e-4f || fabsf(wantY - g_shiftY) > 1e-4f) {
+        fn_set_shift(cam, Vec2{wantX + g_origShift.x, wantY + g_origShift.y}, nullptr);
+        g_shiftX = wantX;
+        g_shiftY = wantY;
+    }
 }
 
 /* Один шаг плавного приближения */
@@ -171,6 +244,7 @@ static void* hook_get_main(void* mi) {
             g_applied = g_zoom;
             ++g_appliedCalls;
         }
+        apply_focus(cam);
     }
     return cam;
 }
@@ -199,6 +273,19 @@ void bearite_mod_init(const BeariteApi* api, const char* mod_id) {
     void* p_set  = find_method("UnityEngine", "Camera", "set_fieldOfView", 1);
     void* p_get  = find_method("UnityEngine", "Camera", "get_fieldOfView", 0);
     void* p_main = find_method("UnityEngine", "Camera", "get_main", 0);
+
+    void* p_sphys = find_method("UnityEngine", "Camera", "set_usePhysicalProperties", 1);
+    void* p_gphys = find_method("UnityEngine", "Camera", "get_usePhysicalProperties", 0);
+    void* p_sshift = find_method("UnityEngine", "Camera", "set_lensShift", 1);
+    void* p_gshift = find_method("UnityEngine", "Camera", "get_lensShift", 0);
+    if (p_sphys && p_gphys && p_sshift && p_gshift) {
+        fn_set_phys = (SetBoolFn)p_sphys;
+        fn_get_phys = (GetBoolFn)p_gphys;
+        fn_set_shift = (SetVec2Fn)p_sshift;
+        fn_get_shift = (GetVec2Fn)p_gshift;
+    } else {
+        say("SBA Zoom: нет Camera.lensShift или usePhysicalProperties, смещение центра зума недоступно");
+    }
 
     if (!p_set)  say("SBA Zoom: не найден Camera.set_fieldOfView");
     if (!p_get)  say("SBA Zoom: не найден Camera.get_fieldOfView");

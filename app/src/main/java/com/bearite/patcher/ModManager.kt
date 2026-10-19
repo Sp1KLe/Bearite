@@ -17,6 +17,8 @@ data class Setting(
     val min: Double?,
     val max: Double?,
     val options: List<String>,
+    /** "slider" рисует в игровом меню ползунок вместо кнопок «−» и «+» (нужны min и max). */
+    val control: String = "",
 )
 
 /**
@@ -138,6 +140,7 @@ class ModManager(private val ctx: Context) {
                     min = min,
                     max = max,
                     options = options,
+                    control = o.optString("control", ""),
                 )
             )
         }

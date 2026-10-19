@@ -3,6 +3,7 @@ package com.bearite.patcher
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
@@ -23,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import java.util.Locale
 
@@ -384,7 +386,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
 
     private fun control(m: Mod, s: Setting, cur: Any): View = when (s.type) {
         "bool" -> togglePill(cur as? Boolean ?: false, 250) { ModSettings.set(m, s.id, it) }
-        "int", "float" -> stepper(m, s, cur)
+        "int", "float" ->
+            if (s.control == "slider" && s.min != null && s.max != null && s.max > s.min) slider(m, s, cur)
+            else stepper(m, s, cur)
         "choice" -> choicePill(m, s, cur.toString())
         else -> textField(m, s, cur.toString())
     }
@@ -404,6 +408,53 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
         }
         t.layoutParams = LinearLayout.LayoutParams(dp(widthDp), dp(38)).apply { leftMargin = dp(marginDp) }
         return t
+    }
+
+    /** Ползунок для числа с диапазоном: значение сохраняется во время перетаскивания. */
+    private fun slider(m: Mod, s: Setting, cur: Any): View {
+        val lo = s.min ?: 0.0
+        val hi = s.max ?: 1.0
+        val isInt = s.type == "int"
+        val steps = if (isInt) (hi - lo).toInt().coerceAtLeast(1) else 1000
+        var v = ((cur as? Number)?.toDouble() ?: lo).coerceIn(lo, hi)
+        fun fmt(x: Double): String =
+            if (isInt) x.toLong().toString()
+            else String.format(Locale.US, "%.2f", x).trimEnd('0').trimEnd('.').ifEmpty { "0" }
+
+        val value = label(fmt(v), 15f, Color.WHITE).apply { gravity = Gravity.CENTER }
+        val bar = SeekBar(act).apply {
+            this.max = steps
+            progress = Math.round((v - lo) / (hi - lo) * steps).toInt()
+            progressTintList = ColorStateList.valueOf(Color.WHITE)
+            progressBackgroundTintList = ColorStateList.valueOf(0x66FFFFFF)
+            thumbTintList = ColorStateList.valueOf(0xFFFFE066.toInt())
+        }
+        var lastSave = 0L
+        fun save() = ModSettings.set(m, s.id, if (isInt) v.toLong() else v)
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
+                var x = lo + p.toDouble() / steps * (hi - lo)
+                x = if (isInt) Math.round(x).toDouble() else Math.round(x * 1000.0) / 1000.0
+                v = x
+                value.text = fmt(v)
+                if (fromUser) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSave > 60) {  // мод видит значение уже во время движения
+                        lastSave = now
+                        save()
+                    }
+                }
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar) {}
+            override fun onStopTrackingTouch(sb: SeekBar) = save()
+        })
+        return LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(bar, LinearLayout.LayoutParams(dp(186), dp(38)))
+            addView(value, LinearLayout.LayoutParams(dp(64), dp(38)))
+        }
     }
 
     private fun stepper(m: Mod, s: Setting, cur: Any): View {
