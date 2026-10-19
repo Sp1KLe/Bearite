@@ -27,6 +27,7 @@ jobs:
         run: |
           mkdir -p out/libs/arm64-v8a
           cp sdk/sba-zoom/mod.json out/
+          if [ -f sdk/sba-zoom/icon.png ]; then cp sdk/sba-zoom/icon.png out/; fi
           cp build-zoom/libsbazoom.so out/libs/arm64-v8a/
           cd out
           zip -r ../sba-zoom.zip .
