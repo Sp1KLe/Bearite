@@ -1,0 +1,11 @@
+{
+  "id": "zoom",
+  "name": "Зум камеры",
+  "version": "1.0",
+  "author": "Bearite",
+  "description": "Меняет приближение камеры. Зум меняется в настройках мода на паузе: «+» ближе, «−» дальше.",
+  "libs": ["libs/arm64-v8a/libzoom.so"],
+  "settings": [
+    { "id": "zoom", "type": "float", "name": "Зум", "description": "1 = как в игре", "min": 0.5, "max": 3.0, "default": 1.0 }
+  ]
+}

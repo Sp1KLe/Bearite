@@ -61,17 +61,22 @@ jobs:
           name: Bearite-debug
           path: app/build/outputs/apk/debug/*.apk
 
-      - name: Build example native mod
+      # все моды из sdk/mods/*: добавь туда папку с mod.json и src/*.c, и она соберётся сама
+      - name: Build mods from sdk/mods
         run: |
-          TC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          mkdir -p build-mod/libs/arm64-v8a
-          "$TC/aarch64-linux-android24-clang" -shared -fPIC -O2 -Wall -Werror -Isdk \
-            -o build-mod/libs/arm64-v8a/libhello.so sdk/example-mod/hello.c
-          "$TC/llvm-nm" -D --defined-only build-mod/libs/arm64-v8a/libhello.so | grep -w bearite_mod_init
-          cp sdk/example-mod/mod.json build-mod/
-          (cd build-mod && zip -qr ../hello-native.zip mod.json libs)
+          mkdir -p dist kit
+          for d in sdk/mods/*/; do
+            if [ -f "${d}mod.json" ]; then EXTRA_CFLAGS="-Werror" bash sdk/build-mod.sh "$d" dist; fi
+          done
+          (cd sdk && zip -qr ../kit/Bearite-ModKit.zip .)
+          ls -la dist kit
 
       - uses: actions/upload-artifact@v4
         with:
-          name: example-mod-hello-native
-          path: hello-native.zip
+          name: Bearite-mods
+          path: dist/*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bearite-ModKit
+          path: kit/Bearite-ModKit.zip

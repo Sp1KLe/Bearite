@@ -1,0 +1,34 @@
+# Сборка модов в облаке, без компьютера и NDK у тебя.
+# Положи этот файл в .github/workflows/ своего репозитория, а рядом с ним (в корне репозитория)
+# файлы набора: build-mod.sh, bearite_api.h, bearite_il2cpp.h и папку mods/ с твоими модами.
+# После пуша открой вкладку Actions: готовые zip будут в Artifacts.
+name: Build mods
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NDK
+        run: |
+          SDKM="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n 1)"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Build all mods
+        run: |
+          mkdir -p dist
+          for d in mods/*/; do
+            if [ -f "${d}mod.json" ]; then bash build-mod.sh "$d" dist; fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mods
+          path: dist/*.zip

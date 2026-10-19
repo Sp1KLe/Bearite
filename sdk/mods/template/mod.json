@@ -1,0 +1,11 @@
+{
+  "id": "my-mod",
+  "name": "Мой мод",
+  "version": "1.0",
+  "author": "я",
+  "description": "Шаблон мода: поменяй id, название и код в src/mod.c.",
+  "libs": ["libs/arm64-v8a/libmymod.so"],
+  "settings": [
+    { "id": "greet", "type": "bool", "name": "Приветствие в лог", "default": true }
+  ]
+}
