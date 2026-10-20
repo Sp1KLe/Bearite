@@ -150,7 +150,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
                 save()
                 expandedObjs.add(objKey(m, m.objects.size - 1))
                 rebuild?.invoke()
-            }, if (i == 0) null else gap())
+            }, if (i == 0) wrapLp() else gap())
         }
         d.addView(android.widget.HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(shapes) }, rowLp())
 
@@ -328,6 +328,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
     private fun toast(s: String) = Toast.makeText(act, s, Toast.LENGTH_LONG).show()
     private fun rowLp() = ui.matchWrap().apply { topMargin = ui.dp(6) }
     private fun cardLp() = ui.matchWrap().apply { bottomMargin = ui.dp(10) }
+    private fun wrapLp() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     private fun gap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         .apply { leftMargin = ui.dp(8) }
 }

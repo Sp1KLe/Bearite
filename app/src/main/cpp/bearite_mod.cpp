@@ -415,9 +415,11 @@ void write_state(const std::string& cam) {
 
 std::string read_scene() {
     if (!F.get_scene || !F.scene_name) return "";
-    void* sc = inv(F.get_scene, nullptr);
+    void* sc = inv(F.get_scene, nullptr);  // boxed Scene: единственное поле - int handle
     if (!sc) return "";
-    return utf8(inv(F.scene_name, sc));
+    int handle = *(const int*)obj_unbox(sc);
+    void* a[1] = {&handle};
+    return utf8(inv(F.scene_name, nullptr, a));  // статический Scene.GetNameInternal(int): без this-указателя
 }
 
 std::string read_camera() {
@@ -580,7 +582,7 @@ void bind_unity() {
     F.set_color = m0(mt, "set_color", 1);
     F.collider_enabled = m0(co, "set_enabled", 1);
     F.get_scene = m0(sm, "GetActiveScene", 0);
-    F.scene_name = m0(sc, "get_name", 0);
+    F.scene_name = m0(sc, "GetNameInternal", 1);
     F.type_renderer = type_of("UnityEngine", "Renderer");
     F.type_collider = type_of("UnityEngine", "Collider");
 }
