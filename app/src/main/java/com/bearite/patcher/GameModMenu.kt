@@ -227,7 +227,16 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
 
     private fun renderList() {
         if (tab == TAB_MAPS) {
-            maps.render(list) { renderList() }
+            try {
+                maps.render(list) { renderList() }
+            } catch (t: Throwable) {
+                // редактор не должен ронять игру: показываем ошибку и пишем её в лог
+                BLog.e("вкладка «Карты»", t)
+                list.removeAllViews()
+                list.addView(ui.label("Ошибка во вкладке «Карты»: $t\nПодробности в логе лаунчера.", 14f, GameUi.RUST, bold = false).apply {
+                    setPadding(dp(12), dp(30), dp(12), dp(30))
+                })
+            }
             return
         }
         list.removeAllViews()

@@ -58,6 +58,9 @@ class MapStore(private val dir: File) {
         }
     }
 
+    fun hasGuard() = File(dir, "_guard").exists()
+    fun clearGuard() { File(dir, "_guard").delete() }
+
     fun delete(m: GameMap) { File(dir, m.id + ".map").delete() }
 
     fun newId(): String {

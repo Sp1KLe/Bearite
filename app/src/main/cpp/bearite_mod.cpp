@@ -128,7 +128,7 @@ std::string utf8(void* il2str) {
 
 // Методы Unity
 struct Fns {
-    void *create_primitive, *get_transform, *set_position, *set_scale, *set_euler, *get_position, *get_forward;
+    void *create_primitive, *get_transform, *go_transform, *set_position, *set_scale, *set_euler, *get_position, *get_forward;
     void *cam_main, *set_name, *destroy, *get_active, *set_layer, *get_component, *get_material, *set_color,
         *collider_enabled, *get_scene, *scene_name;
     void *type_renderer, *type_collider;
@@ -325,7 +325,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
         inv(F.set_name, go, a);
         L.name = fullName;
     }
-    void* tr = inv(F.get_transform, go);
+    void* tr = inv(F.go_transform, go);  // у GameObject свой get_transform, не Component'ский
     if (!tr) return;
     V3 pos{m.off[0] + m.scale * o.p[0], m.off[1] + m.scale * o.p[1], m.off[2] + m.scale * o.p[2]};
     V3 size{m.scale * o.s[0], m.scale * o.s[1], m.scale * o.s[2]};
@@ -468,7 +468,11 @@ void update() {
     if (g_dirty && g_engineOk) {
         g_dirty = false;
         if (g_status != "ok") { g_status = "ok"; g_msg.clear(); }
+        // защита от цикла падений: файл остаётся, если игра упала внутри sync_all
+        std::string guard = g_mapsDir + "/_guard";
+        if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("sync", gf); fclose(gf); }
         sync_all();
+        unlink(guard.c_str());
     }
     if (slow) {
         std::string cam = read_camera();
@@ -565,8 +569,8 @@ void bind_unity() {
     void* sc = bearite_find_class("UnityEngine.SceneManagement", "Scene");
     auto m0 = [](void* k, const char* n, int argc) { return k ? bearite_il2.class_get_method_from_name(k, n, argc) : nullptr; };
     F.create_primitive = m0(go, "CreatePrimitive", 1);
-    F.get_transform = m0(cm, "get_transform", 0);
-    if (!F.get_transform) F.get_transform = m0(go, "get_transform", 0);
+    F.get_transform = m0(cm, "get_transform", 0);  // для компонентов (камера)
+    F.go_transform = m0(go, "get_transform", 0);   // для GameObject
     F.set_position = m0(tr, "set_position", 1);
     F.set_scale = m0(tr, "set_localScale", 1);
     F.set_euler = m0(tr, "set_eulerAngles", 1);
@@ -617,13 +621,19 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
 
     std::string missing;
     if (!F.create_primitive) missing += " GameObject.CreatePrimitive";
-    if (!F.get_transform) missing += " get_transform";
+    if (!F.go_transform) missing += " GameObject.get_transform";
     if (!F.set_position) missing += " Transform.set_position";
     if (!F.set_scale) missing += " Transform.set_localScale";
     if (!F.set_euler) missing += " Transform.set_eulerAngles";
     if (!F.destroy) missing += " Object.Destroy";
     g_engineOk = missing.empty();
-    if (!g_engineOk) {
+    std::string guard = g_mapsDir + "/_guard";
+    if (g_engineOk && access(guard.c_str(), F_OK) == 0) {
+        g_engineOk = false;
+        g_status = "error";
+        g_msg = "в прошлый раз игра упала при построении карты, карты отключены (во вкладке «Карты» есть кнопка сброса)";
+        logf_("%s", g_msg.c_str());
+    } else if (!g_engineOk) {
         g_status = "error";
         g_msg = "в игре вырезаны методы Unity:" + missing;
         logf_("движок карт не запущен, нет методов:%s", missing.c_str());

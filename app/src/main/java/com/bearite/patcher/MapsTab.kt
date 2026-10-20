@@ -27,6 +27,13 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         list.removeAllViews()
         val st = store.readState()
         list.addView(statusCard(st), cardLp())
+        if (store.hasGuard()) {
+            list.addView(ui.pill("Сбросить защиту после падения", danger = true) {
+                store.clearGuard()
+                toast("Готово: при следующем запуске игры карты снова включатся")
+                onChanged()
+            }, cardLp())
+        }
 
         val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         bar.addView(ui.pill("＋ Новая карта", primary = true) {

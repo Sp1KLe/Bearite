@@ -68,13 +68,29 @@
             layout="@layout/page_log" />
     </FrameLayout>
 
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/nav"
+    <!-- плавающая панель-таблетка: активная вкладка в тёмной овальной плашке -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/bear_surface"
-        app:itemActiveIndicatorStyle="@style/Widget.Bearite.NavIndicator"
-        app:itemIconTint="@color/nav_item"
-        app:itemTextColor="@color/nav_item"
-        app:menu="@menu/bottom_nav" />
+        android:paddingStart="14dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="10dp">
+
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/nav"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_nav"
+            android:paddingTop="6dp"
+            android:paddingBottom="2dp"
+            app:elevation="0dp"
+            app:itemActiveIndicatorStyle="@style/Widget.Bearite.NavIndicator"
+            app:itemIconTint="@color/nav_item"
+            app:itemTextAppearanceActive="@style/TextAppearance.Bearite.Nav"
+            app:itemTextAppearanceInactive="@style/TextAppearance.Bearite.Nav"
+            app:itemTextColor="@color/nav_item"
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/bottom_nav" />
+    </FrameLayout>
 </LinearLayout>
