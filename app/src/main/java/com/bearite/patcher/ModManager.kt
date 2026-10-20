@@ -95,7 +95,7 @@ class ModManager(private val ctx: Context) {
             name = "Bearite",
             version = version,
             author = "Bearite",
-            description = "Встроенный мод лаунчера. Загружается вместе с игрой и сообщает в лог, что Bearite работает.",
+            description = "Встроенный мод лаунчера: движок карт. Строит в игре карты из вкладки «Карты» и применяет их на лету.",
             dir = dir,
             bundles = emptyList(),
             libs = if (lib.isFile) listOf(lib) else emptyList(),

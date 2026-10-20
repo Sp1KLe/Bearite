@@ -24,8 +24,8 @@
                 android:paddingBottom="16dp"
                 android:text="@string/mods_empty"
                 android:textAlignment="center"
-                android:textAppearance="?attr/textAppearanceBodyLarge"
-                android:textColor="?attr/colorOnSurfaceVariant" />
+                android:textSize="15sp"
+                android:textColor="@color/bear_muted" />
 
             <LinearLayout
                 android:id="@+id/mods_list"
@@ -51,5 +51,9 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:text="@string/install_mod"
-        app:icon="@drawable/ic_add" />
+        android:textColor="@color/bear_on_cream"
+        app:backgroundTint="@color/bear_cream"
+        app:icon="@drawable/ic_add"
+        app:iconTint="@color/bear_on_cream"
+        app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full" />
 </FrameLayout>

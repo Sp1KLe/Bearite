@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Bearite" parent="Theme.Material3.DayNight.NoActionBar">
+    <!-- Одна тёмная тема: «Тепло даже ночью» -->
+    <style name="Theme.Bearite" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/md_primary</item>
         <item name="colorOnPrimary">@color/md_on_primary</item>
         <item name="colorPrimaryContainer">@color/md_primary_container</item>
@@ -9,5 +10,54 @@
         <item name="colorOnSecondary">@color/md_on_secondary</item>
         <item name="colorSecondaryContainer">@color/md_secondary_container</item>
         <item name="colorOnSecondaryContainer">@color/md_on_secondary_container</item>
+        <item name="colorTertiary">@color/bear_rust</item>
+        <item name="colorOnTertiary">@color/bear_cream</item>
+        <item name="colorError">@color/bear_rust</item>
+        <item name="android:colorBackground">@color/bear_bg</item>
+        <item name="colorSurface">@color/bear_bg</item>
+        <item name="colorOnSurface">@color/bear_cream</item>
+        <item name="colorSurfaceVariant">@color/bear_surface2</item>
+        <item name="colorOnSurfaceVariant">@color/bear_muted</item>
+        <item name="colorSurfaceContainer">@color/bear_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/bear_surface2</item>
+        <item name="colorSurfaceContainerHighest">@color/bear_surface3</item>
+        <item name="colorOutline">@color/bear_dim</item>
+        <item name="colorOutlineVariant">#33D6B18D</item>
+        <item name="android:statusBarColor">@color/bear_bg</item>
+        <item name="android:navigationBarColor">@color/bear_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="materialCardViewStyle">@style/Widget.Bearite.Card</item>
+    </style>
+
+    <style name="Widget.Bearite.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/bear_surface2</item>
+        <item name="cardCornerRadius">26dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeColor">@color/bear_line</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+
+    <!-- Светлая кнопка-пилюля: главное действие -->
+    <style name="Widget.Bearite.Button.Light" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/bear_cream</item>
+        <item name="android:textColor">@color/bear_on_cream</item>
+        <item name="iconTint">@color/bear_on_cream</item>
+        <item name="cornerRadius">999dp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Тёмная кнопка-пилюля с тонкой рамкой -->
+    <style name="Widget.Bearite.Button.Dark" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/bear_surface2</item>
+        <item name="android:textColor">@color/bear_cream</item>
+        <item name="iconTint">@color/bear_cream</item>
+        <item name="strokeColor">#55D6B18D</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">999dp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Widget.Bearite.NavIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@color/bear_surface3</item>
     </style>
 </resources>

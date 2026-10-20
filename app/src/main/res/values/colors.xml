@@ -1,11 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="md_primary">#8B5000</color>
-    <color name="md_on_primary">#FFFFFF</color>
-    <color name="md_primary_container">#FFDCBE</color>
-    <color name="md_on_primary_container">#2C1600</color>
-    <color name="md_secondary">#725A42</color>
-    <color name="md_on_secondary">#FFFFFF</color>
-    <color name="md_secondary_container">#FFDDBA</color>
-    <color name="md_on_secondary_container">#291802</color>
+    <!-- Палитра из концепта: кофейный фон, сливочный текст, карамель и терракота -->
+    <color name="bear_bg">#17120F</color>
+    <color name="bear_surface">#241A15</color>
+    <color name="bear_surface2">#30221A</color>
+    <color name="bear_surface3">#493124</color>
+    <color name="bear_cream">#F2DFC5</color>
+    <color name="bear_muted">#C3AA91</color>
+    <color name="bear_dim">#8F7763</color>
+    <color name="bear_tan">#D6B18D</color>
+    <color name="bear_brown">#8D5338</color>
+    <color name="bear_rust">#B85F54</color>
+    <color name="bear_green">#B9D58A</color>
+    <color name="bear_line">#18FFFFFF</color>
+    <color name="bear_on_cream">#2B1B12</color>
+
+    <color name="md_primary">#D6B18D</color>
+    <color name="md_on_primary">#2B1B12</color>
+    <color name="md_primary_container">#4A3024</color>
+    <color name="md_on_primary_container">#F2DFC5</color>
+    <color name="md_secondary">#C3AA91</color>
+    <color name="md_on_secondary">#2B1B12</color>
+    <color name="md_secondary_container">#493124</color>
+    <color name="md_on_secondary_container">#F2DFC5</color>
 </resources>

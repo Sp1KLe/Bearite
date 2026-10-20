@@ -2,18 +2,177 @@
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:overScrollMode="never">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="20dp">
 
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.Material3.CardView.Filled"
+        <LinearLayout
+            android:id="@+id/hero_tag"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_tag"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="13dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="13dp"
+            android:paddingBottom="8dp">
+
+            <View
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:background="@drawable/bg_dot" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="9dp"
+                android:letterSpacing="0.12"
+                android:text="FAN-MADE LAUNCHER"
+                android:textColor="@color/bear_tan"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/hero_title"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:letterSpacing="-0.04"
+            android:lineSpacingMultiplier="0.92"
+            android:textColor="@color/bear_cream"
+            android:textSize="46sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:lineSpacingMultiplier="1.3"
+            android:text="Запускай Super Bear Adventure с модами и своими картами. Оригинальная игра остаётся нетронутой."
+            android:textColor="@color/bear_muted"
+            android:textSize="15sp" />
+
+        <!-- витрина: свечение, орбиты, иконка и плавающие карточки -->
+        <FrameLayout
+            android:id="@+id/hero_visual"
+            android:layout_width="match_parent"
+            android:layout_height="330dp"
+            android:layout_marginTop="8dp"
+            android:clipChildren="false">
+
+            <View
+                android:id="@+id/hero_glow"
+                android:layout_width="300dp"
+                android:layout_height="300dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_glow" />
+
+            <View
+                android:id="@+id/hero_orbit1"
+                android:layout_width="280dp"
+                android:layout_height="280dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_orbit" />
+
+            <View
+                android:id="@+id/hero_orbit2"
+                android:layout_width="210dp"
+                android:layout_height="210dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_orbit_inner" />
+
+            <ImageView
+                android:id="@+id/hero_icon"
+                android:layout_width="170dp"
+                android:layout_height="170dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:elevation="14dp"
+                android:src="@drawable/bear_hero" />
+
+            <LinearLayout
+                android:id="@+id/float1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_floatcard"
+                android:elevation="10dp"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.08"
+                    android:text="ТВОЯ ИГРА"
+                    android:textColor="@color/bear_muted"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/float1_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="Super Bear Adventure"
+                    android:textColor="@color/bear_cream"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/float2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_floatcard"
+                android:elevation="10dp"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.08"
+                    android:text="МОДЫ"
+                    android:textColor="@color/bear_muted"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/game_mods_info"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:textColor="@color/bear_cream"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_play"
+            style="@style/Widget.Bearite.Button.Light"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="8dp"
+            android:text="@string/play"
+            android:textSize="16sp"
+            app:icon="@drawable/ic_play"
+            app:iconGravity="textStart" />
+
+        <!-- состояние игры -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -40,49 +199,30 @@
                         android:id="@+id/status_title"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceTitleMedium" />
+                        android:textColor="@color/bear_cream"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/status_sub"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:textAppearance="?attr/textAppearanceBodyMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="3dp"
+                        android:textColor="@color/bear_muted"
+                        android:textSize="13sp" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_play"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginTop="16dp"
-            android:text="@string/play"
-            android:textSize="16sp"
-            app:icon="@drawable/ic_play"
-            app:iconGravity="textStart" />
-
         <TextView
-            android:id="@+id/game_mods_info"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
-
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.Material3.CardView.Outlined"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:padding="16dp"
-                android:text="@string/note_original"
-                android:textAppearance="?attr/textAppearanceBodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant" />
-        </com.google.android.material.card.MaterialCardView>
+            android:background="@drawable/bg_note"
+            android:lineSpacingMultiplier="1.25"
+            android:padding="22dp"
+            android:text="@string/note_original"
+            android:textColor="#D3B9A0"
+            android:textSize="13sp" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

@@ -3,10 +3,7 @@ package com.bearite.patcher
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.InputType
@@ -24,29 +21,32 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.SeekBar
 import android.widget.TextView
 import java.util.Locale
 
 /**
- * Меню модов внутри игры в её стиле: фиолетовая панель, вкладки «Установлено» / «Все моды»,
- * во второй — поиск и фильтр. Карточка мода: аватарка (icon.png), переключатель, раскрывающиеся
- * описание и настройки. Рисуется обычными View поверх Unity, открывается и закрывается с анимацией.
+ * Меню Bearite внутри игры в стиле лаунчера: тёмная кофейная панель, сливочный текст, карамельные акценты.
+ * Вкладки «Установлено», «Все моды» (поиск и фильтр) и «Карты» (редактор карт). Рисуется обычными View
+ * поверх Unity, открывается и закрывается с анимацией.
  */
 class GameModMenu(private val act: Activity, private val mods: ModManager) {
-    private val d = act.resources.displayMetrics.density
-    private fun dp(v: Int) = (v * d).toInt()
+    private val ui = GameUi(act)
+    private fun dp(v: Int) = ui.dp(v)
 
     /** Полноэкранная подложка; добавляется в корневой FrameLayout GameActivity. */
     val root = FrameLayout(act)
-    private val panel = LinearLayout(act)
+    private val panel = FrameLayout(act)
     private val list = LinearLayout(act)
     private val searchRow = LinearLayout(act)
     private val search = EditText(act)
     private lateinit var filterBtn: TextView
     private lateinit var tabInstalled: TextView
     private lateinit var tabAll: TextView
+    private lateinit var tabMaps: TextView
+    private lateinit var footer: TextView
+    private lateinit var scroll: ScrollView
 
+    private val maps = MapsTab(act, ui, MapStore(act))
     private val expanded = HashSet<String>()
     private var tab = TAB_INSTALLED
     private var filter = 0
@@ -60,55 +60,64 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
 
     init {
         root.visibility = View.GONE
-        root.setBackgroundColor(0xB3000000.toInt())
+        root.setBackgroundColor(0xC0100B08.toInt())
         root.isClickable = true  // касания не уходят в Unity, пока меню открыто
         root.setOnClickListener { hide() }
 
-        panel.orientation = LinearLayout.VERTICAL
-        panel.background = round(PANEL, 22)
-        panel.setPadding(dp(14), dp(14), dp(14), dp(10))
-        panel.isClickable = true
         val dm = act.resources.displayMetrics
+        panel.background = ui.round(GameUi.SURFACE, 28, GameUi.LINE_TAN)
+        panel.clipToOutline = true
+        panel.outlineProvider = ViewOutlineProvider.BACKGROUND
+        panel.isClickable = true
         root.addView(
             panel,
-            FrameLayout.LayoutParams(
-                (dm.widthPixels * 0.86f).toInt(), (dm.heightPixels * 0.86f).toInt(), Gravity.CENTER
-            )
+            FrameLayout.LayoutParams((dm.widthPixels * 0.88f).toInt(), (dm.heightPixels * 0.88f).toInt(), Gravity.CENTER)
         )
+        // мягкие пятна в углах, как на витрине концепта
+        panel.addView(blob(0x338D5338, 190), FrameLayout.LayoutParams(dp(190), dp(190), Gravity.END or Gravity.BOTTOM).apply {
+            rightMargin = -dp(55); bottomMargin = -dp(70)
+        })
+        panel.addView(blob(0x26B78B68, 150), FrameLayout.LayoutParams(dp(150), dp(150), Gravity.END or Gravity.TOP).apply {
+            rightMargin = -dp(40); topMargin = -dp(60)
+        })
 
-        // шапка: красный крестик и вкладки
-        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        val col = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(10))
+        }
+        panel.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // шапка: логотип, вкладки, закрыть
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(logo(), LinearLayout.LayoutParams(dp(40), dp(40)))
+        head.addView(ui.label("Bearite", 20f).apply { setPadding(dp(10), 0, dp(14), 0) })
+        tabInstalled = tab("Установлено", TAB_INSTALLED)
+        tabAll = tab("Все моды", TAB_ALL)
+        tabMaps = tab("Карты", TAB_MAPS)
+        for (t in listOf(tabInstalled, tabAll, tabMaps)) {
+            head.addView(t, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
+        }
         head.addView(
-            label("X", 26f, Color.WHITE).apply {
+            ui.label("✕", 20f).apply {
                 gravity = Gravity.CENTER
-                background = round(RED, 14)
+                background = ui.round(GameUi.RUST, 21)
                 setOnClickListener { hide() }
             },
-            LinearLayout.LayoutParams(dp(60), dp(52))
+            LinearLayout.LayoutParams(dp(54), dp(42)).apply { leftMargin = dp(10) }
         )
-        tabInstalled = label("Установлено", 19f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            setOnClickListener { selectTab(TAB_INSTALLED) }
-        }
-        tabAll = label("Все моды", 19f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            setOnClickListener { selectTab(TAB_ALL) }
-        }
-        head.addView(tabInstalled, tabLp())
-        head.addView(tabAll, tabLp())
-        panel.addView(head, matchWrap())
+        col.addView(head, ui.matchWrap())
 
         // поиск и фильтр: только на вкладке «Все моды»
         searchRow.orientation = LinearLayout.HORIZONTAL
         searchRow.gravity = Gravity.CENTER_VERTICAL
         search.hint = "Поиск модов"
-        search.setHintTextColor(0x99FFFFFF.toInt())
-        search.setTextColor(Color.WHITE)
-        search.textSize = 16f
+        search.setHintTextColor(GameUi.DIM)
+        search.setTextColor(GameUi.CREAM)
+        search.textSize = 15f
         search.isSingleLine = true
         search.inputType = InputType.TYPE_CLASS_TEXT
-        search.background = round(PILL, 14)
-        search.setPadding(dp(14), 0, dp(14), 0)
+        search.background = ui.round(GameUi.BG_DEEP, 20, GameUi.LINE)
+        search.setPadding(dp(16), 0, dp(16), 0)
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -117,26 +126,35 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
                 renderList()
             }
         })
-        searchRow.addView(search, LinearLayout.LayoutParams(0, dp(44), 1f))
-        filterBtn = label("Фильтр", 15f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            background = round(PILL, 14)
-            setOnClickListener { pickFilter() }
-        }
-        searchRow.addView(filterBtn, LinearLayout.LayoutParams(dp(112), dp(44)).apply { leftMargin = dp(8) })
-        panel.addView(searchRow, matchWrap().apply { topMargin = dp(10) })
+        searchRow.addView(search, LinearLayout.LayoutParams(0, dp(42), 1f))
+        filterBtn = ui.pill("Фильтр") { pickFilter() }
+        searchRow.addView(filterBtn, LinearLayout.LayoutParams(dp(112), dp(42)).apply { leftMargin = dp(8) })
+        col.addView(searchRow, ui.matchWrap().apply { topMargin = dp(10) })
 
         list.orientation = LinearLayout.VERTICAL
-        val sv = ScrollView(act).apply { overScrollMode = View.OVER_SCROLL_NEVER }
-        sv.addView(list, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        panel.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(10) })
+        scroll = ScrollView(act).apply { overScrollMode = View.OVER_SCROLL_NEVER }
+        scroll.addView(list, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(10) })
 
-        panel.addView(
-            label("Включение модов и нативный код применяются после перезапуска игры", 12f, HINT, bold = false).apply {
-                gravity = Gravity.CENTER
-                setPadding(0, dp(6), 0, 0)
-            }
-        )
+        footer = ui.label("", 11f, GameUi.DIM, bold = false).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, 0)
+        }
+        col.addView(footer)
+    }
+
+    private fun blob(color: Int, sizeDp: Int) = View(act).apply {
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+    }
+
+    private fun logo(): View = ImageView(act).apply {
+        setImageResource(R.drawable.bear_hero)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+    }
+
+    private fun tab(text: String, id: Int) = ui.label(text, 15f).apply {
+        gravity = Gravity.CENTER
+        setOnClickListener { selectTab(id) }
     }
 
     // ------------------------------------------------------------ открытие и закрытие
@@ -147,13 +165,14 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
         panel.animate().cancel()
         refresh()
         root.alpha = 0f
-        panel.scaleX = 0.82f
-        panel.scaleY = 0.82f
+        panel.scaleX = 0.84f
+        panel.scaleY = 0.84f
         panel.alpha = 0f
+        panel.translationY = dp(24).toFloat()
         root.visibility = View.VISIBLE
         root.animate().alpha(1f).setDuration(200).start()
-        panel.animate().scaleX(1f).scaleY(1f).alpha(1f)
-            .setDuration(280).setInterpolator(OvershootInterpolator(0.8f)).start()
+        panel.animate().scaleX(1f).scaleY(1f).alpha(1f).translationY(0f)
+            .setDuration(300).setInterpolator(OvershootInterpolator(0.7f)).start()
     }
 
     fun hide() {
@@ -161,9 +180,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
         closing = true
         hideKeyboard()
         panel.animate().cancel()
-        panel.animate().scaleX(0.9f).scaleY(0.9f).alpha(0f)
-            .setDuration(160).setInterpolator(AccelerateInterpolator()).start()
-        root.animate().alpha(0f).setDuration(180).withEndAction {
+        panel.animate().scaleX(0.92f).scaleY(0.92f).alpha(0f).translationY(dp(16).toFloat())
+            .setDuration(170).setInterpolator(AccelerateInterpolator()).start()
+        root.animate().alpha(0f).setDuration(190).withEndAction {
             if (closing) {
                 root.visibility = View.GONE
                 root.alpha = 1f
@@ -188,25 +207,33 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
         tab = t
         refresh()
         list.alpha = 0f
-        list.animate().alpha(1f).setDuration(200).start()
+        list.translationY = dp(10).toFloat()
+        list.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
+        scroll.scrollTo(0, 0)
     }
 
     private fun refresh() {
-        tabInstalled.background = round(if (tab == TAB_INSTALLED) TAB_ON else TAB_OFF, 14)
-        tabAll.background = round(if (tab == TAB_ALL) TAB_ON else TAB_OFF, 14)
+        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS)) {
+            val on = tab == id
+            t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
+            t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 21, if (on) 0 else GameUi.LINE)
+        }
         searchRow.visibility = if (tab == TAB_ALL) View.VISIBLE else View.GONE
         filterBtn.text = if (filter == 0) "Фильтр" else "Фильтр •"
+        footer.text = if (tab == TAB_MAPS) "Карты применяются в игре сразу, как только Bearite их увидит"
+        else "Включение модов и нативный код применяются после перезапуска игры"
         renderList()
     }
 
     private fun renderList() {
+        if (tab == TAB_MAPS) {
+            maps.render(list) { renderList() }
+            return
+        }
         list.removeAllViews()
         val all = mods.scan()
-        val shown = if (tab == TAB_INSTALLED) {
-            all.filter { it.enabled }
-        } else {
-            all.filter { matchesFilter(it) && matchesQuery(it) }
-        }
+        val shown = if (tab == TAB_INSTALLED) all.filter { it.enabled }
+        else all.filter { matchesFilter(it) && matchesQuery(it) }
         if (shown.isEmpty()) {
             val text = when {
                 tab == TAB_INSTALLED -> "Нет включённых модов. Включи их на вкладке «Все моды»."
@@ -214,7 +241,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
                 else -> "Ничего не найдено по поиску или фильтру."
             }
             list.addView(
-                label(text, 16f, HINT, bold = false).apply {
+                ui.label(text, 15f, GameUi.MUTED, bold = false).apply {
                     gravity = Gravity.CENTER
                     setPadding(dp(12), dp(40), dp(12), dp(40))
                 }
@@ -255,24 +282,17 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     private fun card(m: Mod): View {
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(CARD, 16)
+            background = ui.round(GameUi.SURFACE2, 18, GameUi.LINE)
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
-
-        val head = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(avatar(m), LinearLayout.LayoutParams(dp(52), dp(52)))
 
         val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(label(m.name, 19f, Color.WHITE))
-        texts.addView(label(meta(m), 13f, SUBTEXT, bold = false))
-        head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-            leftMargin = dp(10)
-        })
-
-        head.addView(togglePill(m.enabled, 104, 6) { on -> toggleMod(m, on) })
+        texts.addView(ui.label(m.name, 18f))
+        texts.addView(ui.label(meta(m), 12f, GameUi.MUTED, bold = false))
+        head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(10) })
+        head.addView(ui.togglePill(m.enabled, 92, 6) { on -> toggleMod(m, on) })
 
         val hasDetails = m.description.isNotBlank() || m.settings.isNotEmpty()
         if (!hasDetails) {
@@ -280,17 +300,14 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
             return box
         }
         val open = m.id in expanded
-        val chevron = label("›", 26f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            rotation = if (open) 90f else 0f
-        }
+        val chevron = ui.label("›", 26f).apply { gravity = Gravity.CENTER; rotation = if (open) 90f else 0f }
         head.addView(chevron, LinearLayout.LayoutParams(dp(30), dp(38)))
         val details = buildDetails(m)
         details.visibility = if (open) View.VISIBLE else View.GONE
         head.isClickable = true
         head.setOnClickListener { toggleDetails(m.id, details, chevron) }
         box.addView(head)
-        box.addView(details, matchWrap())
+        box.addView(details, ui.matchWrap())
         return box
     }
 
@@ -306,21 +323,18 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
         if (opening) expanded.add(id) else expanded.remove(id)
         chevron.animate().rotation(if (opening) 90f else 0f).setDuration(200).start()
         val shift = -dp(8).toFloat()
+        details.animate().cancel()
         if (opening) {
-            details.animate().cancel()
             details.visibility = View.VISIBLE
             details.alpha = 0f
             details.translationY = shift
-            details.animate().alpha(1f).translationY(0f).setDuration(220)
-                .setInterpolator(DecelerateInterpolator()).start()
+            details.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(DecelerateInterpolator()).start()
         } else {
-            details.animate().cancel()
-            details.animate().alpha(0f).translationY(shift).setDuration(160)
-                .withEndAction {
-                    details.visibility = View.GONE
-                    details.alpha = 1f
-                    details.translationY = 0f
-                }.start()
+            details.animate().alpha(0f).translationY(shift).setDuration(160).withEndAction {
+                details.visibility = View.GONE
+                details.alpha = 1f
+                details.translationY = 0f
+            }.start()
         }
     }
 
@@ -330,14 +344,12 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
             setPadding(dp(4), dp(8), dp(4), 0)
         }
         if (m.description.isNotBlank()) {
-            details.addView(
-                label(m.description, 13f, HINT, bold = false).apply { setPadding(0, 0, 0, dp(6)) }
-            )
+            details.addView(ui.label(m.description, 13f, GameUi.MUTED, bold = false).apply { setPadding(0, 0, 0, dp(6)) })
         }
         val values = ModSettings.load(m)
         for (s in m.settings) {
             val cur = values[s.id] ?: ModSettings.defaultOf(s)
-            details.addView(row(s.name, control(m, s, cur)), rowLp())
+            details.addView(ui.row(s.name, control(m, s, cur)), ui.matchWrap().apply { topMargin = dp(6) })
         }
         return details
     }
@@ -349,14 +361,14 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
             return ImageView(act).apply {
                 setImageBitmap(bmp)
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = round(iconColor(m.id), 12)
+                background = ui.round(GameUi.tileColor(m.id), 14)
                 clipToOutline = true
                 outlineProvider = ViewOutlineProvider.BACKGROUND
             }
         }
-        return label(m.name.take(1).uppercase(Locale.ROOT), 24f, Color.WHITE).apply {
+        return ui.label(m.name.take(1).uppercase(Locale.ROOT), 22f, 0xFFFFFFFF.toInt()).apply {
             gravity = Gravity.CENTER
-            background = round(iconColor(m.id), 12)
+            background = ui.round(GameUi.tileColor(m.id), 14)
         }
     }
 
@@ -385,76 +397,16 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     // ---------------------------------------------------------------- настройки
 
     private fun control(m: Mod, s: Setting, cur: Any): View = when (s.type) {
-        "bool" -> togglePill(cur as? Boolean ?: false, 250) { ModSettings.set(m, s.id, it) }
+        "bool" -> ui.togglePill(cur as? Boolean ?: false, 230) { ModSettings.set(m, s.id, it) }
         "int", "float" ->
-            if (s.control == "slider" && s.min != null && s.max != null && s.max > s.min) slider(m, s, cur)
-            else stepper(m, s, cur)
-        "choice" -> choicePill(m, s, cur.toString())
-        else -> textField(m, s, cur.toString())
-    }
-
-    private fun togglePill(initial: Boolean, widthDp: Int, marginDp: Int = 0, onChange: (Boolean) -> Unit): TextView {
-        var state = initial
-        val t = label("", 16f, Color.WHITE).apply { gravity = Gravity.CENTER }
-        fun paint() {
-            t.text = if (state) "Вкл" else "Выкл"
-            t.background = round(if (state) GREEN else OFF, 14)
-        }
-        paint()
-        t.setOnClickListener {
-            state = !state
-            paint()
-            onChange(state)
-        }
-        t.layoutParams = LinearLayout.LayoutParams(dp(widthDp), dp(38)).apply { leftMargin = dp(marginDp) }
-        return t
-    }
-
-    /** Ползунок для числа с диапазоном: значение сохраняется во время перетаскивания. */
-    private fun slider(m: Mod, s: Setting, cur: Any): View {
-        val lo = s.min ?: 0.0
-        val hi = s.max ?: 1.0
-        val isInt = s.type == "int"
-        val steps = if (isInt) (hi - lo).toInt().coerceAtLeast(1) else 1000
-        var v = ((cur as? Number)?.toDouble() ?: lo).coerceIn(lo, hi)
-        fun fmt(x: Double): String =
-            if (isInt) x.toLong().toString()
-            else String.format(Locale.US, "%.2f", x).trimEnd('0').trimEnd('.').ifEmpty { "0" }
-
-        val value = label(fmt(v), 15f, Color.WHITE).apply { gravity = Gravity.CENTER }
-        val bar = SeekBar(act).apply {
-            this.max = steps
-            progress = Math.round((v - lo) / (hi - lo) * steps).toInt()
-            progressTintList = ColorStateList.valueOf(Color.WHITE)
-            progressBackgroundTintList = ColorStateList.valueOf(0x66FFFFFF)
-            thumbTintList = ColorStateList.valueOf(0xFFFFE066.toInt())
-        }
-        var lastSave = 0L
-        fun save() = ModSettings.set(m, s.id, if (isInt) v.toLong() else v)
-        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                var x = lo + p.toDouble() / steps * (hi - lo)
-                x = if (isInt) Math.round(x).toDouble() else Math.round(x * 1000.0) / 1000.0
-                v = x
-                value.text = fmt(v)
-                if (fromUser) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastSave > 60) {  // мод видит значение уже во время движения
-                        lastSave = now
-                        save()
-                    }
+            if (s.control == "slider" && s.min != null && s.max != null && s.max > s.min) {
+                val isInt = s.type == "int"
+                ui.slider(s.min, s.max, (cur as? Number)?.toDouble() ?: s.min, if (isInt) 0 else 2, 186) {
+                    ModSettings.set(m, s.id, if (isInt) it.toLong() else it)
                 }
-            }
-
-            override fun onStartTrackingTouch(sb: SeekBar) {}
-            override fun onStopTrackingTouch(sb: SeekBar) = save()
-        })
-        return LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(bar, LinearLayout.LayoutParams(dp(186), dp(38)))
-            addView(value, LinearLayout.LayoutParams(dp(64), dp(38)))
-        }
+            } else stepper(m, s, cur)
+        "choice" -> choicePill(m, s, cur.toString())
+        else -> ui.textInput(cur.toString(), 230) { ModSettings.set(m, s.id, it) }
     }
 
     private fun stepper(m: Mod, s: Setting, cur: Any): View {
@@ -467,129 +419,49 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
             min != null && max != null && max > min -> ((max - min) / 20.0).coerceAtLeast(0.01)
             else -> 0.1
         }
-        fun fmt(x: Double): String =
-            if (isInt) x.toLong().toString()
-            else String.format(Locale.US, "%.2f", x).trimEnd('0').trimEnd('.').ifEmpty { "0" }
-
-        val value = label(fmt(v), 17f, Color.WHITE).apply { gravity = Gravity.CENTER }
+        val value = ui.label(ui.fmt(v, if (isInt) 0 else 2), 16f).apply { gravity = Gravity.CENTER }
         fun apply(nv: Double) {
             var x = nv
             if (min != null) x = x.coerceAtLeast(min)
             if (max != null) x = x.coerceAtMost(max)
             if (!isInt) x = Math.round(x * 1000.0) / 1000.0
             v = x
-            value.text = fmt(v)
+            value.text = ui.fmt(v, if (isInt) 0 else 2)
             ModSettings.set(m, s.id, if (isInt) v.toLong() else v)
         }
-        fun btn(text: String, delta: Double) = label(text, 22f, Color.WHITE).apply {
+        fun btn(text: String, delta: Double) = ui.label(text, 22f).apply {
             gravity = Gravity.CENTER
-            background = round(PILL, 12)
+            background = ui.round(GameUi.SURFACE3, 14)
             setOnClickListener { apply(v + delta) }
         }
         return LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(btn("−", -step), LinearLayout.LayoutParams(dp(70), dp(38)))
-            addView(value, LinearLayout.LayoutParams(dp(110), dp(38)))
+            addView(value, LinearLayout.LayoutParams(dp(90), dp(38)))
             addView(btn("+", step), LinearLayout.LayoutParams(dp(70), dp(38)))
         }
     }
 
     private fun choicePill(m: Mod, s: Setting, cur: String): View {
         var idx = s.options.indexOf(cur).coerceAtLeast(0)
-        val t = label(s.options.getOrElse(idx) { cur }, 16f, Color.WHITE).apply {
-            gravity = Gravity.CENTER
-            background = round(PILL, 14)
-        }
+        val t = ui.pill(s.options.getOrElse(idx) { cur }) {}
         t.setOnClickListener {
             if (s.options.isEmpty()) return@setOnClickListener
             idx = (idx + 1) % s.options.size
             t.text = s.options[idx]
             ModSettings.set(m, s.id, s.options[idx])
         }
-        t.layoutParams = LinearLayout.LayoutParams(dp(250), dp(38))
+        t.layoutParams = LinearLayout.LayoutParams(dp(230), dp(38))
         return t
     }
 
-    private fun textField(m: Mod, s: Setting, cur: String): View {
-        val e = EditText(act).apply {
-            setText(cur)
-            setTextColor(Color.WHITE)
-            setHintTextColor(0x88FFFFFF.toInt())
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            isSingleLine = true
-            background = round(PILL, 14)
-            setPadding(dp(10), 0, dp(10), 0)
-            inputType = InputType.TYPE_CLASS_TEXT
-            layoutParams = LinearLayout.LayoutParams(dp(250), dp(38))
-        }
-        e.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(x: Editable?) {
-                ModSettings.set(m, s.id, x?.toString() ?: "")
-            }
-        })
-        return e
-    }
-
-    // ------------------------------------------------------------------ рисование
-
-    private fun row(name: String, control: View): View = LinearLayout(act).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        background = round(ROW, 12)
-        setPadding(dp(14), dp(5), dp(8), dp(5))
-        addView(label(name, 18f, Color.WHITE), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        addView(control)
-    }
-
-    private fun rowLp() = matchWrap().apply { topMargin = dp(6) }
-
-    private fun cardLp() = matchWrap().apply { bottomMargin = dp(10) }
-
-    private fun matchWrap() = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-    )
-
-    private fun tabLp() = LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(10) }
-
-    private fun label(text: String, sizeSp: Float, color: Int, bold: Boolean = true) = TextView(act).apply {
-        this.text = text
-        textSize = sizeSp
-        setTextColor(color)
-        typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-    }
-
-    private fun round(color: Int, radiusDp: Int) = GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radiusDp).toFloat()
-    }
-
-    private fun iconColor(id: String): Int {
-        val palette = intArrayOf(
-            0xFFE0883A.toInt(), 0xFF3FA6C8.toInt(), 0xFFC84F7A.toInt(), 0xFF5BAA4A.toInt(), 0xFF8E6AD8.toInt()
-        )
-        return palette[(id.hashCode() and 0x7fffffff) % palette.size]
-    }
+    private fun cardLp() = ui.matchWrap().apply { bottomMargin = dp(10) }
 
     private companion object {
         const val TAB_INSTALLED = 0
         const val TAB_ALL = 1
+        const val TAB_MAPS = 2
         val FILTER_NAMES = arrayOf("Все моды", "Только включённые", "Только выключенные", "С настройками", "С нативным кодом")
-
-        const val PANEL = 0xFF6455C7.toInt()
-        const val CARD = 0xFF4B3FA8.toInt()
-        const val ROW = 0xFF3F3590.toInt()
-        const val PILL = 0xFF6A5BD0.toInt()
-        const val TAB_ON = 0xFF7D6EE3.toInt()
-        const val TAB_OFF = 0xFF4F43AE.toInt()
-        const val GREEN = 0xFF3FA866.toInt()
-        const val OFF = 0xFF8A4A5A.toInt()
-        const val RED = 0xFFD94545.toInt()
-        const val HINT = 0xFFD6D0FF.toInt()
-        const val SUBTEXT = 0xFFC9C2F5.toInt()
     }
 }

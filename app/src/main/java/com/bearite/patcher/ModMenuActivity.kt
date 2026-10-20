@@ -6,7 +6,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.color.DynamicColors
 
 /**
  * Мод-меню поверх игры (как список модов в Geode): открывается кнопкой в GameActivity.
@@ -16,7 +15,6 @@ class ModMenuActivity : AppCompatActivity() {
     private lateinit var mods: ModManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
         BLog.init(this)
         mods = ModManager(this)

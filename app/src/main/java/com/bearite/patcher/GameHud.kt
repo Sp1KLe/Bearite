@@ -39,7 +39,7 @@ class GameHud(private val act: Activity, mods: ModManager) {
                     text = b.label
                     textSize = if (b.label.length > 2) 13f else 22f
                     typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(Color.WHITE)
+                    setTextColor(GameUi.CREAM)
                     gravity = Gravity.CENTER
                     isClickable = true
                 }
@@ -54,9 +54,9 @@ class GameHud(private val act: Activity, mods: ModManager) {
 
         hint.textSize = 16f
         hint.typeface = Typeface.DEFAULT_BOLD
-        hint.setTextColor(Color.WHITE)
+        hint.setTextColor(GameUi.CREAM)
         hint.setPadding(dp(16), dp(8), dp(16), dp(8))
-        hint.background = round(0xCC2E2670.toInt(), 16)
+        hint.background = round(0xEE30221A.toInt(), 16).apply { setStroke(dp(1), GameUi.LINE_TAN) }
         hint.alpha = 0f
         root.addView(
             hint,
@@ -91,8 +91,9 @@ class GameHud(private val act: Activity, mods: ModManager) {
     private fun paint(e: Entry) {
         val on = e.button.action == "toggle" &&
             (ModSettings.load(e.mod)[e.button.setting] as? Boolean) == true
-        e.view.background = round(if (on) 0xF23FA866.toInt() else 0xCC4F43AE.toInt(), 16).apply {
-            setStroke(dp(2), 0xAAFFFFFF.toInt())
+        e.view.setTextColor(if (on) GameUi.ON_CREAM else GameUi.CREAM)
+        e.view.background = round(if (on) 0xF2D6B18D.toInt() else 0xCC30221A.toInt(), 18).apply {
+            setStroke(dp(2), if (on) 0xFFF2DFC5.toInt() else GameUi.LINE_TAN)
         }
     }
 

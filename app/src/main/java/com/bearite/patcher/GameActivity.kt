@@ -201,12 +201,12 @@ class GameActivity : Activity() {
         b.text = "Моды"
         b.textSize = 20f
         b.typeface = Typeface.DEFAULT_BOLD
-        b.setTextColor(0xFF3A2A00.toInt())
+        b.setTextColor(GameUi.ON_CREAM)
         b.gravity = Gravity.CENTER
         b.background = GradientDrawable().apply {
-            setColor(0xFFFFC21A.toInt())
-            cornerRadius = 16 * d
-            setStroke((3 * d).toInt(), 0xFFB07A00.toInt())
+            setColor(GameUi.CREAM)
+            cornerRadius = 24 * d
+            setStroke((2 * d).toInt(), GameUi.TAN)
         }
         b.setOnClickListener {
             modMenu?.show()

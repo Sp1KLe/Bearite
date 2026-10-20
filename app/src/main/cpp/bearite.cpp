@@ -292,9 +292,18 @@ static const char* api_get_string(const char* mod, const char* key, const char* 
     return buf.c_str();
 }
 
+static const char* api_data_dir() {
+    static std::string dir;
+    if (dir.empty()) {
+        size_t slash = g_cfgPath.find_last_of('/');
+        dir = slash == std::string::npos ? "." : g_cfgPath.substr(0, slash);
+    }
+    return dir.c_str();
+}
+
 static const BeariteApi g_api = {
     BEARITE_API_VERSION, api_log,      api_il2cpp_symbol, api_module_base, api_hook,
-    api_get_bool,        api_get_int,  api_get_float,     api_get_string,
+    api_get_bool,        api_get_int,  api_get_float,     api_get_string,   api_data_dir,
 };
 
 // id модов живут до конца процесса: мод вправе запомнить указатель mod_id и пользоваться им позже

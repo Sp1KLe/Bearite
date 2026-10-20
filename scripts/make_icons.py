@@ -17,12 +17,18 @@ SRC = os.path.join(ROOT, "design", "icon-source.png")
 RES = os.path.join(ROOT, "app", "src", "main", "res")
 
 src = Image.open(SRC).convert("RGB")
+# В исходнике плитка со скруглёнными углами на белом поле: вырезаем её середину без белых углов.
+# Если у картинки нет белых полей, обрезка не нужна (поставь TILE = None).
+TILE = (65, 65, 1190, 1190)  # границы плитки в пикселях
+INSET = 95                    # отступ внутрь, чтобы углы не попали в кадр
+if TILE and src.width == 1254:
+    src = src.crop((TILE[0] + INSET, TILE[1] + INSET, TILE[2] - INSET, TILE[3] - INSET))
 W = src.width
 
 # цвет фона картинки: по краю, где нет рисунка
 bg = tuple(int(v) for v in src.resize((1, 1), Image.BOX).getpixel((0, 0)))
 px = src.load()
-bg = px[int(W * 0.04), W // 2]
+bg = (244, 227, 209) if TILE else px[int(W * 0.04), W // 2]  # сливочный фон плитки
 BG_HEX = "#%02X%02X%02X" % bg
 
 
@@ -40,9 +46,10 @@ def feathered_paste(canvas, img, feather):
 
 # --- адаптивная иконка: 108 dp, видимая часть ~72 dp, безопасная зона 66 dp ---
 FG = 432  # 108 dp при xxxhdpi
-inner = int(FG * 0.70)  # рисунок целиком (с запасом) укладывается в безопасный круг
-fg = Image.new("RGB", (FG, FG), bg)
-feathered_paste(fg, src.resize((inner, inner), Image.LANCZOS), feather=int(inner * 0.06))
+inner = int(FG * 0.76)  # буква целиком в безопасной зоне, край рисунка за пределами видимой маски
+# вместо плоской заливки подложка - сильно размытая та же картинка: цвета по краям продолжаются
+fg = src.resize((FG, FG), Image.LANCZOS).filter(ImageFilter.GaussianBlur(FG * 0.06))
+feathered_paste(fg, src.resize((inner, inner), Image.LANCZOS), feather=int(inner * 0.035))
 os.makedirs(os.path.join(RES, "drawable-nodpi"), exist_ok=True)
 fg.save(os.path.join(RES, "drawable-nodpi", "ic_launcher_foreground.png"), optimize=True)
 
@@ -87,3 +94,14 @@ for dens, size in SIZES.items():
         icon.save(os.path.join(d, "ic_launcher.png" if kind == "square" else "ic_launcher_round.png"), optimize=True)
 
 print("фон", BG_HEX, "- иконки готовы")
+
+# --- большая иконка для главного экрана лаунчера (плитка со скруглёнными углами, прозрачные углы) ---
+if TILE:
+    _tile = Image.open(SRC).convert("RGB").crop(TILE)
+    _s = 512
+    _big = _tile.resize((_s * 2, _s * 2), Image.LANCZOS)
+    _m = Image.new("L", _big.size, 0)
+    ImageDraw.Draw(_m).rounded_rectangle((0, 0, _big.width - 1, _big.height - 1), radius=int(_big.width * 0.235), fill=255)
+    _big = _big.convert("RGBA")
+    _big.putalpha(_m)
+    _big.resize((_s, _s), Image.LANCZOS).save(os.path.join(RES, "drawable-nodpi", "bear_hero.png"), optimize=True)

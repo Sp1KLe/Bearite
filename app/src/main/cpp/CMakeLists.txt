@@ -19,6 +19,7 @@ target_include_directories(bearite PRIVATE "${DOBBY_DIR}/include" "${CMAKE_CURRE
 target_link_libraries(bearite dobby log)
 
 # Встроенный мод Bearite: попадает в APK, лаунчер грузит его сам
-add_library(bearite_mod SHARED bearite_mod.c)
+add_library(bearite_mod SHARED bearite_mod.cpp)
 target_include_directories(bearite_mod PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sdk")
 target_compile_options(bearite_mod PRIVATE -fvisibility=hidden)
+target_link_libraries(bearite_mod log)

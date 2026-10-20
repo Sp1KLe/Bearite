@@ -44,6 +44,10 @@ typedef struct BeariteApi {
     double (*get_float)(const char* mod_id, const char* key, double default_value);
     /* Указатель действителен до следующего вызова get_string из того же потока. */
     const char* (*get_string)(const char* mod_id, const char* key, const char* default_value);
+
+    /* Папка данных Bearite (filesDir приложения), без завершающего слеша. Моды могут хранить там свои файлы.
+     * Добавлено позже остальных полей; версия API при этом не менялась. */
+    const char* (*data_dir)(void);
 } BeariteApi;
 
 typedef void (*BeariteModInitFn)(const BeariteApi* api, const char* mod_id);

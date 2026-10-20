@@ -4,7 +4,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.net.Uri
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.view.animation.LinearInterpolator
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageView
@@ -15,7 +21,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.color.DynamicColors
 import java.io.File
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 
@@ -33,8 +38,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // на Android 12+ берём цвета обоев пользователя, иначе работает наша палитра
-        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
         BLog.init(this)
         mods = ModManager(this)
@@ -64,10 +67,52 @@ class MainActivity : AppCompatActivity() {
             refreshLog()
         }
 
+        setupHero()
+
         if (savedInstanceState == null) {
             nav.selectedItemId = R.id.nav_game  // сработает и слушатель -> showPage
         } else {
             showPage(nav.selectedItemId)
+        }
+    }
+
+    /** Заголовок в два цвета, вращающиеся орбиты и парящие карточки, как в концепте. */
+    private fun setupHero() {
+        val title = SpannableStringBuilder("Твоё новое\nприключение.")
+        title.setSpan(
+            ForegroundColorSpan(getColor(R.color.bear_tan)), 11, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        findViewById<TextView>(R.id.hero_title).text = title
+        val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Throwable) { "" }
+        findViewById<TextView>(R.id.header_chip).text = "v$ver"
+
+        fun spin(id: Int, ms: Long, reverse: Boolean) {
+            ObjectAnimator.ofFloat(findViewById<View>(id), View.ROTATION, if (reverse) 360f else 0f, if (reverse) 0f else 360f).apply {
+                duration = ms
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                start()
+            }
+        }
+        fun float(id: Int, ms: Long, delay: Long) {
+            ObjectAnimator.ofFloat(findViewById<View>(id), View.TRANSLATION_Y, 0f, -22f).apply {
+                duration = ms
+                startDelay = delay
+                repeatMode = ValueAnimator.REVERSE
+                repeatCount = ValueAnimator.INFINITE
+                start()
+            }
+        }
+        spin(R.id.hero_orbit1, 30000, false)
+        spin(R.id.hero_orbit2, 30000, true)
+        float(R.id.hero_icon, 2500, 0)
+        float(R.id.float1, 3000, 0)
+        float(R.id.float2, 3000, 1200)
+        ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_glow), View.ALPHA, 0.6f, 1f).apply {
+            duration = 2800
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
         }
     }
 
@@ -128,7 +173,9 @@ class MainActivity : AppCompatActivity() {
 
         val all = mods.scan()
         findViewById<TextView>(R.id.game_mods_info).text =
-            "Включено модов: ${all.count { it.enabled }} из ${all.size}"
+            "Включено ${all.count { it.enabled }} из ${all.size}"
+        findViewById<TextView>(R.id.float1_text).text =
+            if (game == null) "Не установлена" else "Super Bear Adventure"
     }
 
     private fun play() {
