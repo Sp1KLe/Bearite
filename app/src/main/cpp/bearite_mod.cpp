@@ -37,9 +37,10 @@ const char* ID = "bearite";
 
 // ------------------------------------------------------------------ IL2CPP
 
-uint32_t (*gch_new)(void*, int);
-void* (*gch_target)(uint32_t);
-void (*gch_free)(uint32_t);
+// в Unity 6 GC-handle - 64-битное значение (указатель), uint32 его обрезает и ломает
+uintptr_t (*gch_new)(void*, int);
+void* (*gch_target)(uintptr_t);
+void (*gch_free)(uintptr_t);
 void* (*obj_unbox)(void*);
 void* (*obj_class)(void*);
 const char* (*class_name)(void*);
@@ -171,7 +172,7 @@ struct MapSpec {
 
 /** То, что реально применено к объекту в сцене. */
 struct Live {
-    uint32_t h = 0;  // GC-handle на GameObject, 0 = объекта нет
+    uintptr_t h = 0;  // GC-handle на GameObject, 0 = объекта нет
     std::string shape;
     bool solid = true;
     int layer = 0;
@@ -279,7 +280,7 @@ void reload_maps() {
 
 // ------------------------------------------------------------- объекты в сцене
 
-void* target(uint32_t h) { return h ? gch_target(h) : nullptr; }
+void* target(uintptr_t h) { return h ? gch_target(h) : nullptr; }
 
 void destroy_live(Live& L) {
     if (!L.h) return;
@@ -546,9 +547,9 @@ template <typename T>
 T sym(const char* n) { return reinterpret_cast<T>(A->il2cpp_symbol(n)); }
 
 bool bind_il2cpp() {
-    gch_new = sym<uint32_t (*)(void*, int)>("il2cpp_gchandle_new");
-    gch_target = sym<void* (*)(uint32_t)>("il2cpp_gchandle_get_target");
-    gch_free = sym<void (*)(uint32_t)>("il2cpp_gchandle_free");
+    gch_new = sym<uintptr_t (*)(void*, int)>("il2cpp_gchandle_new");
+    gch_target = sym<void* (*)(uintptr_t)>("il2cpp_gchandle_get_target");
+    gch_free = sym<void (*)(uintptr_t)>("il2cpp_gchandle_free");
     obj_unbox = sym<void* (*)(void*)>("il2cpp_object_unbox");
     obj_class = sym<void* (*)(void*)>("il2cpp_object_get_class");
     class_name = sym<const char* (*)(void*)>("il2cpp_class_get_name");

@@ -75,7 +75,7 @@ static void blog(const char* fmt, ...) {
     X(il2cpp_object_get_class, void*, (void*))                                \
     X(il2cpp_string_new, void*, (const char*))                                \
     X(il2cpp_runtime_invoke, void*, (void*, void*, void**, void**))           \
-    X(il2cpp_gchandle_new, uint32_t, (void*, int))                            \
+    X(il2cpp_gchandle_new, uintptr_t, (void*, int))                            \
     X(il2cpp_array_length, size_t, (void*))                                   \
     X(il2cpp_object_unbox, void*, (void*))                                    \
     X(il2cpp_thread_attach, void*, (void*))                                   \
