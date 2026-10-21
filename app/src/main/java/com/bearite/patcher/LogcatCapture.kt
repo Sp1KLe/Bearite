@@ -27,7 +27,7 @@ object LogcatCapture {
             // сам краш и его backtrace (строки tag DEBUG идут сразу после)
             all.subList((crashAt - 25).coerceAtLeast(0), (crashAt + 90).coerceAtMost(all.size))
         } else {
-            all.filter { l -> interesting.any { l.contains(it) } }.takeLast(80)
+            all.filter { l -> interesting.any { l.contains(it) } || l.contains(" E ") || l.contains("dlopen") || l.contains("UnsatisfiedLink") }.takeLast(100)
         }
         if (picked.isEmpty()) listOf("(logcat пуст или недоступен)") else picked.map { it.take(240) }
     } catch (t: Throwable) {

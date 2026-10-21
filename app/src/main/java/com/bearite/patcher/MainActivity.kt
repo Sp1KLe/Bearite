@@ -133,7 +133,8 @@ class MainActivity : AppCompatActivity() {
                 BLog.e("прошлый запуск игры завершился аварийно")
                 BLog.i("--- logcat вокруг аварии (${lines.size} строк) ---\n" + lines.joinToString("\n"))
             } else {
-                BLog.i("прошлый запуск закончился без нормального выхода, но аварии в logcat нет: игру, скорее всего, закрыли из списка недавних")
+                BLog.i("прошлый запуск закончился без нормального выхода, но аварии в logcat нет: игру, скорее всего, закрыли из списка недавних или она зависла")
+                BLog.i("--- значимые строки logcat (${lines.size}) ---\n" + lines.joinToString("\n"))
             }
             runOnUiThread { refreshLog() }
         }.start()

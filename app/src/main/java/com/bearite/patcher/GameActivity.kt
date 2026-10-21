@@ -59,7 +59,7 @@ class GameActivity : Activity() {
         super.onCreate(savedInstanceState)
         gamePkg = intent.getStringExtra(EXTRA_PKG) ?: GAME_PKG
         BLog.init(this)
-        BLog.i("GameActivity: старт, pid=${Process.myPid()}")
+        BLog.i("GameActivity: старт, pid=${Process.myPid()}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
         // маркер «игра идёт»: если он остался после выхода, процесс убили аварийно
         try { File(filesDir, RUNNING_MARKER).writeText(System.currentTimeMillis().toString()) } catch (_: Throwable) {}
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
@@ -114,7 +114,18 @@ class GameActivity : Activity() {
         window.takeSurface(null)
         window.setFormat(PixelFormat.RGBX_8888)
 
+        // если создание плеера зависнет, через 8 с запишем, где именно стоит главный поток
+        val mainThread = Thread.currentThread()
+        val playerReady = java.util.concurrent.atomic.AtomicBoolean(false)
+        Thread {
+            try { Thread.sleep(8000) } catch (_: InterruptedException) { return@Thread }
+            if (!playerReady.get()) {
+                BLog.e("плеер не создан за 8 с, главный поток стоит здесь:\n" +
+                    mainThread.stackTrace.take(40).joinToString("\n") { "    at $it" })
+            }
+        }.apply { isDaemon = true }.start()
         val p = createPlayer(loader)
+        playerReady.set(true)
         player = p
         val view = playerView(p)
 
