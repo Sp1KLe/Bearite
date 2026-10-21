@@ -56,6 +56,22 @@ jobs:
           fi
           exit "$rc"
 
+      # расшифровка адресов из аварии: положи смещения (hex, по одному в строке) в scripts/symbolize.txt
+      - name: Symbolize crash offsets
+        if: always()
+        run: |
+          NDK="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for lib in $(find app/build -name libbearite_mod.so); do
+            echo "::notice::lib $lib size=$(stat -c %s "$lib") buildid=$("$TC/llvm-readelf" -n "$lib" | grep -o 'Build ID: .*')"
+            [ -f scripts/symbolize.txt ] || continue
+            while read -r off; do
+              [ -z "$off" ] && continue
+              r=$("$TC/llvm-addr2line" -f -C -i -e "$lib" "0x$off" | tr '\n' ' ')
+              echo "::notice::$(basename "$(dirname "$lib")") $off => $r"
+            done < scripts/symbolize.txt
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: Bearite-debug
