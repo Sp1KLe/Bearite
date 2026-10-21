@@ -64,11 +64,25 @@ void logf_(const char* fmt, ...) {
 }
 
 int g_exc_logged = 0;
+bool g_in_sync = false;       // идёт построение объектов: каждый вызов пишем в _guard
+std::string g_guardPath;      // maps/_guard
+std::string g_ctx;            // "карта/объект" для хлебных крошек
+
+/** Пишет, что именно вызываем сейчас. Если игра упадёт, файл покажет последний шаг. */
+void breadcrumb(void* m, void* obj) {
+    if (!g_in_sync || g_guardPath.empty() || !m) return;
+    FILE* f = fopen(g_guardPath.c_str(), "w");
+    if (!f) return;
+    void* k = obj ? obj_class(obj) : nullptr;
+    fprintf(f, "%s::%s | %s", k ? class_name(k) : "static", method_name(m), g_ctx.c_str());
+    fclose(f);
+}
 
 /** Вызов управляемого метода. ok=false при исключении (первые несколько пишем в лог). */
 void* inv(void* m, void* obj, void** args = nullptr, bool* ok = nullptr) {
     void* exc = nullptr;
     void* r = nullptr;
+    breadcrumb(m, obj);
     if (m) r = bearite_il2.runtime_invoke(m, obj, args, &exc);
     if (ok) *ok = m != nullptr && exc == nullptr;
     if (exc && g_exc_logged < 12) {
@@ -348,6 +362,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
 
 /** Приводит объекты в сцене в соответствие с картами. */
 void sync_all() {
+    g_in_sync = true;
     // карты, которых больше нет в файлах
     for (auto it = g_live.begin(); it != g_live.end();) {
         bool found = false;
@@ -371,6 +386,7 @@ void sync_all() {
             const Obj& o = m.objs[i];
             Live& L = live[i];
             if (L.h && (L.shape != o.shape || L.solid != o.solid || L.layer != m.layer)) destroy_live(L);
+            g_ctx = m.id + " объект " + std::to_string(i + 1);
             std::string full = "Bearite/" + m.name + "/" + (o.name.empty() ? std::to_string(i + 1) : o.name);
             if (!L.h && !create_live(L, o, m, full)) {
                 g_status = "error";
@@ -472,6 +488,7 @@ void update() {
         std::string guard = g_mapsDir + "/_guard";
         if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("sync", gf); fclose(gf); }
         sync_all();
+        g_in_sync = false;
         unlink(guard.c_str());
     }
     if (slow) {
@@ -609,6 +626,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     api->log(mod_id, msg);
 
     g_mapsDir = std::string(api->data_dir()) + "/maps";
+    g_guardPath = g_mapsDir + "/_guard";
     mkdir(g_mapsDir.c_str(), 0775);
 
     if (!bearite_il2cpp_init(api) || !bind_il2cpp()) {

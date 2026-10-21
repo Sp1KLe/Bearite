@@ -28,6 +28,10 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         val st = store.readState()
         list.addView(statusCard(st), cardLp())
         if (store.hasGuard()) {
+            val info = store.guardInfo()
+            if (info.isNotBlank() && info != "sync") list.addView(
+                ui.label("Игра упала на вызове: $info", 12f, GameUi.RUST, bold = false).apply { setPadding(ui.dp(4), 0, ui.dp(4), ui.dp(6)) }
+            )
             list.addView(ui.pill("Сбросить защиту после падения", danger = true) {
                 store.clearGuard()
                 toast("Готово: при следующем запуске игры карты снова включатся")
