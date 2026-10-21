@@ -54,7 +54,6 @@ class GameActivity : Activity() {
     private var modButton: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
-    private var gameApp: android.app.Application? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,6 +79,14 @@ class GameActivity : Activity() {
         val info = packageManager.getApplicationInfo(gamePkg, 0)
         val ctx = createPackageContext(gamePkg, Context.CONTEXT_IGNORE_SECURITY)
         gameCtx = ctx
+
+        if (info.className?.startsWith("com.pairip.") == true) {
+            BLog.e("эта сборка игры защищена проверкой лицензии Google Play (${info.className}), запуск через Bearite невозможен")
+            throw IllegalStateException(
+                "Эта сборка игры (из Google Play) защищена проверкой лицензии: она работает только под " +
+                "своим пакетом и закрывается при запуске через Bearite. Нужна сборка игры без этой защиты " +
+                "(например, та, что стоит на телефоне, где Bearite уже работает).")
+        }
 
         val abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: Build.SUPPORTED_32_BIT_ABIS.first()
         val gameApks = ArrayList<String>()
@@ -116,7 +123,6 @@ class GameActivity : Activity() {
         window.setFormat(PixelFormat.RGBX_8888)
 
         diagnoseGame(info, gameApks)
-        startGameApplication(loader, info)
 
         // если создание плеера зависнет, через 8 с запишем, где именно стоит главный поток
         val mainThread = Thread.currentThread()
@@ -164,28 +170,6 @@ class GameActivity : Activity() {
             BLog.i("lib в ${dir?.path}: " + (libs?.joinToString { it.name + " " + it.length() / 1024 + "K" } ?: "нет"))
         } catch (t: Throwable) {
             BLog.e("диагностика игры не удалась", t)
-        }
-    }
-
-    /**
-     * Если у игры свой класс Application (например, защита Google Play или SDK), он обычно готовит
-     * процесс ещё до загрузки libunity. Лаунчер его не создаёт, поэтому запускаем сами.
-     */
-    private fun startGameApplication(loader: ClassLoader, info: ApplicationInfo) {
-        val name = info.className
-        if (name.isNullOrEmpty() || name == "android.app.Application") return
-        try {
-            val cls = loader.loadClass(name)
-            val app = cls.getDeclaredConstructor().newInstance() as android.app.Application
-            val attach = android.content.ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
-            attach.isAccessible = true
-            attach.invoke(app, this)
-            BLog.i("Application игры создан: $name")
-            gameApp = app
-            app.onCreate()
-            BLog.i("Application игры: onCreate выполнен")
-        } catch (t: Throwable) {
-            BLog.e("Application игры ($name) не запустился, продолжаю без него", t)
         }
     }
 
