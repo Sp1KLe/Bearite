@@ -14,6 +14,8 @@ data class MapObj(
     var solid: Boolean = true,
     var tex: String = "",        // id своей текстуры (maps/textures/<id>.png), пусто = без текстуры
     var tu: Double = 1.0, var tv: Double = 1.0,  // повторы текстуры по осям
+    var dest: String = "",       // круг телепорта: "" = точка этой карты, "@exit" = выход из мира, иначе id карты
+    var dx: Double = 0.0, var dy: Double = 1.0, var dz: Double = 0.0,  // точка назначения в этой карте
 )
 
 data class GameMap(
@@ -167,8 +169,19 @@ class MapStore(private val dir: File) {
     }
 
     companion object {
-        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane")
-        val SHAPE_NAMES = mapOf("cube" to "Куб", "sphere" to "Шар", "cylinder" to "Цилиндр", "capsule" to "Капсула", "plane" to "Плоскость")
+        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal")
+        val SHAPE_NAMES = mapOf("cube" to "Куб", "sphere" to "Шар", "cylinder" to "Цилиндр", "capsule" to "Капсула",
+            "plane" to "Плоскость", "portal" to "Круг телепорта")
+
+        /** Новый объект с подходящими размерами и цветом для формы. */
+        fun newObj(shape: String): MapObj {
+            val o = MapObj(SHAPE_NAMES[shape] ?: "Блок", shape)
+            when (shape) {
+                "plane" -> { o.sx = 2.0; o.sz = 2.0 }
+                "portal" -> { o.sx = 3.0; o.sy = 0.1; o.sz = 3.0; o.color = 0x6FE0D0; o.solid = false }
+            }
+            return o
+        }
 
         /** Цвета на выбор в редакторе (RGB). */
         val PALETTE = intArrayOf(
@@ -200,7 +213,8 @@ class MapStore(private val dir: File) {
                 for (v in doubleArrayOf(o.x, o.y, o.z, o.sx, o.sy, o.sz, o.rx, o.ry, o.rz)) append('\t').append(f(v))
                 append('\t').append(String.format("%06X", o.color and 0xFFFFFF))
                 append('\t').append(if (o.solid) 1 else 0)
-                append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv)).append('\n')
+                append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv))
+                append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\n')
             }
         }
 
@@ -221,6 +235,9 @@ class MapStore(private val dir: File) {
                             color = p[12].toIntOrNull(16) ?: 0x8D5338, solid = p[13] == "1",
                             tex = p.getOrNull(14) ?: "",
                             tu = p.getOrNull(15)?.toDoubleOrNull() ?: 1.0, tv = p.getOrNull(16)?.toDoubleOrNull() ?: 1.0,
+                            dest = p.getOrNull(17) ?: "",
+                            dx = p.getOrNull(18)?.toDoubleOrNull() ?: 0.0, dy = p.getOrNull(19)?.toDoubleOrNull() ?: 1.0,
+                            dz = p.getOrNull(20)?.toDoubleOrNull() ?: 0.0,
                         )
                     )
                     continue

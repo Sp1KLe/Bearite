@@ -23,8 +23,8 @@ object PrimMeshes {
 
     private val cache = HashMap<String, Mesh>()
 
-    fun get(shape: String): Mesh = cache.getOrPut(shape) {
-        when (shape) {
+    fun get(shape: String): Mesh = cache.getOrPut(if (shape == "portal") "cylinder" else shape) {
+        when (if (shape == "portal") "cylinder" else shape) {
             "sphere" -> {
                 val l = ArrayList<Pair<Float, Float>>()
                 for (i in 0..8) { val a = Math.PI / 2 - Math.PI * i / 8; l.add((0.5 * sin(a)).toFloat() to (0.5 * cos(a)).toFloat()) }
@@ -234,6 +234,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         drawObjects(c)
         drawCameraMarker(c)
         drawSpawn(c)
+        drawPortalLink(c)
         drawGizmo(c)
         drawHud(c)
     }
@@ -330,7 +331,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         line.color = 0xFFFFA52F.toInt(); line.strokeWidth = 2f * d
         val hx = if (o.shape == "plane") 5f * o.sx.toFloat() else 0.5f * o.sx.toFloat()
         val hz = if (o.shape == "plane") 5f * o.sz.toFloat() else 0.5f * o.sz.toFloat()
-        val hy = when (o.shape) { "plane" -> 0f; "cylinder", "capsule" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
+        val hy = when (o.shape) { "plane" -> 0f; "cylinder", "capsule", "portal" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
         val cs = Array(8) { i ->
             val vx = (if (i and 1 == 0) -hx else hx); val vy = (if (i and 2 == 0) -hy else hy); val vz = (if (i and 4 == 0) -hz else hz)
             floatArrayOf(
@@ -341,6 +342,27 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         }
         for (i in 0 until 8) for (bit in intArrayOf(1, 2, 4)) {
             if (i and bit == 0) { val j = i or bit; seg(c, cs[i][0], cs[i][1], cs[i][2], cs[j][0], cs[j][1], cs[j][2]) }
+        }
+    }
+
+    /** У выбранного круга телепорта рисуем линию к точке назначения. */
+    private fun drawPortalLink(c: Canvas) {
+        val o = map.objects.getOrNull(selected) ?: return
+        if (o.shape != "portal") return
+        val p = FloatArray(3)
+        when (o.dest) {
+            "" -> {
+                line.color = 0xFF6FE0D0.toInt(); line.strokeWidth = 2f * d
+                seg(c, o.x.toFloat(), o.y.toFloat(), o.z.toFloat(), o.dx.toFloat(), o.dy.toFloat(), o.dz.toFloat())
+                if (proj(o.dx.toFloat(), o.dy.toFloat(), o.dz.toFloat(), p)) {
+                    fill.color = 0xFF6FE0D0.toInt(); c.drawCircle(p[0], p[1], 6f * d, fill)
+                    text.color = 0xFF6FE0D0.toInt(); c.drawText("куда", p[0] + 9f * d, p[1] + 4f * d, text)
+                }
+            }
+            else -> if (proj(o.x.toFloat(), o.y.toFloat(), o.z.toFloat(), p)) {
+                text.color = 0xFF6FE0D0.toInt()
+                c.drawText(if (o.dest == "@exit") "→ в обычный мир" else "→ другая карта", p[0] + 12f * d, p[1] - 12f * d, text)
+            }
         }
     }
 

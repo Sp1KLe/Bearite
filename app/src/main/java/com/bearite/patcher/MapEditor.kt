@@ -241,7 +241,7 @@ class MapEditor(
         if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, GameUi.DIM, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
     }
 
-    private fun glyph(shape: String) = when (shape) { "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; else -> "■" }
+    private fun glyph(shape: String) = when (shape) { "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; else -> "■" }
 
     private fun treeRow(g: String, name: String, on: Boolean, color: Int, click: () -> Unit): View {
         val r = LinearLayout(act).apply {
@@ -297,11 +297,11 @@ class MapEditor(
     }
 
     private fun addObject(shape: String) {
-        val o = MapObj(MapStore.SHAPE_NAMES[shape] ?: "Блок", shape)
-        if (shape == "plane") { o.sx = 2.0; o.sz = 2.0 }
+        val o = MapStore.newObj(shape)
         val sp = vp.spawnPoint()
         o.x = sp[0].toDouble(); o.z = sp[2].toDouble()
-        o.y = when (shape) { "plane" -> 0.0; "cylinder", "capsule" -> o.sy; else -> 0.5 * o.sy }
+        o.y = when (shape) { "plane" -> 0.0; "cylinder", "capsule", "portal" -> o.sy; else -> 0.5 * o.sy }
+        if (shape == "portal") { o.dx = o.x + 6.0; o.dy = 1.0; o.dz = o.z }
         map.objects.add(o)
         commit()
         select(map.objects.size - 1)
@@ -465,12 +465,48 @@ class MapEditor(
         })
         inspector.addView(hex)
 
+        if (o.shape == "portal") portalSection(o)
         textureSection(o)
 
         inspector.addView(ui.pill("К камере игры", sizeSp = 13f) { toGameCamera() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(12) })
         inspector.addView(ui.pill("Удалить объект", danger = true, sizeSp = 13f) { deleteSelected() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(6) })
+    }
+
+    // ------------------------------------------------------------- круг телепорта
+
+    private fun destTitle(o: MapObj): String = when (o.dest) {
+        "" -> "В точку на этой карте"
+        "@exit" -> "Выход в обычный мир"
+        else -> store.list().firstOrNull { it.id == o.dest }?.let { "На карту «${it.name}»" } ?: "Карта не найдена"
+    }
+
+    private fun portalSection(o: MapObj) {
+        section("Телепорт")
+        inspector.addView(ui.pill(destTitle(o), sizeSp = 13f) {
+            val others = store.list().filter { it.id != map.id }
+            val items = listOf("В точку на этой карте", "Выход в обычный мир") +
+                others.map { "На карту «${it.name}»" + if (it.world) " (мир)" else "" }
+            ui.choose("Куда ведёт круг", items, when (o.dest) { "" -> 0; "@exit" -> 1; else -> others.indexOfFirst { it.id == o.dest }.let { i -> if (i < 0) -1 else i + 2 } }) { i ->
+                o.dest = when (i) { 0 -> ""; 1 -> "@exit"; else -> others[i - 2].id }
+                commit(); showInspector(); vp.invalidate()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(4) })
+        val hint = when (o.dest) {
+            "" -> "Игрок встаёт в круг и переносится в точку ниже. Круг срабатывает, когда в него заходят."
+            "@exit" -> "Выход из отдельного мира: игрок возвращается туда, где вошёл в мир."
+            else -> "Игрок переносится на точку появления выбранной карты. Если карта это отдельный мир, мир включается сам."
+        }
+        inspector.addView(ui.label(hint, 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        if (o.dest.isEmpty()) {
+            vec3("Точка назначения", arrayOf({ o.dx }, { o.dy }, { o.dz }), arrayOf({ v -> o.dx = v }, { v -> o.dy = v }, { v -> o.dz = v }), "dest")
+            inspector.addView(ui.pill("Точка в центр обзора", sizeSp = 12f) {
+                val sp = vp.spawnPoint()
+                o.dx = sp[0].toDouble(); o.dz = sp[2].toDouble(); o.dy = 1.0
+                commit(); showInspector(); vp.invalidate()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
+        }
     }
 
     // ------------------------------------------------------------------- текстуры

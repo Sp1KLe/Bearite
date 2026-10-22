@@ -161,8 +161,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         val shapes = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         for ((i, s) in MapStore.SHAPES.withIndex()) {
             shapes.addView(ui.pill("＋ " + MapStore.SHAPE_NAMES[s], sizeSp = 13f) {
-                val o = MapObj(MapStore.SHAPE_NAMES[s] ?: "Блок", s)
-                if (s == "plane") { o.sx = 4.0; o.sz = 4.0 }
+                val o = MapStore.newObj(s)
                 putAtCamera(m, o)
                 m.objects.add(o)
                 save()

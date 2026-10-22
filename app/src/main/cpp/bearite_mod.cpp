@@ -182,6 +182,9 @@ struct Fns {
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc;
+    // диагностика и запасной путь для текстур
+    void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
+        *rend_set_material, *mat_class, *mat_ctor_shader, *rend_bounds;
 } F{};
 
 struct V3 { float x, y, z; };
@@ -198,6 +201,8 @@ struct Obj {
     bool solid = true;
     std::string tex;
     float tile[2] = {1, 1};
+    std::string dest;       // круг телепорта: "" = точка этой карты, "@exit" = выход из мира, иначе id карты
+    float dp[3] = {0, 0, 0};
 };
 
 struct MapSpec {
@@ -237,6 +242,13 @@ std::string g_msg;
 int g_liveCount = 0;
 bool g_engineOk = false;
 std::string g_worldWant;  // id карты-мира, которая должна быть активна ("" = нет)
+std::string g_worldFile;  // мир, включённый переключателем в файлах
+std::string g_worldRt;    // выбор круга телепорта: "" нет, "@exit" выйти из мира, иначе id мира
+
+void refresh_world_want() {
+    std::string w = g_worldRt == "@exit" ? "" : !g_worldRt.empty() ? g_worldRt : g_worldFile;
+    if (w != g_worldWant) { g_worldWant = w; g_dirty = true; }
+}
 
 float num(const std::string& s, float d) {
     char* e = nullptr;
@@ -277,6 +289,8 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             o.solid = p[13] == "1";
             if (p.size() > 14) o.tex = p[14];
             if (p.size() > 16) { o.tile[0] = num(p[15], 1); o.tile[1] = num(p[16], 1); }
+            if (p.size() > 17) o.dest = p[17];
+            if (p.size() > 20) for (int i = 0; i < 3; ++i) o.dp[i] = num(p[18 + i], 0);
             m.objs.push_back(o);
             continue;
         }
@@ -328,8 +342,10 @@ void reload_maps() {
         if (parse_map(n.substr(0, n.size() - 4), g_mapsDir + "/" + n, m)) specs.push_back(std::move(m));
     }
     g_specs = std::move(specs);
-    g_worldWant.clear();
-    for (const auto& m : g_specs) if (m.world && m.enabled) { g_worldWant = m.id; break; }
+    g_worldFile.clear();
+    for (const auto& m : g_specs) if (m.world && m.enabled) { g_worldFile = m.id; break; }
+    g_worldRt.clear();  // карты правили: выбор круга телепорта сбрасывается
+    refresh_world_want();
     g_dirty = true;
 }
 
@@ -472,6 +488,56 @@ void drop_textures() {
     g_tex.clear();
 }
 
+bool mat_has(void* mat, const char* name) {
+    if (!F.mat_has_prop) return false;
+    void* a[1] = {bearite_il2.string_new(name)};
+    void* r = inv(F.mat_has_prop, mat, a);
+    return r && *(const uint8_t*)obj_unbox(r) != 0;
+}
+
+void mat_set_tex_named(void* mat, const char* name, void* tx, const Obj& o) {
+    if (!F.mat_set_tex) return;
+    void* a[2] = {bearite_il2.string_new(name), tx};
+    inv(F.mat_set_tex, mat, a);
+    if (tx && F.mat_set_scale) {
+        struct { float x, y; } v{o.tile[0], o.tile[1]};
+        void* c[2] = {bearite_il2.string_new(name), &v};
+        inv(F.mat_set_scale, mat, c);
+    }
+}
+
+std::string shader_name(void* mat) {
+    void* sh = F.mat_get_shader ? inv(F.mat_get_shader, mat) : nullptr;
+    void* nm = sh && F.get_name ? inv(F.get_name, sh) : nullptr;
+    return nm ? utf8(nm) : "?";
+}
+
+/** У материала примитива нет слота под текстуру: делаем свой материал на любом подходящем шейдере игры. */
+void* texture_material(void* rend, const Obj& o) {
+    static const char* names[] = {"Universal Render Pipeline/Lit", "Universal Render Pipeline/Simple Lit", "Universal Render Pipeline/Unlit",
+                                  "Standard", "Unlit/Texture", "Mobile/Diffuse", "Legacy Shaders/Diffuse", "Sprites/Default"};
+    if (!F.shader_find || !F.mat_class || !F.mat_ctor_shader || !F.rend_set_material || !obj_new) return nullptr;
+    for (const char* n : names) {
+        void* a[1] = {bearite_il2.string_new(n)};
+        void* sh = inv(F.shader_find, nullptr, a);
+        if (!sh) continue;
+        void* m = obj_new(F.mat_class);
+        bool ok = false;
+        void* b[1] = {sh};
+        inv(F.mat_ctor_shader, m, b, &ok);
+        if (!ok || !(mat_has(m, "_BaseMap") || mat_has(m, "_MainTex"))) continue;
+        Col c{((o.color >> 16) & 255) / 255.f, ((o.color >> 8) & 255) / 255.f, (o.color & 255) / 255.f, 1.f};
+        void* d[1] = {&c};
+        if (F.set_color) inv(F.set_color, m, d);
+        void* e[1] = {m};
+        inv(F.rend_set_material, rend, e);
+        logf_("материал с текстурой: свой на шейдере «%s»", n);
+        return m;
+    }
+    logf_("не нашёл шейдер с текстурой среди известных, текстуры на этом материале не видны");
+    return nullptr;
+}
+
 void apply_texture(Live& L, void* go, const Obj& o) {
     L.tex = o.tex;
     L.tile[0] = o.tile[0];
@@ -483,6 +549,16 @@ void apply_texture(Live& L, void* go, const Obj& o) {
     if (!mat) return;
     void* tx = o.tex.empty() ? nullptr : get_texture(o.tex);
     if (!o.tex.empty() && !tx) return;  // не загрузилась: повторять при каждом тике не будем
+    bool hb = mat_has(mat, "_BaseMap"), hm = mat_has(mat, "_MainTex");
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        logf_("материал примитива: шейдер «%s», _BaseMap=%d _MainTex=%d", shader_name(mat).c_str(), hb, hm);
+    }
+    if (tx && !hb && !hm) {
+        void* nm = texture_material(rend, o);
+        if (nm) { mat = nm; hb = mat_has(mat, "_BaseMap"); hm = mat_has(mat, "_MainTex"); }
+    }
     void* a[1] = {tx};
     inv(F.set_main_tex, mat, a);
     if (tx && F.set_main_tex_scale) {
@@ -490,13 +566,22 @@ void apply_texture(Live& L, void* go, const Obj& o) {
         void* c[1] = {&v};
         inv(F.set_main_tex_scale, mat, c);
     }
+    // на всякий случай задаём слоты явно: mainTexture указывает на один из них, но не у всех шейдеров
+    if (hb) mat_set_tex_named(mat, "_BaseMap", tx, o);
+    if (hm) mat_set_tex_named(mat, "_MainTex", tx, o);
+    static int checks = 0;
+    if (tx && checks < 3 && F.mat_get_main_tex) {
+        ++checks;
+        void* back = inv(F.mat_get_main_tex, mat);
+        logf_("текстура %s на объекте: mainTexture после установки %s (_BaseMap=%d _MainTex=%d)", o.tex.c_str(), back ? "задана" : "ПУСТО", hb, hm);
+    }
 }
 
 int primitive_id(const std::string& s) {
     // UnityEngine.PrimitiveType: Sphere=0, Capsule=1, Cylinder=2, Cube=3, Plane=4, Quad=5
     if (s == "sphere") return 0;
     if (s == "capsule") return 1;
-    if (s == "cylinder") return 2;
+    if (s == "cylinder" || s == "portal") return 2;  // круг телепорта: плоский цилиндр
     if (s == "plane") return 4;
     return 3;
 }
@@ -510,7 +595,7 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
     L.h = gch_new(go, 0);
     ++g_liveCount;
     L.shape = o.shape;
-    L.solid = o.solid;
+    L.solid = o.solid && o.shape != "portal";
     L.layer = m.layer;
     L.name = "";
     L.pos[0] = 1e9f; L.rot[0] = 1e9f; L.size[0] = 0;
@@ -519,7 +604,7 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
     L.tile[0] = L.tile[1] = 0;
     L.tid = 0;
     if (F.set_layer) { int ly = m.layer; void* b[1] = {&ly}; inv(F.set_layer, go, b); }
-    if (!o.solid && F.type_collider && F.get_component && F.collider_enabled) {
+    if ((!o.solid || o.shape == "portal") && F.type_collider && F.get_component && F.collider_enabled) {
         void* b[1] = {F.type_collider};
         void* col = inv(F.get_component, go, b);
         if (col) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
@@ -573,8 +658,8 @@ void sync_all() {
     }
     for (const auto& m : g_specs) {
         auto& live = g_live[m.id];
-        bool want = m.enabled && g_engineOk &&
-                    (m.world ? m.id == g_worldWant : (g_worldWant.empty() && (m.scene.empty() || m.scene == g_scene)));
+        bool want = g_engineOk &&
+                    (m.world ? m.id == g_worldWant : (m.enabled && g_worldWant.empty() && (m.scene.empty() || m.scene == g_scene)));
         if (!want) {
             for (auto& L : live) destroy_live(L);
             live.clear();
@@ -585,7 +670,7 @@ void sync_all() {
         for (size_t i = 0; i < m.objs.size(); ++i) {
             const Obj& o = m.objs[i];
             Live& L = live[i];
-            if (L.h && (L.shape != o.shape || L.solid != o.solid || L.layer != m.layer)) destroy_live(L);
+            if (L.h && (L.shape != o.shape || L.solid != (o.solid && o.shape != "portal") || L.layer != m.layer)) destroy_live(L);
             g_ctx = m.id + " объект " + std::to_string(i + 1);
             std::string full = "Bearite/" + m.name + "/" + (o.name.empty() ? std::to_string(i + 1) : o.name);
             if (!L.h && !create_live(L, o, m, full)) {
@@ -613,7 +698,11 @@ struct World {
     float camBg[4] = {0, 0, 0, 1};
     long long lastScan = 0, lastTry = 0;
     int tries = 0;
+    float here[3] = {0, 0, 0};  // где игрок сейчас: рядом с ним ничего не прячем (его модель может быть не в иерархии игрока)
+    int nearKept = 0;
 } W;
+bool g_hasPending = false;  // круг телепорта задал точку входа в мир
+V3 g_pending{0, 0, 0};
 
 std::unordered_set<int> g_ownIds;
 
@@ -636,6 +725,12 @@ bool is_protected(void* tr) {
 /** Выключает все рендереры и коллайдеры сцены, кроме игрока и объектов Bearite. Возвращает, сколько выключено. */
 int hide_world() {
     g_ownIds.clear();
+    W.nearKept = 0;
+    if (W.active && W.player) {  // повторный обход: берём текущее место игрока
+        void* ptr = target(W.player);
+        void* pos = ptr ? inv(F.get_position, ptr) : nullptr;
+        if (pos) memcpy(W.here, obj_unbox(pos), sizeof W.here);
+    }
     for (auto& kv : g_live) for (auto& L : kv.second) if (L.tid) g_ownIds.insert(L.tid);
     int n = 0;
     for (int pass = 0; pass < 2; ++pass) {
@@ -655,6 +750,14 @@ int hide_world() {
             if (!tr) continue;
             if (g_ownIds.count(inst_id(tr))) continue;
             if (is_protected(tr)) continue;
+            if (pass == 0 && F.rend_bounds) {  // небольшие рендереры рядом с игроком (его модель) оставляем
+                void* bb = inv(F.rend_bounds, o);
+                if (bb) {
+                    const float* f = (const float*)obj_unbox(bb);  // центр xyz, размеры xyz (половина)
+                    float dx = f[0] - W.here[0], dy = f[1] - W.here[1], dz = f[2] - W.here[2];
+                    if (dx * dx + dy * dy + dz * dz < 12.f && f[3] < 3.f && f[4] < 3.f && f[5] < 3.f) { ++W.nearKept; continue; }
+                }
+            }
             void* en = inv(getEn, o);
             if (!en || !*(const uint8_t*)obj_unbox(en)) continue;
             uint8_t off = 0;
@@ -765,18 +868,26 @@ bool world_enter(const MapSpec& m) {
     for (int i = 0; i < 12 && F.get_parent; ++i) { void* p2 = inv(F.get_parent, root); if (!p2) break; root = p2; }
     W.protect[2] = root != tr && few(root) ? inst_id(root) : 0;
     if (void* pos = inv(F.get_position, tr)) memcpy(W.saved, obj_unbox(pos), sizeof W.saved);
+    memcpy(W.here, W.saved, sizeof W.here);
+    {
+        void* nm = F.get_name ? inv(F.get_name, tr) : nullptr;
+        logf_("мир «%s»: игрок найден: «%s» (защита: сам=%d родитель=%d корень=%d)", m.name.c_str(), nm ? utf8(nm).c_str() : "?",
+              W.protect[0] != 0, W.protect[1] != 0, W.protect[2] != 0);
+    }
 
     g_crumbs = false;
     int n = hide_world();
     g_crumbs = true;
     set_sky(m.sky);
     V3 sp{m.off[0] + m.scale * m.spawn[0], m.off[1] + m.scale * m.spawn[1], m.off[2] + m.scale * m.spawn[2]};
+    if (g_hasPending) { sp = g_pending; g_hasPending = false; }
     teleport(tr, sp);
+    memcpy(W.here, &sp, sizeof W.here);
     W.active = true;
     W.id = m.id;
     W.tries = 0;
     W.lastScan = now_ms_fwd();
-    logf_("мир «%s»: вход, скрыто объектов %d, игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, sp.x, sp.y, sp.z);
+    logf_("мир «%s»: вход, скрыто объектов %d (рядом с игроком оставлено %d), игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, W.nearKept, sp.x, sp.y, sp.z);
     return true;
 }
 
@@ -805,7 +916,7 @@ void world_exit(bool restore) {
 
 void world_update(long long now) {
     const MapSpec* want = nullptr;
-    for (const auto& m : g_specs) if (m.id == g_worldWant && m.enabled && g_engineOk) { want = &m; break; }
+    for (const auto& m : g_specs) if (m.world && m.id == g_worldWant && g_engineOk) { want = &m; break; }
     if (W.active && (!want || want->id != W.id)) world_exit(true);
     if (!want) return;
     if (!W.active) {
@@ -820,6 +931,88 @@ void world_update(long long now) {
         g_crumbs = false;
         hide_world();  // то, что игра успела создать после входа (враги, эффекты)
         g_crumbs = true;
+    }
+}
+
+// ------------------------------------------------------------ круги телепорта
+
+uintptr_t g_player = 0;       // handle на Transform игрока (для кругов)
+bool g_portalLatched = true;  // игрок стоит в круге после телепорта: сработает снова, только когда выйдет и зайдёт
+long long g_portalCool = 0, g_lastFind = 0;
+
+void drop_player() {
+    if (g_player) { gch_free(g_player); g_player = 0; }
+    g_portalLatched = true;
+}
+
+const MapSpec* find_spec(const std::string& id) {
+    for (const auto& m : g_specs) if (m.id == id) return &m;
+    return nullptr;
+}
+
+void portals_tick(long long now) {
+    bool any = false;
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i)
+            if (m.objs[i].shape == "portal" && it->second[i].h) { any = true; break; }
+        if (any) break;
+    }
+    if (!any) return;
+    void* tr = g_player ? target(g_player) : nullptr;
+    void* pv = tr ? inv(F.get_position, tr) : nullptr;
+    if (!pv) {
+        if (g_player) { gch_free(g_player); g_player = 0; }
+        if (now - g_lastFind < 1000) return;
+        g_lastFind = now;
+        tr = find_player();
+        pv = tr ? inv(F.get_position, tr) : nullptr;
+        if (!pv) return;
+        g_player = gch_new(tr, 0);
+    }
+    float pp[3];
+    memcpy(pp, obj_unbox(pv), sizeof pp);
+    const MapSpec* hit = nullptr;
+    const Obj* hitObj = nullptr;
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            const Obj& o = m.objs[i];
+            if (o.shape != "portal" || !it->second[i].h) continue;
+            float cx = m.off[0] + m.scale * o.p[0], cy = m.off[1] + m.scale * o.p[1], cz = m.off[2] + m.scale * o.p[2];
+            float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]);
+            float dx = pp[0] - cx, dz = pp[2] - cz, dy = pp[1] - cy;
+            if (dx * dx + dz * dz < r * r && dy > -1.0f * m.scale && dy < (2.5f + o.s[1]) * m.scale) { hit = &m; hitObj = &o; break; }
+        }
+        if (hit) break;
+    }
+    if (!hit) { g_portalLatched = false; return; }
+    if (g_portalLatched || now < g_portalCool) return;
+    g_portalLatched = true;
+    g_portalCool = now + 1500;
+    const std::string& d = hitObj->dest;
+    g_ctx = hit->id + " круг телепорта";
+    if (d == "@exit") {
+        if (W.active) { g_worldRt = "@exit"; refresh_world_want(); logf_("круг телепорта «%s»: выход из мира", hitObj->name.c_str()); }
+    } else if (d.empty()) {
+        teleport(tr, V3{hit->off[0] + hit->scale * hitObj->dp[0], hit->off[1] + hit->scale * hitObj->dp[1], hit->off[2] + hit->scale * hitObj->dp[2]});
+        logf_("круг телепорта «%s»: в точку этой карты", hitObj->name.c_str());
+    } else if (const MapSpec* t = find_spec(d)) {
+        V3 sp{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
+        if (t->world && !(W.active && W.id == t->id)) {
+            g_pending = sp;
+            g_hasPending = true;
+            g_worldRt = t->id;
+            refresh_world_want();
+            logf_("круг телепорта «%s»: вход в мир «%s»", hitObj->name.c_str(), t->name.c_str());
+        } else {
+            teleport(tr, sp);
+            logf_("круг телепорта «%s»: на точку появления карты «%s»", hitObj->name.c_str(), t->name.c_str());
+        }
+    } else {
+        logf_("круг телепорта «%s»: карта «%s» не найдена", hitObj->name.c_str(), d.c_str());
     }
 }
 
@@ -900,13 +1093,18 @@ void update() {
         g_lastSlow = now;
         std::string sc = read_scene();
         if (!sc.empty() && sc != g_scene) {
+            logf_("сцена: «%s» → «%s»", g_scene.c_str(), sc.c_str());
             g_scene = sc;
             world_exit(false);  // объекты прошлой сцены уже уничтожены
             drop_all_live();    // Unity сам уничтожил объекты прошлой сцены
             drop_textures();
+            drop_player();
+            g_worldRt.clear();
+            refresh_world_want();
             g_dirty = true;
         } else if (!check_alive()) {
-            world_exit(false);
+            logf_("объекты карт пропали без смены сцены, строю заново");
+            world_exit(true);  // сцена та же: возвращаем спрятанное
             drop_all_live();
             drop_textures();
             g_dirty = true;
@@ -922,6 +1120,7 @@ void update() {
         g_in_sync = false;
         unlink(guard.c_str());
     }
+    if (g_engineOk && !g_dirty) portals_tick(now);
     if (slow && g_engineOk) {
         std::string guard = g_mapsDir + "/_guard";
         if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("мир", gf); fclose(gf); }
@@ -1067,6 +1266,18 @@ void bind_unity() {
     F.cam_set_bg = m0(ca, "set_backgroundColor", 1);
     F.cam_get_bg = m0(ca, "get_backgroundColor", 0);
     F.type_cc = type_of("UnityEngine", "CharacterController");
+    void* shd = bearite_find_class("UnityEngine", "Shader");
+    F.mat_has_prop = find_method_types(mt, "HasProperty", {"String"});
+    F.mat_set_tex = find_method_types(mt, "SetTexture", {"String", "Texture"});
+    F.mat_set_scale = find_method_types(mt, "SetTextureScale", {"String", "Vector2"});
+    F.mat_get_shader = m0(mt, "get_shader", 0);
+    F.get_name = m0(ob, "get_name", 0);
+    F.mat_get_main_tex = m0(mt, "get_mainTexture", 0);
+    F.shader_find = find_method_p0(shd, "Find", 1, "String");
+    F.rend_set_material = m0(rd, "set_material", 1);
+    F.mat_class = mt;
+    F.mat_ctor_shader = find_method_types(mt, ".ctor", {"Shader"});
+    F.rend_bounds = m0(rd, "get_bounds", 0);
     F.type_renderer = type_of("UnityEngine", "Renderer");
     F.type_collider = type_of("UnityEngine", "Collider");
 }
