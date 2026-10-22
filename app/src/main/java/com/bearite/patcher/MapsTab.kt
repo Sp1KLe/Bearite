@@ -177,9 +177,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         })
         tail.addView(ui.pill("Дублировать") { val c = store.duplicate(m); expandedMaps.add(c.id); rebuild?.invoke() }, gap())
         tail.addView(ui.pill("Удалить карту", danger = true) {
-            AlertDialog.Builder(act).setTitle("Удалить карту?").setMessage("«${m.name}» и все её объекты будут удалены.")
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Удалить") { _, _ -> store.delete(m); rebuild?.invoke() }.show()
+            ui.confirm("Удалить карту?", "«${m.name}» и все её объекты будут удалены.", "Удалить", danger = true) { store.delete(m); rebuild?.invoke() }
         }, gap())
         d.addView(android.widget.HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(tail) }, rowLp().apply { topMargin = ui.dp(12) })
     }
@@ -311,12 +309,11 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
     private fun round2(x: Double) = Math.round(x * 100.0) / 100.0
 
     private fun pickTemplate(m: GameMap) {
-        AlertDialog.Builder(act).setTitle("Добавить шаблон")
-            .setItems(MapStore.TEMPLATES.toTypedArray()) { _, which ->
-                m.objects.addAll(MapStore.template(which))
-                store.save(m)
-                rebuild?.invoke()
-            }.setNegativeButton("Отмена", null).show()
+        ui.choose("Добавить шаблон", MapStore.TEMPLATES, -1) { which ->
+            m.objects.addAll(MapStore.template(which))
+            store.save(m)
+            rebuild?.invoke()
+        }
     }
 
     private fun importFromClipboard() {

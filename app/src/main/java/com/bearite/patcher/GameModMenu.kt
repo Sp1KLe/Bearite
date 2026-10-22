@@ -275,15 +275,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     }
 
     private fun pickFilter() {
-        AlertDialog.Builder(act)
-            .setTitle("Фильтр модов")
-            .setSingleChoiceItems(FILTER_NAMES, filter) { dlg, which ->
-                filter = which
-                dlg.dismiss()
-                refresh()
-            }
-            .setNegativeButton("Закрыть", null)
-            .show()
+        ui.choose("Фильтр модов", FILTER_NAMES.toList(), filter) { filter = it; refresh() }
     }
 
     // ----------------------------------------------------------------- карточка
@@ -383,20 +375,23 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
 
     private fun toggleMod(m: Mod, on: Boolean) {
         if (on && m.libs.isNotEmpty() && !mods.isNativeAccepted(m.id)) {
-            AlertDialog.Builder(act)
-                .setTitle("Нативный код")
-                .setMessage(
+            ui.dialog(
+                "Нативный код",
+                ui.label(
                     "Мод «${m.name}» содержит нативные библиотеки (.so). Они выполняются внутри игры " +
-                        "и имеют полный доступ к её процессу. Включай только моды, которым доверяешь."
-                )
-                .setNegativeButton("Отмена") { _, _ -> refresh() }
-                .setPositiveButton("Включить") { _, _ ->
-                    mods.acceptNative(m.id)
-                    mods.setEnabled(m.id, true)
-                    refresh()
-                }
-                .setOnCancelListener { refresh() }
-                .show()
+                        "и имеют полный доступ к её процессу. Включай только моды, которым доверяешь.",
+                    14f, GameUi.MUTED, bold = false
+                ),
+                listOf(
+                    GameUi.Btn("Отмена") { refresh() },
+                    GameUi.Btn("Включить", primary = true) {
+                        mods.acceptNative(m.id)
+                        mods.setEnabled(m.id, true)
+                        refresh()
+                    }
+                ),
+                onCancel = { refresh() }
+            ).show()
         } else {
             mods.setEnabled(m.id, on)
             refresh()

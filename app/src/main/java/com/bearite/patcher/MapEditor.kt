@@ -1,7 +1,6 @@
 package com.bearite.patcher
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Dialog
 import android.graphics.Typeface
 import android.text.Editable
@@ -148,6 +147,7 @@ class MapEditor(
         titleView = ui.label(map.name, 14f, GameUi.MUTED).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(10), 0, dp(10), 0) }
         val tools = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         tools.addView(titleView, LinearLayout.LayoutParams(dp(110), ViewGroup.LayoutParams.WRAP_CONTENT))
+        tools.addView(ui.pill("＋ Фигуры", primary = true, sizeSp = 13f) { addMenu() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { rightMargin = dp(8) })
         undoBtn = mini("↶") { doUndo() }
         redoBtn = mini("↷") { doRedo() }
         tools.addView(undoBtn); tools.addView(redoBtn)
@@ -255,12 +255,43 @@ class MapEditor(
         return r
     }
 
+    /** Окно «Фигуры и шаблоны»: плитки с фигурами и список готовых шаблонов. */
     private fun addMenu() {
-        val names = MapStore.SHAPES.map { "＋ " + (MapStore.SHAPE_NAMES[it] ?: it) } + MapStore.TEMPLATES.map { "Шаблон: $it" }
-        AlertDialog.Builder(act).setTitle("Добавить").setItems(names.toTypedArray()) { _, w ->
-            if (w < MapStore.SHAPES.size) addObject(MapStore.SHAPES[w])
-            else { map.objects.addAll(MapStore.template(w - MapStore.SHAPES.size)); commit(); select(map.objects.size - 1); vp.frameAll(); vp.invalidate() }
-        }.setNegativeButton("Отмена", null).show()
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        var dlg: android.app.Dialog? = null
+        col.addView(ui.label("Фигуры", 13f, GameUi.DIM))
+        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        for (sh in MapStore.SHAPES) {
+            val tile = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = ui.round(GameUi.SURFACE3, 16, GameUi.LINE_TAN)
+                setOnClickListener { dlg?.dismiss(); addObject(sh) }
+            }
+            tile.addView(ui.label(glyph(sh), 26f, GameUi.TAN).apply { gravity = Gravity.CENTER })
+            tile.addView(ui.label(MapStore.SHAPE_NAMES[sh] ?: sh, 11f, GameUi.CREAM).apply { gravity = Gravity.CENTER; maxLines = 1 })
+            row.addView(tile, LinearLayout.LayoutParams(0, dp(78), 1f).apply { rightMargin = dp(6) })
+        }
+        col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        col.addView(ui.label("Шаблоны", 13f, GameUi.DIM).apply { setPadding(0, dp(16), 0, 0) })
+        val hints = listOf("один большой пол", "8 ступеней вверх", "пол и четыре стены")
+        MapStore.TEMPLATES.forEachIndexed { i, name ->
+            val item = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL
+                background = ui.round(GameUi.SURFACE3, 14, GameUi.LINE_TAN)
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                setOnClickListener {
+                    dlg?.dismiss()
+                    map.objects.addAll(MapStore.template(i))
+                    commit(); select(map.objects.size - 1); vp.frameAll(); vp.invalidate()
+                }
+            }
+            item.addView(ui.label(name, 15f))
+            item.addView(ui.label(hints.getOrElse(i) { "" } + " · ${MapStore.template(i).size} объектов", 12f, GameUi.MUTED, bold = false))
+            col.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        }
+        dlg = ui.dialog("Фигуры и шаблоны", col, listOf(GameUi.Btn("Закрыть")), widthDp = 460)
+        dlg.show()
     }
 
     private fun addObject(shape: String) {

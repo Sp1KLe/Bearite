@@ -1,6 +1,7 @@
 package com.bearite.patcher
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -251,6 +252,64 @@ class GameUi(val act: Activity) {
             background = round(color, 14)
             layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
         }
+
+
+    // ------------------------------------------------------------ окна в стиле лаунчера
+
+    /** Окно в оформлении Bearite: тёмная карточка с рамкой, заголовок, содержимое и ряд кнопок. */
+    class Btn(val text: String, val primary: Boolean = false, val danger: Boolean = false, val onClick: () -> Unit = {})
+
+    fun dialog(title: String, content: View?, buttons: List<Btn>, onCancel: (() -> Unit)? = null, widthDp: Int = 440): Dialog {
+        val dlg = Dialog(act)
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val box = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(SURFACE, 24, LINE_TAN, 1)
+            setPadding(dp(20), dp(18), dp(20), dp(16))
+        }
+        box.addView(label(title, 19f))
+        if (content != null) box.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        if (buttons.isNotEmpty()) {
+            val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+            for (b in buttons) row.addView(
+                pill(b.text, b.primary, b.danger, 14f) { dlg.dismiss(); b.onClick() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)).apply { leftMargin = dp(8) }
+            )
+            box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
+        }
+        val sv = android.widget.ScrollView(act).apply { addView(box) }
+        dlg.setContentView(sv)
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            val dm = act.resources.displayMetrics
+            setLayout(minOf(dp(widthDp), (dm.widthPixels * 0.92f).toInt()), ViewGroup.LayoutParams.WRAP_CONTENT)
+            setDimAmount(0.6f)
+        }
+        if (onCancel != null) dlg.setOnCancelListener { onCancel() }
+        return dlg
+    }
+
+    fun confirm(title: String, message: String, okText: String, danger: Boolean = false, onOk: () -> Unit) {
+        dialog(title, label(message, 14f, MUTED, bold = false), listOf(Btn("Отмена"), Btn(okText, primary = !danger, danger = danger, onClick = onOk))).show()
+    }
+
+    /** Список вариантов; tap выбирает и закрывает окно. */
+    fun choose(title: String, items: List<String>, selected: Int, onPick: (Int) -> Unit) {
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        var dlg: Dialog? = null
+        items.forEachIndexed { i, t ->
+            col.addView(
+                label(t, 16f, if (i == selected) ON_CREAM else CREAM).apply {
+                    setPadding(dp(16), dp(10), dp(16), dp(10))
+                    background = round(if (i == selected) CREAM else SURFACE3, 14, if (i == selected) 0 else LINE_TAN)
+                    setOnClickListener { dlg?.dismiss(); onPick(i) }
+                },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) }
+            )
+        }
+        dlg = dialog(title, col, listOf(Btn("Закрыть")))
+        dlg.show()
+    }
 
     companion object {
         const val BG = 0xFF17120F.toInt()
