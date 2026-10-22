@@ -55,6 +55,7 @@ class MapEditor(
     fun show() {
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         vp.gameCam = camInMap()
+        vp.texAvg = { store.textureAverage(it) }
         vp.onSelect = { select(it) }
         vp.onEdited = { refreshLive() }
         vp.onCommit = { commit(); refreshTree() }
@@ -202,6 +203,7 @@ class MapEditor(
         val m = MapStore.parse(map.id, snap)
         map.name = m.name; map.enabled = m.enabled; map.scene = m.scene
         map.ox = m.ox; map.oy = m.oy; map.oz = m.oz; map.scale = m.scale; map.layer = m.layer
+        map.world = m.world; map.sky = m.sky; map.spx = m.spx; map.spy = m.spy; map.spz = m.spz
         map.objects.clear(); map.objects.addAll(m.objects)
         lastSnap = snap; lastKey = null
         store.save(map)
@@ -463,10 +465,95 @@ class MapEditor(
         })
         inspector.addView(hex)
 
+        textureSection(o)
+
         inspector.addView(ui.pill("К камере игры", sizeSp = 13f) { toGameCamera() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(12) })
         inspector.addView(ui.pill("Удалить объект", danger = true, sizeSp = 13f) { deleteSelected() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(6) })
+    }
+
+    // ------------------------------------------------------------------- текстуры
+
+    private fun thumb(id: String?, selected: Boolean, onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
+        val size = dp(58)
+        val box = FrameLayout(act).apply {
+            background = ui.round(GameUi.SURFACE3, 12, if (selected) GameUi.CREAM else GameUi.LINE_TAN, if (selected) 3 else 1)
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+            setOnClickListener { onClick() }
+            if (onLong != null) setOnLongClickListener { onLong(); true }
+        }
+        if (id == null) {
+            box.addView(ui.label("✕", 20f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -1))
+        } else {
+            val iv = android.widget.ImageView(act).apply { scaleType = android.widget.ImageView.ScaleType.CENTER_CROP }
+            try {
+                val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }
+                iv.setImageBitmap(android.graphics.BitmapFactory.decodeFile(store.texturePng(id).path, o))
+            } catch (_: Throwable) {}
+            box.addView(iv, FrameLayout.LayoutParams(-1, -1))
+        }
+        box.layoutParams = LinearLayout.LayoutParams(size, size).apply { rightMargin = dp(6) }
+        return box
+    }
+
+    private fun textureSection(o: MapObj) {
+        section("Текстура")
+        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(thumb(null, o.tex.isEmpty(), {
+            if (o.tex.isNotEmpty()) { o.tex = ""; commit(); showInspector(); vp.invalidate() }
+        }))
+        for (id in store.textures()) {
+            row.addView(thumb(id, o.tex == id, {
+                if (o.tex.isEmpty() && o.color != 0xFFFFFF) o.color = 0xFFFFFF  // цвет работает как оттенок: белый = текстура как есть
+                o.tex = id; commit(); refreshTree(); showInspector(); vp.invalidate()
+            }, {
+                ui.confirm("Удалить текстуру?", "Она пропадёт из всех карт, где использована.", "Удалить", danger = true) {
+                    store.deleteTexture(id)
+                    store.clearTextureCache(id)
+                    map.objects.forEach { if (it.tex == id) it.tex = "" }
+                    commit(); showInspector(); vp.invalidate()
+                }
+            }))
+        }
+        row.addView(ui.label("＋", 24f, GameUi.CREAM).apply {
+            gravity = Gravity.CENTER
+            background = ui.round(GameUi.SURFACE3, 12, GameUi.LINE_TAN)
+            layoutParams = LinearLayout.LayoutParams(dp(58), dp(58))
+            setOnClickListener { importTexture(o) }
+        })
+        inspector.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(row) })
+        inspector.addView(ui.label("＋ добавляет картинку из галереи, долгое нажатие на текстуру удаляет её. Цвет объекта работает как оттенок.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        if (o.tex.isNotEmpty()) {
+            section("Повтор текстуры")
+            val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val fu = numField(o.tu, "tu") { v -> o.tu = v.coerceIn(0.01, 1000.0) }
+            val fv = numField(o.tv, "tv") { v -> o.tv = v.coerceIn(0.01, 1000.0) }
+            liveFields.add(fu to { o.tu }); liveFields.add(fv to { o.tv })
+            r2.addView(ui.label("X", 12f, GameUi.MUTED), LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(fu, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
+            r2.addView(ui.label("Y", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(20), ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(fv, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
+            inspector.addView(r2)
+            inspector.addView(ui.pill("По размеру объекта", sizeSp = 12f) {
+                o.tu = maxOf(1.0, o.sx)
+                o.tv = if (o.sy < maxOf(o.sx, o.sz)) maxOf(1.0, o.sz) else maxOf(1.0, o.sy)
+                commit(); showInspector()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
+        }
+    }
+
+    private fun importTexture(o: MapObj) {
+        val g = act as? GameActivity ?: return toast("Выбор картинки доступен только в игре")
+        g.pickImage { uri ->
+            if (uri == null) return@pickImage
+            val id = store.importTexture(act, uri)
+            if (id == null) { toast("Не удалось прочитать картинку"); return@pickImage }
+            if (o.color != 0xFFFFFF) o.color = 0xFFFFFF
+            o.tex = id
+            commit(); refreshTree(); showInspector(); vp.invalidate()
+            toast("Текстура добавлена")
+        }
     }
 
     private fun mapInspector() {
@@ -475,15 +562,51 @@ class MapEditor(
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38))
         })
-        val sceneBtn = ui.pill(if (map.scene.isEmpty()) "Сцена: любая" else "Сцена: ${map.scene}", sizeSp = 13f) {}
-        sceneBtn.setOnClickListener {
-            val cur = store.readState().scene
-            map.scene = if (map.scene.isEmpty()) cur else ""
-            sceneBtn.text = if (map.scene.isEmpty()) "Сцена: любая" else "Сцена: ${map.scene}"
-            commit()
-            if (map.scene.isEmpty() && cur.isEmpty()) toast("Сцена игры пока неизвестна")
+        section("Режим")
+        val worldToggle = ui.togglePill(map.world, 84) { on ->
+            map.world = on
+            if (on && map.oy < 500) {
+                map.ox = 0.0; map.oy = 1000.0; map.oz = 0.0
+                toast("Мир поднят на высоту 1000, чтобы не пересекаться с обычным")
+            }
+            commit(); vp.frameAll(); showInspector(); vp.invalidate()
         }
-        inspector.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(6) })
+        inspector.addView(ui.row("Отдельный мир", worldToggle), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        inspector.addView(ui.label(
+            if (map.world) "Остальной мир скрывается, игрок переносится на точку появления, небо заливается цветом ниже. Выключи карту, и всё вернётся."
+            else "Выключено: объекты просто добавляются в обычную сцену игры.",
+            11f, GameUi.DIM, bold = false
+        ).apply { setPadding(dp(4), dp(4), 0, 0) })
+        if (map.world) {
+            vec3("Точка появления игрока", arrayOf({ map.spx }, { map.spy }, { map.spz }),
+                arrayOf({ v -> map.spx = v }, { v -> map.spy = v }, { v -> map.spz = v }), "spawn")
+            inspector.addView(ui.pill("Точка в центр обзора", sizeSp = 12f) {
+                val sp = vp.spawnPoint()
+                map.spx = sp[0].toDouble(); map.spz = sp[2].toDouble(); map.spy = maxOf(map.spy, 1.5)
+                commit(); showInspector(); vp.invalidate()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
+            section("Цвет неба")
+            val skyRow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+            val skies = intArrayOf(0x87B8E8, 0xF2DFC5, 0xE8A07A, 0x2B2A4C, 0x1B1410, 0x5E8C61)
+            for (c in skies) {
+                val v = View(act).apply {
+                    background = ui.round(0xFF000000.toInt() or c, 8, if (c == map.sky) GameUi.CREAM else GameUi.LINE, if (c == map.sky) 3 else 1)
+                    setOnClickListener { map.sky = c; commit(); showInspector(); vp.invalidate() }
+                }
+                skyRow.addView(v, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(4) })
+            }
+            inspector.addView(skyRow)
+        } else {
+            val sceneBtn = ui.pill(if (map.scene.isEmpty()) "Сцена: любая" else "Сцена: ${map.scene}", sizeSp = 13f) {}
+            sceneBtn.setOnClickListener {
+                val cur = store.readState().scene
+                map.scene = if (map.scene.isEmpty()) cur else ""
+                sceneBtn.text = if (map.scene.isEmpty()) "Сцена: любая" else "Сцена: ${map.scene}"
+                commit()
+                if (map.scene.isEmpty() && cur.isEmpty()) toast("Сцена игры пока неизвестна")
+            }
+            inspector.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(8) })
+        }
         vec3("Сдвиг карты в мире", arrayOf({ map.ox }, { map.oy }, { map.oz }), arrayOf({ v -> map.ox = v }, { v -> map.oy = v }, { v -> map.oz = v }), "off")
         section("Масштаб и слой")
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }

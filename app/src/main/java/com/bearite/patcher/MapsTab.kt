@@ -40,13 +40,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         }
 
         val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        bar.addView(ui.pill("＋ Новая карта", primary = true) {
-            val m = store.create("Карта ${store.list().size + 1}")
-            placeAtCamera(m)
-            store.save(m)
-            expandedMaps.add(m.id)
-            onChanged()
-        })
+        bar.addView(ui.pill("＋ Новая карта", primary = true) { newMapDialog(onChanged) })
         bar.addView(ui.pill("Из буфера") { importFromClipboard() }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = ui.dp(8) })
         list.addView(bar, cardLp())
@@ -67,6 +61,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
     private fun statusCard(st: EngineState): View {
         val (text, color) = when {
             !st.fresh -> "Движок карт не отвечает: запусти игру через Bearite (встроенный мод должен быть включён). Карты можно править и сейчас, они применятся при запуске." to GameUi.MUTED
+            st.status == "ok" && st.world.isNotEmpty() -> "Ты в отдельном мире «${store.list().firstOrNull { it.id == st.world }?.name ?: st.world}» · объектов: ${st.objects}" to GameUi.GREEN
             st.status == "ok" -> "Движок карт работает · сцена: ${st.scene.ifEmpty { "?" }} · объектов в сцене: ${st.objects}" to GameUi.GREEN
             else -> "Движок карт: ${st.message.ifEmpty { "ошибка" }}" to GameUi.RUST
         }
@@ -89,11 +84,22 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(ui.label(m.name, 18f))
         texts.addView(ui.label(
-            "объектов: ${m.objects.size} · " + if (m.scene.isEmpty()) "любая сцена" else "сцена ${m.scene}",
+            "объектов: ${m.objects.size} · " + when {
+                m.world -> "отдельный мир"
+                m.scene.isEmpty() -> "любая сцена"
+                else -> "сцена ${m.scene}"
+            },
             12f, GameUi.MUTED, bold = false
         ))
         head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = ui.dp(10) })
-        head.addView(ui.togglePill(m.enabled, 92, 6) { on -> m.enabled = on; store.save(m) })
+        head.addView(ui.togglePill(m.enabled, 92, 6) { on ->
+            m.enabled = on
+            store.save(m)
+            if (on && m.world) {  // одновременно может быть включён только один отдельный мир
+                store.list().filter { it.world && it.enabled && it.id != m.id }.forEach { it.enabled = false; store.save(it) }
+                rebuild?.invoke()
+            }
+        })
         val open = m.id in expandedMaps
         val chevron = ui.label("›", 26f).apply { gravity = Gravity.CENTER; rotation = if (open) 90f else 0f }
         head.addView(chevron, LinearLayout.LayoutParams(ui.dp(30), ui.dp(38)))
@@ -183,6 +189,40 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
     }
 
     private fun sceneText(m: GameMap) = if (m.scene.isEmpty()) "Любая" else m.scene
+
+    // ------------------------------------------------------------- новая карта
+
+    private fun newMapDialog(onChanged: () -> Unit) {
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        var dlg: android.app.Dialog? = null
+        fun option(title: String, text: String, world: Boolean) {
+            val box = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL
+                background = ui.round(GameUi.SURFACE3, 16, GameUi.LINE_TAN)
+                setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
+                setOnClickListener { dlg?.dismiss(); createMap(world); onChanged() }
+            }
+            box.addView(ui.label(title, 16f))
+            box.addView(ui.label(text, 12f, GameUi.MUTED, bold = false))
+            col.addView(box, ui.matchWrap().apply { topMargin = ui.dp(8) })
+        }
+        option("Отдельный мир", "Своя пустота: обычный мир скрывается, игрок переносится на карту, небо своего цвета. Так делают свои уровни.", true)
+        option("Дополнение к миру", "Объекты добавляются в обычную сцену игры перед камерой: можно достроить существующее место.", false)
+        dlg = ui.dialog("Новая карта", col, listOf(GameUi.Btn("Отмена")))
+        dlg.show()
+    }
+
+    private fun createMap(world: Boolean) {
+        val m = store.create("Карта ${store.list().size + 1}")
+        if (world) {
+            m.world = true
+            m.ox = 0.0; m.oy = 1000.0; m.oz = 0.0
+            m.objects.add(MapObj("Пол", "cube", 0.0, -0.5, 0.0, 24.0, 1.0, 24.0, color = 0x8D5338))
+            m.enabled = false  // сначала настрой мир, включишь переключателем
+        } else placeAtCamera(m)
+        store.save(m)
+        expandedMaps.add(m.id)
+    }
 
     // ----------------------------------------------------------------- объект
 

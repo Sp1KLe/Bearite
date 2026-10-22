@@ -101,6 +101,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     var onEdited: (() -> Unit)? = null
     /** Перетаскивание закончено: можно сохранять и запоминать для отмены. */
     var onCommit: (() -> Unit)? = null
+    var texAvg: ((String) -> Int)? = null  // средний цвет текстуры для предпросмотра
     var gameCam: DoubleArray? = null  // позиция камеры игры в координатах карты (x y z fx fy fz)
 
     // камера
@@ -133,7 +134,6 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private val sq = FloatArray(3)
 
     init {
-        setBackgroundColor(0xFF1E1914.toInt())
         isFocusable = true
         frameAll()
     }
@@ -226,9 +226,14 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     override fun onDraw(c: Canvas) {
         if (width == 0 || height == 0) return
         updateBasis()
+        if (map.world) {
+            val sk = map.sky
+            c.drawColor(Color.rgb((0x1E + (Color.red(sk) - 0x1E) / 2), (0x19 + (Color.green(sk) - 0x19) / 2), (0x14 + (Color.blue(sk) - 0x14) / 2)))
+        } else c.drawColor(0xFF1E1914.toInt())
         drawGrid(c)
         drawObjects(c)
         drawCameraMarker(c)
+        drawSpawn(c)
         drawGizmo(c)
         drawHud(c)
     }
@@ -274,7 +279,11 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 if (proj(wx, wy, wz, p)) { vtmp[i * 6 + 3] = p[0]; vtmp[i * 6 + 4] = p[1]; vtmp[i * 6 + 5] = p[2] }
                 else vtmp[i * 6 + 5] = -1f
             }
-            val r = Color.red(o.color); val g = Color.green(o.color); val b = Color.blue(o.color)
+            var r = Color.red(o.color); var g = Color.green(o.color); var b = Color.blue(o.color)
+            if (o.tex.isNotEmpty()) {
+                val avg = texAvg?.invoke(o.tex) ?: 0xFF888888.toInt()
+                r = r * Color.red(avg) / 255; g = g * Color.green(avg) / 255; b = b * Color.blue(avg) / 255
+            }
             for (t in 0 until mesh.t.size / 3) {
                 val a = mesh.t[t * 3]; val bb = mesh.t[t * 3 + 1]; val cc = mesh.t[t * 3 + 2]
                 if (vtmp[a * 6 + 5] < 0 || vtmp[bb * 6 + 5] < 0 || vtmp[cc * 6 + 5] < 0) continue
@@ -333,6 +342,19 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         for (i in 0 until 8) for (bit in intArrayOf(1, 2, 4)) {
             if (i and bit == 0) { val j = i or bit; seg(c, cs[i][0], cs[i][1], cs[i][2], cs[j][0], cs[j][1], cs[j][2]) }
         }
+    }
+
+    private fun drawSpawn(c: Canvas) {
+        if (!map.world) return
+        val x = map.spx.toFloat(); val y = map.spy.toFloat(); val z = map.spz.toFloat()
+        val p = FloatArray(3)
+        if (!proj(x, y, z, p)) return
+        line.color = 0xFF6FE0D0.toInt(); line.strokeWidth = 2f * d
+        seg(c, x, y, z, x, 0f, z)
+        fill.color = 0xFF6FE0D0.toInt()
+        c.drawCircle(p[0], p[1], 7f * d, fill)
+        text.color = 0xFF6FE0D0.toInt()
+        c.drawText("появление", p[0] + 10f * d, p[1] + 4f * d, text)
     }
 
     private fun drawCameraMarker(c: Canvas) {

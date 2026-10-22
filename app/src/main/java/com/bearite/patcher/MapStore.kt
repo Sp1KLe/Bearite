@@ -12,6 +12,8 @@ data class MapObj(
     var rx: Double = 0.0, var ry: Double = 0.0, var rz: Double = 0.0,
     var color: Int = 0x8D5338,  // RGB
     var solid: Boolean = true,
+    var tex: String = "",        // id своей текстуры (maps/textures/<id>.png), пусто = без текстуры
+    var tu: Double = 1.0, var tv: Double = 1.0,  // повторы текстуры по осям
 )
 
 data class GameMap(
@@ -22,6 +24,9 @@ data class GameMap(
     var ox: Double = 0.0, var oy: Double = 0.0, var oz: Double = 0.0,
     var scale: Double = 1.0,
     var layer: Int = 0,
+    var world: Boolean = false,       // отдельный мир: остальной мир скрывается, игрок появляется на карте
+    var sky: Int = 0x87B8E8,          // цвет неба в отдельном мире
+    var spx: Double = 0.0, var spy: Double = 2.0, var spz: Double = 0.0,  // точка появления (в координатах карты)
     val objects: MutableList<MapObj> = ArrayList(),
 )
 
@@ -32,6 +37,7 @@ data class EngineState(
     val scene: String = "",
     val cam: DoubleArray? = null,  // x y z fx fy fz
     val objects: Int = 0,
+    val world: String = "",        // id карты-мира, в котором сейчас игрок
     val fresh: Boolean = false,    // файл обновлялся недавно: движок работает
 )
 
@@ -61,6 +67,66 @@ class MapStore(private val dir: File) {
     fun hasGuard() = File(dir, "_guard").exists()
     fun guardInfo(): String = try { File(dir, "_guard").readText().take(200) } catch (_: Throwable) { "" }
     fun clearGuard() { File(dir, "_guard").delete() }
+
+
+    // ------------------------------------------------------------------ текстуры
+
+    private val texDir get() = File(dir, "textures").also { it.mkdirs() }
+
+    /** Id всех импортированных текстур по порядку добавления. */
+    fun textures(): List<String> =
+        (texDir.listFiles { f -> f.isFile && f.name.endsWith(".png") } ?: emptyArray())
+            .map { it.name.removeSuffix(".png") }
+            .sortedWith(compareBy({ it.length }, { it }))
+
+    fun texturePng(id: String) = File(texDir, "$id.png")
+
+    /**
+     * Добавляет картинку из галереи: уменьшает до 512 px, сохраняет PNG для превью и сырой RGBA (.tex) для игры.
+     * Игре отдаём сырые пиксели, чтобы не зависеть от того, оставила ли игра в сборке декодер картинок.
+     */
+    fun importTexture(ctx: android.content.Context, uri: android.net.Uri): String? = try {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (bounds.outWidth / sample > 1024 || bounds.outHeight / sample > 1024) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        var bm = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+            ?: throw IllegalStateException("не удалось прочитать картинку")
+        val k = 512f / maxOf(bm.width, bm.height)
+        if (k < 1f) bm = android.graphics.Bitmap.createScaledBitmap(bm, maxOf(1, (bm.width * k).toInt()), maxOf(1, (bm.height * k).toInt()), true)
+        val id = "t" + java.lang.Long.toString(System.currentTimeMillis(), 36)
+        File(texDir, "$id.png").outputStream().use { bm.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        val w = bm.width; val h = bm.height
+        val px = IntArray(w * h)
+        bm.getPixels(px, 0, w, 0, 0, w, h)
+        val buf = java.nio.ByteBuffer.allocate(8 + w * h * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buf.putInt(w).putInt(h)
+        // строки у Unity идут снизу вверх
+        for (y in h - 1 downTo 0) for (x in 0 until w) {
+            val c = px[y * w + x]
+            buf.put(((c shr 16) and 255).toByte()).put(((c shr 8) and 255).toByte()).put((c and 255).toByte()).put(((c ushr 24) and 255).toByte())
+        }
+        File(texDir, "$id.tex").writeBytes(buf.array())
+        id
+    } catch (_: Throwable) {
+        null
+    }
+
+    fun deleteTexture(id: String) { File(texDir, "$id.png").delete(); File(texDir, "$id.tex").delete() }
+
+    private val avgCache = HashMap<String, Int>()
+
+    /** Средний цвет текстуры: для предпросмотра в редакторе. */
+    fun textureAverage(id: String): Int = avgCache.getOrPut(id) {
+        try {
+            val bm = android.graphics.BitmapFactory.decodeFile(texturePng(id).path) ?: return@getOrPut 0xFF888888.toInt()
+            val s = android.graphics.Bitmap.createScaledBitmap(bm, 1, 1, true)
+            s.getPixel(0, 0) or 0xFF000000.toInt()
+        } catch (_: Throwable) { 0xFF888888.toInt() }
+    }
+
+    fun clearTextureCache(id: String) { avgCache.remove(id) }
 
     fun delete(m: GameMap) { File(dir, m.id + ".map").delete() }
 
@@ -95,6 +161,7 @@ class MapStore(private val dir: File) {
             scene = kv["scene"] ?: "",
             cam = cam,
             objects = kv["objects"]?.toIntOrNull() ?: 0,
+            world = kv["world"] ?: "",
             fresh = System.currentTimeMillis() - f.lastModified() < 5000,
         )
     }
@@ -121,11 +188,19 @@ class MapStore(private val dir: File) {
             append("oz=").append(f(m.oz)).append('\n')
             append("scale=").append(f(m.scale)).append('\n')
             append("layer=").append(m.layer).append('\n')
+            if (m.world) {
+                append("world=1\n")
+                append("sky=").append(String.format("%06X", m.sky and 0xFFFFFF)).append('\n')
+                append("spx=").append(f(m.spx)).append('\n')
+                append("spy=").append(f(m.spy)).append('\n')
+                append("spz=").append(f(m.spz)).append('\n')
+            }
             for (o in m.objects) {
                 append("O\t").append(clean(o.name)).append('\t').append(o.shape)
                 for (v in doubleArrayOf(o.x, o.y, o.z, o.sx, o.sy, o.sz, o.rx, o.ry, o.rz)) append('\t').append(f(v))
                 append('\t').append(String.format("%06X", o.color and 0xFFFFFF))
-                append('\t').append(if (o.solid) 1 else 0).append('\n')
+                append('\t').append(if (o.solid) 1 else 0)
+                append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv)).append('\n')
             }
         }
 
@@ -144,6 +219,8 @@ class MapStore(private val dir: File) {
                             x = n[0], y = n[1], z = n[2], sx = n[3], sy = n[4], sz = n[5],
                             rx = n[6], ry = n[7], rz = n[8],
                             color = p[12].toIntOrNull(16) ?: 0x8D5338, solid = p[13] == "1",
+                            tex = p.getOrNull(14) ?: "",
+                            tu = p.getOrNull(15)?.toDoubleOrNull() ?: 1.0, tv = p.getOrNull(16)?.toDoubleOrNull() ?: 1.0,
                         )
                     )
                     continue
@@ -161,6 +238,11 @@ class MapStore(private val dir: File) {
                     "oz" -> m.oz = v.toDoubleOrNull() ?: 0.0
                     "scale" -> m.scale = (v.toDoubleOrNull() ?: 1.0).coerceIn(0.01, 100.0)
                     "layer" -> m.layer = (v.toIntOrNull() ?: 0).coerceIn(0, 31)
+                    "world" -> m.world = v == "1" || v == "true"
+                    "sky" -> m.sky = v.trim().toIntOrNull(16) ?: 0x87B8E8
+                    "spx" -> m.spx = v.toDoubleOrNull() ?: 0.0
+                    "spy" -> m.spy = v.toDoubleOrNull() ?: 2.0
+                    "spz" -> m.spz = v.toDoubleOrNull() ?: 0.0
                 }
             }
             return m

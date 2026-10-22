@@ -7,6 +7,10 @@
  * применяются на лету. Состояние движка пишется в maps/_state.txt (сцена, позиция камеры, ошибки),
  * его читает редактор.
  *
+ * Карта может быть «отдельным миром» (world=1): тогда остальной мир скрывается (рендереры и коллайдеры
+ * выключаются), игрок переносится на точку появления карты, небо заливается цветом карты. При выходе всё
+ * возвращается. У объектов могут быть свои текстуры: сырые RGBA-файлы из maps/textures/<id>.tex.
+ *
  * Все вызовы Unity должны идти из главного потока, поэтому движок «тикает» из хуков на Time.get_*,
  * которые игра вызывает каждый кадр. Camera.get_main не трогаем: его перехватывают другие моды (например зум),
  * а Dobby не умеет вешать два хука на одну функцию.
@@ -25,6 +29,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "bearite_api.h"
@@ -53,6 +58,9 @@ const char* (*method_name)(void*);
 uint32_t (*method_pcount)(void*);
 void* (*method_param)(void*, uint32_t);
 void* (*class_from_type)(void*);
+void* (*obj_new)(void*);
+void* (*arr_new)(void*, uintptr_t);
+void* (*get_corlib)();
 
 void logf_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void logf_(const char* fmt, ...) {
@@ -66,12 +74,16 @@ void logf_(const char* fmt, ...) {
 
 int g_exc_logged = 0;
 bool g_in_sync = false;       // идёт построение объектов: каждый вызов пишем в _guard
+// Il2CppArray на 64 битах: заголовок объекта 16 + bounds 8 + max_length 8, дальше элементы
+inline uintptr_t arr_len(void* a) { return *(const uintptr_t*)((const uint8_t*)a + 24); }
+inline void* arr_elem(void* a, size_t size, uintptr_t i) { return (uint8_t*)a + 32 + size * i; }
+bool g_crumbs = true;         // false: в длинных циклах не пишем хлебную крошку на каждый вызов
 std::string g_guardPath;      // maps/_guard
 std::string g_ctx;            // "карта/объект" для хлебных крошек
 
 /** Пишет, что именно вызываем сейчас. Если игра упадёт, файл покажет последний шаг. */
 void breadcrumb(void* m, void* obj) {
-    if (!g_in_sync || g_guardPath.empty() || !m) return;
+    if (!g_in_sync || !g_crumbs || g_guardPath.empty() || !m) return;
     FILE* f = fopen(g_guardPath.c_str(), "w");
     if (!f) return;
     void* k = obj ? obj_class(obj) : nullptr;
@@ -102,6 +114,23 @@ void* find_method_p0(void* klass, const char* name, int argc, const char* p0) {
         if (!p0) return m;
         void* k = class_from_type(method_param(m, 0));
         if (k && strcmp(class_name(k), p0) == 0) return m;
+    }
+    return nullptr;
+}
+
+/** Метод по имени и именам типов всех параметров (.ctor для конструкторов). */
+void* find_method_types(void* klass, const char* name, std::initializer_list<const char*> types) {
+    if (!klass) return nullptr;
+    void* it = nullptr;
+    while (void* m = class_methods(klass, &it)) {
+        if (strcmp(method_name(m), name) != 0 || method_pcount(m) != types.size()) continue;
+        bool ok = true;
+        uint32_t i = 0;
+        for (const char* t : types) {
+            void* k = class_from_type(method_param(m, i++));
+            if (!k || strcmp(class_name(k), t) != 0) { ok = false; break; }
+        }
+        if (ok) return m;
     }
     return nullptr;
 }
@@ -147,10 +176,18 @@ struct Fns {
     void *cam_main, *set_name, *destroy, *get_active, *set_layer, *get_component, *get_material, *set_color,
         *collider_enabled, *get_scene, *scene_name;
     void *type_renderer, *type_collider;
+    // текстуры
+    void *tex2d, *set_main_tex, *set_main_tex_scale, *set_hideflags, *image_conv;
+    // отдельный мир
+    void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
+    void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
+    void *type_cc;
 } F{};
 
 struct V3 { float x, y, z; };
 struct Col { float r, g, b, a; };
+
+long long now_ms_fwd();
 
 // ------------------------------------------------------------------ карты
 
@@ -159,6 +196,8 @@ struct Obj {
     float p[3] = {0, 0, 0}, s[3] = {1, 1, 1}, r[3] = {0, 0, 0};
     unsigned color = 0x8D5338;
     bool solid = true;
+    std::string tex;
+    float tile[2] = {1, 1};
 };
 
 struct MapSpec {
@@ -167,6 +206,9 @@ struct MapSpec {
     float off[3] = {0, 0, 0};
     float scale = 1;
     int layer = 0;
+    bool world = false;
+    unsigned sky = 0x87B8E8;
+    float spawn[3] = {0, 2, 0};
     std::vector<Obj> objs;
 };
 
@@ -179,6 +221,9 @@ struct Live {
     std::string name;
     float pos[3] = {1e9f, 0, 0}, size[3] = {0, 0, 0}, rot[3] = {1e9f, 0, 0};
     unsigned color = 0xFFFFFFFF;
+    std::string tex;
+    float tile[2] = {0, 0};
+    int tid = 0;  // instance id Transform объекта: по нему отличаем свои объекты от чужих
 };
 
 std::string g_mapsDir;
@@ -191,6 +236,7 @@ std::string g_status = "unknown";
 std::string g_msg;
 int g_liveCount = 0;
 bool g_engineOk = false;
+std::string g_worldWant;  // id карты-мира, которая должна быть активна ("" = нет)
 
 float num(const std::string& s, float d) {
     char* e = nullptr;
@@ -229,6 +275,8 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             for (int i = 0; i < 3; ++i) { o.p[i] = num(p[3 + i], 0); o.s[i] = num(p[6 + i], 1); o.r[i] = num(p[9 + i], 0); }
             o.color = (unsigned)strtoul(p[12].c_str(), nullptr, 16) & 0xFFFFFF;
             o.solid = p[13] == "1";
+            if (p.size() > 14) o.tex = p[14];
+            if (p.size() > 16) { o.tile[0] = num(p[15], 1); o.tile[1] = num(p[16], 1); }
             m.objs.push_back(o);
             continue;
         }
@@ -243,6 +291,11 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
         else if (k == "oz") m.off[2] = num(v, 0);
         else if (k == "scale") m.scale = num(v, 1);
         else if (k == "layer") m.layer = atoi(v.c_str());
+        else if (k == "world") m.world = v == "1" || v == "true";
+        else if (k == "sky") m.sky = (unsigned)strtoul(v.c_str(), nullptr, 16) & 0xFFFFFF;
+        else if (k == "spx") m.spawn[0] = num(v, 0);
+        else if (k == "spy") m.spawn[1] = num(v, 2);
+        else if (k == "spz") m.spawn[2] = num(v, 0);
     }
     fclose(f);
     if (m.scale < 0.01f) m.scale = 0.01f;
@@ -275,6 +328,8 @@ void reload_maps() {
         if (parse_map(n.substr(0, n.size() - 4), g_mapsDir + "/" + n, m)) specs.push_back(std::move(m));
     }
     g_specs = std::move(specs);
+    g_worldWant.clear();
+    for (const auto& m : g_specs) if (m.world && m.enabled) { g_worldWant = m.id; break; }
     g_dirty = true;
 }
 
@@ -297,6 +352,144 @@ void destroy_live(Live& L) {
 void drop_live(Live& L) {  // объект уже уничтожен Unity (смена сцены): только освобождаем handle
     if (L.h) { gch_free(L.h); if (g_liveCount > 0) --g_liveCount; }
     L = Live();
+}
+
+
+int inst_id(void* o) {
+    if (!o || !F.get_iid) return 0;
+    void* r = inv(F.get_iid, o);
+    return r ? *(const int*)obj_unbox(r) : 0;
+}
+
+// ------------------------------------------------------------------ текстуры
+
+std::map<std::string, uintptr_t> g_tex;  // id -> handle (0 = не удалось загрузить)
+
+void* byte_array(const unsigned char* data, size_t n) {
+    static void* byteK = nullptr;
+    if (!byteK && get_corlib && bearite_il2.class_from_name) byteK = bearite_il2.class_from_name(get_corlib(), "System", "Byte");
+    if (!byteK) byteK = bearite_find_class("System", "Byte");
+    if (!byteK || !arr_new) return nullptr;
+    void* arr = arr_new(byteK, n);
+    if (!arr) return nullptr;
+    memcpy(arr_elem(arr, 1, 0), data, n);
+    return arr;
+}
+
+bool read_file(const std::string& path, std::vector<unsigned char>& out) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n <= 0 || n > 64 * 1024 * 1024) { fclose(f); return false; }
+    out.resize((size_t)n);
+    bool ok = fread(out.data(), 1, out.size(), f) == out.size();
+    fclose(f);
+    return ok;
+}
+
+/** Создаёт Texture2D из maps/textures/<id>.tex (сырой RGBA32). Если нет нужных методов, пробует PNG через ImageConversion. */
+void* make_texture(const std::string& id) {
+    void* k = F.tex2d;
+    if (!k || !obj_new) { logf_("текстуры недоступны: нет Texture2D или il2cpp_object_new"); return nullptr; }
+    std::vector<unsigned char> raw;
+    if (!read_file(g_mapsDir + "/textures/" + id + ".tex", raw) || raw.size() < 8) { logf_("текстура %s: файл не найден", id.c_str()); return nullptr; }
+    int w = 0, h = 0;
+    memcpy(&w, raw.data(), 4);
+    memcpy(&h, raw.data() + 4, 4);
+    if (w < 1 || h < 1 || w > 4096 || h > 4096 || raw.size() != (size_t)8 + (size_t)w * h * 4) { logf_("текстура %s: повреждённый файл", id.c_str()); return nullptr; }
+    const unsigned char* px = raw.data() + 8;
+    size_t pxn = (size_t)w * h * 4;
+
+    void* tex = obj_new(k);
+    if (!tex) return nullptr;
+    bool ok = false;
+    int fmt = 4;      // TextureFormat.RGBA32
+    uint8_t mip = 0;  // без мипов: LoadRawTextureData ждёт ровно w*h*4 байт
+    if (void* c4 = find_method_types(k, ".ctor", {"Int32", "Int32", "TextureFormat", "Boolean"})) {
+        void* a[4] = {&w, &h, &fmt, &mip};
+        inv(c4, tex, a, &ok);
+    } else if (void* c2 = find_method_types(k, ".ctor", {"Int32", "Int32"})) {
+        void* a[2] = {&w, &h};
+        inv(c2, tex, a, &ok);
+    }
+    if (!ok) { logf_("текстура %s: не создался Texture2D", id.c_str()); return nullptr; }
+
+    bool loaded = false;
+    const char* how = "";
+    if (void* m = find_method_types(k, "LoadRawTextureData", {"Byte[]"})) {
+        if (void* arr = byte_array(px, pxn)) { void* a[1] = {arr}; inv(m, tex, a, &loaded); how = "LoadRawTextureData(byte[])"; }
+    }
+    if (!loaded) if (void* m = find_method_types(k, "LoadRawTextureData", {"IntPtr", "Int32"})) {
+        const void* ptr = px;
+        int n = (int)pxn;
+        void* a[2] = {&ptr, &n};
+        inv(m, tex, a, &loaded);
+        how = "LoadRawTextureData(IntPtr)";
+    }
+    if (!loaded) {
+        std::vector<unsigned char> png;
+        void* ic = F.image_conv;
+        void* m = ic ? find_method_types(ic, "LoadImage", {"Texture2D", "Byte[]"}) : nullptr;
+        if (m && read_file(g_mapsDir + "/textures/" + id + ".png", png)) {
+            if (void* arr = byte_array(png.data(), png.size())) {
+                void* a[2] = {tex, arr};
+                void* r = inv(m, nullptr, a, &loaded);
+                if (loaded && r) loaded = *(const uint8_t*)obj_unbox(r) != 0;
+                how = "ImageConversion.LoadImage";
+            }
+        }
+    }
+    if (!loaded) { logf_("текстура %s: в игре нет методов загрузки пикселей", id.c_str()); return nullptr; }
+    bool applied = false;
+    if (void* ap = find_method_types(k, "Apply", {"Boolean", "Boolean"})) {
+        uint8_t a1 = 0, a2 = 0;
+        void* a[2] = {&a1, &a2};
+        inv(ap, tex, a, &applied);
+    } else if (void* ap1 = find_method_types(k, "Apply", {"Boolean"})) {
+        uint8_t a1 = 0;
+        void* a[1] = {&a1};
+        inv(ap1, tex, a, &applied);
+    } else if (void* ap0 = bearite_il2.class_get_method_from_name(k, "Apply", 0)) {
+        inv(ap0, tex, nullptr, &applied);
+    }
+    if (F.set_hideflags) { int hf = 61; void* a[1] = {&hf}; inv(F.set_hideflags, tex, a); }  // HideAndDontSave: не выгружать при смене сцены
+    logf_("текстура %s загружена (%dx%d, %s, Apply %s)", id.c_str(), w, h, how, applied ? "ok" : "нет");
+    return tex;
+}
+
+void* get_texture(const std::string& id) {
+    auto it = g_tex.find(id);
+    if (it != g_tex.end()) return it->second ? target(it->second) : nullptr;
+    void* t = make_texture(id);
+    g_tex[id] = t ? gch_new(t, 0) : 0;
+    return t;
+}
+
+void drop_textures() {
+    for (auto& kv : g_tex) if (kv.second) gch_free(kv.second);
+    g_tex.clear();
+}
+
+void apply_texture(Live& L, void* go, const Obj& o) {
+    L.tex = o.tex;
+    L.tile[0] = o.tile[0];
+    L.tile[1] = o.tile[1];
+    if (!F.get_component || !F.get_material || !F.type_renderer || !F.set_main_tex) return;
+    void* b[1] = {F.type_renderer};
+    void* rend = inv(F.get_component, go, b);
+    void* mat = rend ? inv(F.get_material, rend) : nullptr;
+    if (!mat) return;
+    void* tx = o.tex.empty() ? nullptr : get_texture(o.tex);
+    if (!o.tex.empty() && !tx) return;  // не загрузилась: повторять при каждом тике не будем
+    void* a[1] = {tx};
+    inv(F.set_main_tex, mat, a);
+    if (tx && F.set_main_tex_scale) {
+        struct { float x, y; } v{o.tile[0], o.tile[1]};
+        void* c[1] = {&v};
+        inv(F.set_main_tex_scale, mat, c);
+    }
 }
 
 int primitive_id(const std::string& s) {
@@ -322,6 +515,9 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
     L.name = "";
     L.pos[0] = 1e9f; L.rot[0] = 1e9f; L.size[0] = 0;
     L.color = 0xFFFFFFFF;
+    L.tex.clear();
+    L.tile[0] = L.tile[1] = 0;
+    L.tid = 0;
     if (F.set_layer) { int ly = m.layer; void* b[1] = {&ly}; inv(F.set_layer, go, b); }
     if (!o.solid && F.type_collider && F.get_component && F.collider_enabled) {
         void* b[1] = {F.type_collider};
@@ -329,6 +525,7 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
         if (col) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
     }
     (void)fullName;
+    if (F.go_transform) L.tid = inst_id(inv(F.go_transform, go));
     return true;
 }
 
@@ -359,6 +556,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
             L.color = o.color;
         }
     }
+    if (L.tex != o.tex || (!o.tex.empty() && (L.tile[0] != o.tile[0] || L.tile[1] != o.tile[1]))) apply_texture(L, go, o);
 }
 
 /** Приводит объекты в сцене в соответствие с картами. */
@@ -375,7 +573,8 @@ void sync_all() {
     }
     for (const auto& m : g_specs) {
         auto& live = g_live[m.id];
-        bool want = m.enabled && (m.scene.empty() || m.scene == g_scene) && g_engineOk;
+        bool want = m.enabled && g_engineOk &&
+                    (m.world ? m.id == g_worldWant : (g_worldWant.empty() && (m.scene.empty() || m.scene == g_scene)));
         if (!want) {
             for (auto& L : live) destroy_live(L);
             live.clear();
@@ -396,6 +595,231 @@ void sync_all() {
             }
             apply_live(L, o, m, full);
         }
+    }
+}
+
+// -------------------------------------------------------------- отдельный мир
+
+struct World {
+    bool active = false;
+    std::string id;
+    uintptr_t player = 0;       // handle на Transform игрока
+    int protect[3] = {0, 0, 0}; // instance id игрока, его родителя и корня: их потомков не прячем
+    float saved[3] = {0, 0, 0};
+    std::vector<uintptr_t> hr, hc;  // спрятанные рендереры и коллайдеры
+    std::unordered_set<int> hidden;
+    bool camSaved = false;
+    int camFlags = 1;
+    float camBg[4] = {0, 0, 0, 1};
+    long long lastScan = 0, lastTry = 0;
+    int tries = 0;
+} W;
+
+std::unordered_set<int> g_ownIds;
+
+void* find_objects(void* type) {
+    if (!type) return nullptr;
+    if (F.find_objs) { void* a[1] = {type}; return inv(F.find_objs, nullptr, a); }
+    if (F.find_objs_sorted) { int mode = 0; void* a[2] = {type, &mode}; return inv(F.find_objs_sorted, nullptr, a); }
+    return nullptr;
+}
+
+bool is_protected(void* tr) {
+    for (int i = 0; i < 10 && tr; ++i) {
+        int id = inst_id(tr);
+        for (int k = 0; k < 3; ++k) if (W.protect[k] && id == W.protect[k]) return true;
+        tr = F.get_parent ? inv(F.get_parent, tr) : nullptr;
+    }
+    return false;
+}
+
+/** Выключает все рендереры и коллайдеры сцены, кроме игрока и объектов Bearite. Возвращает, сколько выключено. */
+int hide_world() {
+    g_ownIds.clear();
+    for (auto& kv : g_live) for (auto& L : kv.second) if (L.tid) g_ownIds.insert(L.tid);
+    int n = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        void* arr = find_objects(pass == 0 ? F.type_renderer : F.type_collider);
+        if (!arr) continue;
+        void* getEn = pass == 0 ? F.rend_get_enabled : F.col_get_enabled;
+        void* setEn = pass == 0 ? F.rend_set_enabled : F.collider_enabled;
+        if (!getEn || !setEn) continue;
+        uintptr_t cnt = arr_len(arr);
+        if (cnt > 200000) cnt = 200000;
+        for (uintptr_t i = 0; i < cnt; ++i) {
+            void* o = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!o) continue;
+            int id = inst_id(o);
+            if (id && W.hidden.count(id)) continue;
+            void* tr = inv(F.get_transform, o);
+            if (!tr) continue;
+            if (g_ownIds.count(inst_id(tr))) continue;
+            if (is_protected(tr)) continue;
+            void* en = inv(getEn, o);
+            if (!en || !*(const uint8_t*)obj_unbox(en)) continue;
+            uint8_t off = 0;
+            void* a[1] = {&off};
+            bool ok = false;
+            inv(setEn, o, a, &ok);
+            if (!ok) continue;
+            (pass == 0 ? W.hr : W.hc).push_back(gch_new(o, 0));
+            if (id) W.hidden.insert(id);
+            ++n;
+        }
+    }
+    return n;
+}
+
+void show_world() {
+    for (int pass = 0; pass < 2; ++pass) {
+        auto& v = pass == 0 ? W.hr : W.hc;
+        void* setEn = pass == 0 ? F.rend_set_enabled : F.collider_enabled;
+        for (uintptr_t h : v) {
+            void* o = target(h);
+            if (o && setEn) { uint8_t on = 1; void* a[1] = {&on}; inv(setEn, o, a); }
+            gch_free(h);
+        }
+        v.clear();
+    }
+    W.hidden.clear();
+}
+
+void* find_player() {
+    if (F.find_tag && F.go_transform) {
+        void* a[1] = {bearite_il2.string_new("Player")};
+        void* go = inv(F.find_tag, nullptr, a);
+        void* tr = go ? inv(F.go_transform, go) : nullptr;
+        if (tr) return tr;
+    }
+    if (F.find_obj && F.type_cc && F.get_transform) {
+        void* a[1] = {F.type_cc};
+        void* cc = inv(F.find_obj, nullptr, a);
+        void* tr = cc ? inv(F.get_transform, cc) : nullptr;
+        if (tr) return tr;
+    }
+    return nullptr;
+}
+
+void teleport(void* tr, V3 pos) {
+    void* go = F.get_gameobject ? inv(F.get_gameobject, tr) : nullptr;
+    void* cc = nullptr;
+    if (go && F.type_cc && F.get_component) { void* b[1] = {F.type_cc}; cc = inv(F.get_component, go, b); }
+    uint8_t off = 0, on = 1;
+    if (cc && F.collider_enabled) { void* a[1] = {&off}; inv(F.collider_enabled, cc, a); }  // CharacterController иначе возвращает себя на место
+    void* a[1] = {&pos};
+    inv(F.set_position, tr, a);
+    if (cc && F.collider_enabled) { void* c[1] = {&on}; inv(F.collider_enabled, cc, c); }
+}
+
+void set_sky(unsigned rgb) {
+    if (!F.cam_main || !F.cam_set_flags || !F.cam_set_bg) return;
+    void* cam = inv(F.cam_main, nullptr);
+    if (!cam) return;
+    if (!W.camSaved) {
+        if (F.cam_get_flags) { void* r = inv(F.cam_get_flags, cam); if (r) W.camFlags = *(const int*)obj_unbox(r); }
+        if (F.cam_get_bg) { void* r = inv(F.cam_get_bg, cam); if (r) memcpy(W.camBg, obj_unbox(r), sizeof W.camBg); }
+        W.camSaved = true;
+    }
+    int fl = 2;  // CameraClearFlags.SolidColor
+    void* a[1] = {&fl};
+    inv(F.cam_set_flags, cam, a);
+    Col c{((rgb >> 16) & 255) / 255.f, ((rgb >> 8) & 255) / 255.f, (rgb & 255) / 255.f, 1.f};
+    void* b[1] = {&c};
+    inv(F.cam_set_bg, cam, b);
+}
+
+void restore_sky() {
+    if (!W.camSaved) return;
+    W.camSaved = false;
+    if (!F.cam_main || !F.cam_set_flags || !F.cam_set_bg) return;
+    void* cam = inv(F.cam_main, nullptr);
+    if (!cam) return;
+    void* a[1] = {&W.camFlags};
+    inv(F.cam_set_flags, cam, a);
+    Col c{W.camBg[0], W.camBg[1], W.camBg[2], W.camBg[3]};
+    void* b[1] = {&c};
+    inv(F.cam_set_bg, cam, b);
+}
+
+bool world_enter(const MapSpec& m) {
+    void* tr = find_player();
+    if (!tr) {
+        if (W.tries++ == 0) logf_("мир «%s»: игрок не найден (нет тега Player и CharacterController), жду", m.name.c_str());
+        return false;
+    }
+    if (!F.type_renderer || !F.type_collider || !F.get_transform || !F.get_iid || (!F.find_objs && !F.find_objs_sorted)) {
+        g_status = "error";
+        g_msg = "отдельный мир недоступен: в игре вырезаны методы поиска объектов";
+        logf_("%s", g_msg.c_str());
+        W.lastTry = 1LL << 60;  // больше не пробуем
+        return false;
+    }
+    g_ctx = m.id + " мир: вход";
+    W.player = gch_new(tr, 0);
+    W.protect[0] = inst_id(tr);
+    // защищаем игрока, его родителя и корень; слишком «толстый» контейнер (весь уровень) не трогаем
+    auto few = [](void* t) { void* c = F.get_child_count ? inv(F.get_child_count, t) : nullptr; return c && *(const int*)obj_unbox(c) <= 40; };
+    void* par = F.get_parent ? inv(F.get_parent, tr) : nullptr;
+    W.protect[1] = par && few(par) ? inst_id(par) : 0;
+    void* root = tr;
+    for (int i = 0; i < 12 && F.get_parent; ++i) { void* p2 = inv(F.get_parent, root); if (!p2) break; root = p2; }
+    W.protect[2] = root != tr && few(root) ? inst_id(root) : 0;
+    if (void* pos = inv(F.get_position, tr)) memcpy(W.saved, obj_unbox(pos), sizeof W.saved);
+
+    g_crumbs = false;
+    int n = hide_world();
+    g_crumbs = true;
+    set_sky(m.sky);
+    V3 sp{m.off[0] + m.scale * m.spawn[0], m.off[1] + m.scale * m.spawn[1], m.off[2] + m.scale * m.spawn[2]};
+    teleport(tr, sp);
+    W.active = true;
+    W.id = m.id;
+    W.tries = 0;
+    W.lastScan = now_ms_fwd();
+    logf_("мир «%s»: вход, скрыто объектов %d, игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, sp.x, sp.y, sp.z);
+    return true;
+}
+
+/** Выход из мира. restore=false: сцена сменилась, объекты уже уничтожены, трогать их нельзя. */
+void world_exit(bool restore) {
+    if (!W.active && W.hr.empty() && W.hc.empty()) return;
+    g_ctx = "мир: выход";
+    if (restore) {
+        g_crumbs = false;
+        show_world();
+        g_crumbs = true;
+        restore_sky();
+        void* tr = target(W.player);
+        if (tr) teleport(tr, V3{W.saved[0], W.saved[1], W.saved[2]});
+        logf_("мир: выход, всё возвращено на место");
+    } else {
+        for (uintptr_t h : W.hr) gch_free(h);
+        for (uintptr_t h : W.hc) gch_free(h);
+        W.hr.clear(); W.hc.clear(); W.hidden.clear();
+        W.camSaved = false;
+    }
+    if (W.player) { gch_free(W.player); W.player = 0; }
+    W.active = false;
+    W.id.clear();
+}
+
+void world_update(long long now) {
+    const MapSpec* want = nullptr;
+    for (const auto& m : g_specs) if (m.id == g_worldWant && m.enabled && g_engineOk) { want = &m; break; }
+    if (W.active && (!want || want->id != W.id)) world_exit(true);
+    if (!want) return;
+    if (!W.active) {
+        if (now - W.lastTry < 1000) return;
+        W.lastTry = now;
+        // карта должна быть уже построена, иначе игрок упадёт в пустоту
+        auto it = g_live.find(want->id);
+        if (it == g_live.end() || it->second.empty()) return;
+        world_enter(*want);
+    } else if (now - W.lastScan > 3000) {
+        W.lastScan = now;
+        g_crumbs = false;
+        hide_world();  // то, что игра успела создать после входа (враги, эффекты)
+        g_crumbs = true;
     }
 }
 
@@ -424,7 +848,8 @@ void write_state(const std::string& cam) {
     std::string tmp = g_mapsDir + "/.state.tmp";
     FILE* f = fopen(tmp.c_str(), "w");
     if (!f) return;
-    fprintf(f, "status=%s\nmsg=%s\nscene=%s\nobjects=%d\n", g_status.c_str(), g_msg.c_str(), g_scene.c_str(), g_liveCount);
+    fprintf(f, "status=%s\nmsg=%s\nscene=%s\nobjects=%d\nworld=%s\n", g_status.c_str(), g_msg.c_str(), g_scene.c_str(), g_liveCount,
+            W.active ? W.id.c_str() : "");
     if (!cam.empty()) fprintf(f, "cam=%s\n", cam.c_str());
     fclose(f);
     rename(tmp.c_str(), path.c_str());
@@ -462,6 +887,7 @@ long long now_ms() {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
+long long now_ms_fwd() { return now_ms(); }
 
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
@@ -475,10 +901,14 @@ void update() {
         std::string sc = read_scene();
         if (!sc.empty() && sc != g_scene) {
             g_scene = sc;
-            drop_all_live();  // Unity сам уничтожил объекты прошлой сцены
+            world_exit(false);  // объекты прошлой сцены уже уничтожены
+            drop_all_live();    // Unity сам уничтожил объекты прошлой сцены
+            drop_textures();
             g_dirty = true;
         } else if (!check_alive()) {
+            world_exit(false);
             drop_all_live();
+            drop_textures();
             g_dirty = true;
         }
     }
@@ -489,6 +919,14 @@ void update() {
         std::string guard = g_mapsDir + "/_guard";
         if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("sync", gf); fclose(gf); }
         sync_all();
+        g_in_sync = false;
+        unlink(guard.c_str());
+    }
+    if (slow && g_engineOk) {
+        std::string guard = g_mapsDir + "/_guard";
+        if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("мир", gf); fclose(gf); }
+        g_in_sync = true;
+        world_update(now);
         g_in_sync = false;
         unlink(guard.c_str());
     }
@@ -562,6 +1000,9 @@ bool bind_il2cpp() {
     method_pcount = sym<uint32_t (*)(void*)>("il2cpp_method_get_param_count");
     method_param = sym<void* (*)(void*, uint32_t)>("il2cpp_method_get_param");
     class_from_type = sym<void* (*)(void*)>("il2cpp_class_from_type");
+    obj_new = sym<void* (*)(void*)>("il2cpp_object_new");
+    arr_new = sym<void* (*)(void*, uintptr_t)>("il2cpp_array_new");
+    get_corlib = sym<void* (*)()>("il2cpp_get_corlib");
     return gch_new && gch_target && gch_free && obj_unbox && obj_class && class_name && str_chars && str_len &&
            class_type && type_object && class_methods && method_name && method_pcount && method_param && class_from_type;
 }
@@ -605,6 +1046,27 @@ void bind_unity() {
     F.collider_enabled = m0(co, "set_enabled", 1);
     F.get_scene = m0(sm, "GetActiveScene", 0);
     F.scene_name = m0(sc, "GetNameInternal", 1);
+    F.tex2d = bearite_find_class("UnityEngine", "Texture2D");
+    F.set_main_tex = find_method_p0(mt, "set_mainTexture", 1, "Texture");
+    F.set_main_tex_scale = find_method_p0(mt, "set_mainTextureScale", 1, "Vector2");
+    F.set_hideflags = m0(ob, "set_hideFlags", 1);
+    F.image_conv = bearite_find_class("UnityEngine", "ImageConversion");
+    F.get_iid = m0(ob, "GetInstanceID", 0);
+    F.get_parent = m0(tr, "get_parent", 0);
+    F.get_child_count = m0(tr, "get_childCount", 0);
+    F.get_gameobject = m0(cm, "get_gameObject", 0);
+    F.find_tag = find_method_p0(go, "FindWithTag", 1, "String");
+    F.find_obj = find_method_p0(ob, "FindObjectOfType", 1, "Type");
+    F.find_objs = find_method_p0(ob, "FindObjectsOfType", 1, "Type");
+    F.find_objs_sorted = find_method_types(ob, "FindObjectsByType", {"Type", "FindObjectsSortMode"});
+    F.rend_set_enabled = m0(rd, "set_enabled", 1);
+    F.rend_get_enabled = m0(rd, "get_enabled", 0);
+    F.col_get_enabled = m0(co, "get_enabled", 0);
+    F.cam_set_flags = m0(ca, "set_clearFlags", 1);
+    F.cam_get_flags = m0(ca, "get_clearFlags", 0);
+    F.cam_set_bg = m0(ca, "set_backgroundColor", 1);
+    F.cam_get_bg = m0(ca, "get_backgroundColor", 0);
+    F.type_cc = type_of("UnityEngine", "CharacterController");
     F.type_renderer = type_of("UnityEngine", "Renderer");
     F.type_collider = type_of("UnityEngine", "Collider");
 }
@@ -664,6 +1126,9 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
             logf_("цвет объектов недоступен (нет Renderer/Material в игре)");
         if (!F.get_scene || !F.scene_name) logf_("имя сцены недоступно, привязка карт к сцене не работает");
         if (!F.cam_main || !F.get_position || !F.get_forward) logf_("позиция камеры недоступна, «перед камерой» не работает");
+        logf_("текстуры: Texture2D=%d mainTexture=%d объект_new=%d; мир: поиск=%d%d%d тег=%d CharacterController=%d небо=%d",
+              F.tex2d != nullptr, F.set_main_tex != nullptr, obj_new != nullptr, F.find_objs != nullptr, F.find_objs_sorted != nullptr,
+              F.find_obj != nullptr, F.find_tag != nullptr, F.type_cc != nullptr, F.cam_set_bg != nullptr);
     }
 
     int hooks = 0;

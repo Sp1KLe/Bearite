@@ -422,7 +422,37 @@ class GameActivity : Activity() {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
         inject(event) || super.onGenericMotionEvent(event)
 
+    private var imageCallback: ((android.net.Uri?) -> Unit)? = null
+
+    /** Выбор картинки из галереи (для своих текстур в редакторе карт). */
+    fun pickImage(cb: (android.net.Uri?) -> Unit) {
+        imageCallback = cb
+        try {
+            startActivityForResult(
+                Intent(Intent.ACTION_GET_CONTENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE) },
+                REQ_IMAGE
+            )
+        } catch (t: Throwable) {
+            imageCallback = null
+            BLog.e("не открылся выбор картинки", t)
+            cb(null)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQ_IMAGE) {
+            val cb = imageCallback
+            imageCallback = null
+            cb?.invoke(if (resultCode == RESULT_OK) data?.data else null)
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     companion object {
+        const val REQ_IMAGE = 4711
         const val EXTRA_PKG = "game_pkg"
         const val RUNNING_MARKER = "game_running"
     }
