@@ -485,7 +485,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                     if (!moved && hypot(e.x - downX, e.y - downY) > 10f * d) moved = true
                     if (dragMode != 0) { if (moved) dragGizmo(e.x, e.y) }
                     else if (moved) {
-                        yaw -= (e.x - lastX) * 0.008f
+                        yaw += (e.x - lastX) * 0.008f
                         pitch = (pitch + (e.y - lastY) * 0.008f).coerceIn(-1.5f, 1.5f)
                         invalidate()
                     }
