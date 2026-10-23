@@ -1097,6 +1097,41 @@ void scan_near(const float* pp) {
     for (size_t i = 0; i < hits.size() && i < 14; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
 }
 
+/** Один раз за сцену: ищет по имени объекты, похожие на круг/портал/вход (чтобы найти родной круг телепорта). */
+void scan_names() {
+    if (!g_typeTransform || !F.get_transform) return;
+    void* arr = find_objects(g_typeTransform);
+    if (!arr) return;
+    static const char* kw[] = {"portal", "teleport", "circle", "pad", "warp", "entrance", "entry", "door", "gate", "exit", "enter", "ring", "disc", "lobby", "level select", "arcade", "travel", "zone"};
+    bool oc = g_crumbs;
+    g_crumbs = false;
+    uintptr_t n = arr_len(arr);
+    if (n > 100000) n = 100000;
+    std::vector<std::string> seen;
+    int shown = 0;
+    logf_("поиск круга/портала по имени (объектов в сцене %d):", (int)n);
+    for (uintptr_t i = 0; i < n && shown < 70; ++i) {
+        void* tr = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!tr) continue;
+        std::string nm = name_of(tr), l = nm;
+        for (auto& c : l) c = (char)tolower((unsigned char)c);
+        if (l.rfind("bearite/", 0) == 0) continue;
+        bool hit = false;
+        for (const char* k : kw) if (l.find(k) != std::string::npos) { hit = true; break; }
+        if (!hit) continue;
+        void* par = F.get_parent ? inv(F.get_parent, tr) : nullptr;
+        std::string pn = par ? name_of(par) : "-";
+        std::string key = nm + "|" + pn;
+        if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+        seen.push_back(key);
+        void* pv = inv(F.get_position, tr);
+        const float* f = pv ? (const float*)obj_unbox(pv) : nullptr;
+        logf_("  «%s» (родитель «%s») поз %.1f %.1f %.1f", nm.c_str(), pn.c_str(), f ? f[0] : 0.f, f ? f[1] : 0.f, f ? f[2] : 0.f);
+        ++shown;
+    }
+    g_crumbs = oc;
+}
+
 void portals_tick(long long now) {
     bool any = false;
     for (const auto& m : g_specs) {
@@ -1129,6 +1164,12 @@ void portals_tick(long long now) {
     if (!pv) { if (g_player) { gch_free(g_player); g_player = 0; } return; }
     float pp[3];
     memcpy(pp, obj_unbox(pv), sizeof pp);
+    if (diag) {
+        static std::string scNames;
+        static long long scSince = 0;
+        if (scNames != g_scene) { scNames = g_scene; scSince = now; }
+        if (scSince && now - scSince > 5000) { scSince = 0; scan_names(); }
+    }
     if (diag) {
         static float lastScan[3] = {1e9f, 0, 0};
         float mx = pp[0] - lastScan[0], my = pp[1] - lastScan[1], mz = pp[2] - lastScan[2];
