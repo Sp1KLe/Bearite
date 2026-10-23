@@ -828,7 +828,7 @@ void* g_typeTransform = nullptr;
 
 bool bad_name(std::string n) {
     for (auto& c : n) c = (char)tolower((unsigned char)c);
-    static const char* bad[] = {"photo", "camera", "audio", "music", "bearite/", "replay", "canvas", "hud", "ui ", "(ui", "menu", "shadow", "spawn", "marker", "icon", "label", "text"};
+    static const char* bad[] = {"photo", "camera", "audio", "music", "bearite/", "replay", "canvas", "hud", "ui ", "(ui", "menu", "shadow", "spawn", "marker", "icon", "label", "text", "manager", "tiling", "faces", "multiplayer"};
     for (const char* b : bad) if (n.find(b) != std::string::npos) return true;
     return false;
 }
