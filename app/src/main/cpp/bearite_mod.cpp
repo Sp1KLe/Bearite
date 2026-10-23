@@ -72,19 +72,26 @@ void logf_(const char* fmt, ...) {
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
 
-    // Диагностическая сборка: оставляем только сообщения, нужные для поиска
-    // проблем перехода между сценами, игроком, телепортами и отдельными мирами.
-    // Подробный дамп рендереров и список всех кандидатов намеренно скрыты.
+    // Сохраняем компактный лог, но после заголовков диагностических дампов
+    // пропускаем и строки-детали: у них обычно нет слов «портал»/«мир».
+    static int detail_lines = 0;
     static const char* keep[] = {
         "сцена:", "мир", "круг", "телепорт", "портал", "исключение",
         "движок карт", "игрок найден", "игрок не найден", "точку появления",
         "вход", "выход", "защита:", "не найден", "не запущен",
         "нет методов", "позиция камеры", "хуков кадра", "карты читаются",
-        "ошибка", "не удалось", "недоступен"
+        "ошибка", "не удалось", "недоступен", "поиск круга/портала",
+        "рядом с игроком (до 8 м)"
     };
     bool relevant = false;
     for (const char* token : keep) {
         if (strstr(buf, token)) { relevant = true; break; }
+    }
+    if (strstr(buf, "поиск круга/портала")) detail_lines = 75;
+    else if (strstr(buf, "рядом с игроком (до 8 м)")) detail_lines = 26;
+    if (!relevant && detail_lines > 0) {
+        relevant = true;
+        --detail_lines;
     }
     if (!relevant) return;
     if (A) A->log(ID, buf);
@@ -119,7 +126,10 @@ void* inv(void* m, void* obj, void** args = nullptr, bool* ok = nullptr) {
     if (exc && g_exc_logged < 12) {
         ++g_exc_logged;
         void* k = obj_class(exc);
-        logf_("исключение в управляемом методе: %s", k ? class_name(k) : "?");
+        logf_("исключение в управляемом методе: %s; вызов=%s; объект=%s; контекст=%s",
+              k ? class_name(k) : "?", m ? method_name(m) : "?",
+              obj ? class_name(obj_class(obj)) : "static",
+              g_ctx.empty() ? "-" : g_ctx.c_str());
     }
     return exc ? nullptr : r;
 }
