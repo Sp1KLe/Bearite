@@ -1064,7 +1064,7 @@ const MapSpec* find_spec(const std::string& id) {
 }
 
 /** Что игра держит рядом с игроком (до 8 м): помогает найти родной круг телепорта. */
-void scan_near(const float* pp) {
+void scan_near(const float* pp, int pid) {
     if (!F.type_renderer || !F.rend_bounds || !F.get_transform) return;
     void* arr = find_objects(F.type_renderer);
     if (!arr) return;
@@ -1085,6 +1085,17 @@ void scan_near(const float* pp) {
         if (d > 8.f || f[3] > 15.f || f[5] > 15.f) continue;
         void* tr = inv(F.get_transform, o);
         if (!tr) continue;
+        bool mine = false;  // части самого игрока (тело, тень, следы) не показываем: они забивают список
+        {
+            void* t = tr;
+            for (int k = 0; k < 14 && t && !mine; ++k) {
+                if (pid && inst_id(t) == pid) mine = true;
+                t = F.get_parent ? inv(F.get_parent, t) : nullptr;
+            }
+        }
+        if (mine) continue;
+        std::string nm0 = name_of(tr);
+        if (nm0 == "Shadow" || nm0.rfind("Footstep", 0) == 0 || nm0.rfind("Jump VFX", 0) == 0 || nm0.rfind("Bearite/", 0) == 0) continue;
         void* par = F.get_parent ? inv(F.get_parent, tr) : nullptr;
         char buf[320];
         snprintf(buf, sizeof buf, "«%s» (родитель «%s») центр %.1f %.1f %.1f размер %.1f×%.1f×%.1f",
@@ -1094,7 +1105,7 @@ void scan_near(const float* pp) {
     g_crumbs = oc;
     std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.d < b.d; });
     logf_("рядом с игроком (до 8 м): %d рендереров, ближайшие:", (int)hits.size());
-    for (size_t i = 0; i < hits.size() && i < 14; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
+    for (size_t i = 0; i < hits.size() && i < 25; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
 }
 
 /** Один раз за сцену: ищет по имени объекты, похожие на круг/портал/вход (чтобы найти родной круг телепорта). */
@@ -1172,8 +1183,9 @@ void portals_tick(long long now) {
     }
     if (diag) {
         static float lastScan[3] = {1e9f, 0, 0};
+        static long long lastScanT = 0;
         float mx = pp[0] - lastScan[0], my = pp[1] - lastScan[1], mz = pp[2] - lastScan[2];
-        if (mx * mx + my * my + mz * mz > 9.f) { memcpy(lastScan, pp, sizeof lastScan); scan_near(pp); }
+        if (mx * mx + my * my + mz * mz > 9.f || now - lastScanT > 12000) { lastScanT = now; memcpy(lastScan, pp, sizeof lastScan); { void* ptr = g_player ? target(g_player) : nullptr; scan_near(pp, ptr ? inst_id(ptr) : 0); } }
         float best = 1e30f, bdy = 0, br = 0; std::string bn;
         for (const auto& m : g_specs) {
             auto it = g_live.find(m.id);
