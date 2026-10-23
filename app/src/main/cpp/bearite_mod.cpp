@@ -1366,7 +1366,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         return;
     }
     char msg[200];
-    snprintf(msg, sizeof msg, "встроенный мод Bearite запущен, libil2cpp: база=%p", api->module_base("libil2cpp.so"));
+    snprintf(msg, sizeof msg, "встроенный мод Bearite запущен (сборка %s %s, круги v2), libil2cpp: база=%p", __DATE__, __TIME__, api->module_base("libil2cpp.so"));
     api->log(mod_id, msg);
 
     g_mapsDir = std::string(api->data_dir()) + "/maps";
