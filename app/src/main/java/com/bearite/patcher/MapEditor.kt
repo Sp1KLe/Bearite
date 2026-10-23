@@ -601,9 +601,12 @@ class MapEditor(
         section("Режим")
         val worldToggle = ui.togglePill(map.world, 84) { on ->
             map.world = on
-            if (on && map.oy < 500) {
-                map.ox = 0.0; map.oy = 1000.0; map.oz = 0.0
-                toast("Мир поднят на высоту 1000, чтобы не пересекаться с обычным")
+            // Отдельный мир скрывает окружение через рендереры/коллайдеры,
+            // поэтому поднимать его на Y=1000 не нужно: это отправляет игрока
+            // далеко от игровой сцены и может ломать физику.
+            if (on && kotlin.math.abs(map.oy - 1000.0) < 0.01) {
+                map.oy = 0.0
+                toast("Сброшена старая высота мира Y=1000")
             }
             commit(); vp.frameAll(); showInspector(); vp.invalidate()
         }
