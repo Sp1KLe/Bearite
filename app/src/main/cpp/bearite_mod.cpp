@@ -686,8 +686,11 @@ void sync_all() {
     }
     for (const auto& m : g_specs) {
         auto& live = g_live[m.id];
+        // При переходе через портал любая выбранная карта становится активной изолированной локацией.
+        // Флаг world дополнительно позволяет запускать карту как отдельный мир автоматически.
         bool want = g_engineOk &&
-                    (m.world ? m.id == g_worldWant : (m.enabled && g_worldWant.empty() && (m.scene.empty() || m.scene == g_scene)));
+                    (!g_worldWant.empty() ? m.id == g_worldWant :
+                     (!m.world && m.enabled && (m.scene.empty() || m.scene == g_scene)));
         if (!want) {
             for (auto& L : live) destroy_live(L);
             live.clear();
@@ -1055,7 +1058,9 @@ void world_exit(bool restore) {
 
 void world_update(long long now) {
     const MapSpec* want = nullptr;
-    for (const auto& m : g_specs) if (m.world && m.id == g_worldWant && g_engineOk) { want = &m; break; }
+    // g_worldWant может указывать на любую пользовательскую карту, выбранную порталом,
+    // а не только на карту с флагом world=1.
+    for (const auto& m : g_specs) if (m.id == g_worldWant && g_engineOk) { want = &m; break; }
     if (W.active && (!want || want->id != W.id)) world_exit(true);
     if (!want) return;
     if (!W.active) {
@@ -1248,15 +1253,17 @@ void portals_tick(long long now) {
         logf_("круг телепорта «%s»: в точку этой карты", hitObj->name.c_str());
     } else if (const MapSpec* t = find_spec(d)) {
         V3 sp{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
-        if (t->world && !(W.active && W.id == t->id)) {
+        if (!(W.active && W.id == t->id)) {
+            // Портал на другую карту — это переход в отдельную локацию даже если
+            // автор не включал флаг «Отдельный мир» для автоматического запуска.
             g_pending = sp;
             g_hasPending = true;
             g_worldRt = t->id;
             refresh_world_want();
-            logf_("круг телепорта «%s»: вход в мир «%s»", hitObj->name.c_str(), t->name.c_str());
+            logf_("круг телепорта «%s»: переход в отдельную локацию «%s»", hitObj->name.c_str(), t->name.c_str());
         } else {
             teleport(tr, sp);
-            logf_("круг телепорта «%s»: на точку появления карты «%s»", hitObj->name.c_str(), t->name.c_str());
+            logf_("круг телепорта «%s»: точка появления текущего мира «%s»", hitObj->name.c_str(), t->name.c_str());
         }
     } else {
         logf_("круг телепорта «%s»: карта «%s» не найдена", hitObj->name.c_str(), d.c_str());
