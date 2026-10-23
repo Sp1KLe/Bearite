@@ -15,6 +15,7 @@
  * которые игра вызывает каждый кадр. Camera.get_main не трогаем: его перехватывают другие моды (например зум),
  * а Dobby не умеет вешать два хука на одну функцию.
  */
+#include <cmath>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -960,6 +961,9 @@ void portals_tick(long long now) {
         if (any) break;
     }
     if (!any) return;
+    static long long lastDiag = 0;
+    bool diag = now - lastDiag > 3000;
+    if (diag) lastDiag = now;
     void* tr = g_player ? target(g_player) : nullptr;
     void* pv = tr ? inv(F.get_position, tr) : nullptr;
     if (!pv) {
@@ -968,11 +972,28 @@ void portals_tick(long long now) {
         g_lastFind = now;
         tr = find_player();
         pv = tr ? inv(F.get_position, tr) : nullptr;
-        if (!pv) return;
+        if (!pv) { if (diag) logf_("круги: игрок не найден (тег Player / CharacterController)"); return; }
         g_player = gch_new(tr, 0);
+        logf_("круги: игрок найден");
     }
     float pp[3];
     memcpy(pp, obj_unbox(pv), sizeof pp);
+    if (diag) {
+        float best = 1e30f, bdy = 0, br = 0; std::string bn;
+        for (const auto& m : g_specs) {
+            auto it = g_live.find(m.id);
+            if (it == g_live.end()) continue;
+            for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+                const Obj& o = m.objs[i];
+                if (o.shape != "portal" || !it->second[i].h) continue;
+                float dx = pp[0] - (m.off[0] + m.scale * o.p[0]), dz = pp[2] - (m.off[2] + m.scale * o.p[2]);
+                float d = sqrtf(dx * dx + dz * dz);
+                if (d < best) { best = d; bdy = pp[1] - (m.off[1] + m.scale * o.p[1]); br = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]); bn = o.name; }
+            }
+        }
+        logf_("круги: игрок (%.1f %.1f %.1f), ближайший «%s»: расстояние %.1f, радиус %.1f, dy %.1f, защёлка %d",
+              pp[0], pp[1], pp[2], bn.c_str(), best, br, bdy, (int)g_portalLatched);
+    }
     const MapSpec* hit = nullptr;
     const Obj* hitObj = nullptr;
     for (const auto& m : g_specs) {
