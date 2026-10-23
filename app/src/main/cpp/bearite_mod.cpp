@@ -183,7 +183,7 @@ struct Fns {
     // отдельный мир
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
-    void *type_cc;
+    void *type_cc, *type_kcm, *kcm_set_pos;
     // диагностика и запасной путь для текстур
     void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
         *rend_set_material, *mat_class, *mat_ctor_shader, *rend_bounds;
@@ -802,7 +802,7 @@ void* g_typeTransform = nullptr;
 
 bool bad_name(std::string n) {
     for (auto& c : n) c = (char)tolower((unsigned char)c);
-    static const char* bad[] = {"photo", "camera", "canvas", "hud", "ui ", "(ui", "menu", "shadow", "spawn", "marker", "icon", "label", "text"};
+    static const char* bad[] = {"photo", "camera", "audio", "music", "bearite/", "replay", "canvas", "hud", "ui ", "(ui", "menu", "shadow", "spawn", "marker", "icon", "label", "text"};
     for (const char* b : bad) if (n.find(b) != std::string::npos) return true;
     return false;
 }
@@ -829,6 +829,13 @@ void cands_rebuild() {
     old.swap(g_cands);
     bool oc = g_crumbs;
     g_crumbs = false;
+    if (F.type_kcm) if (void* arr = find_objects(F.type_kcm)) {
+        uintptr_t n = arr_len(arr);
+        for (uintptr_t i = 0; i < n && i < 50; ++i) {
+            void* m = *(void**)arr_elem(arr, sizeof(void*), i);
+            cand_add(m ? inv(F.get_transform, m) : nullptr, "KCC");
+        }
+    }
     if (F.find_tag && F.go_transform) {
         void* a[1] = {bearite_il2.string_new("Player")};
         void* go = inv(F.find_tag, nullptr, a);
@@ -866,6 +873,7 @@ void cands_rebuild() {
 void* pick_player(long long now, bool force = false) {
     if (force || g_cands.empty() || now - g_candBuild > 5000) { g_candBuild = now; cands_rebuild(); }
     Cand* best = nullptr;
+    float bestScore = 0;
     for (auto& c : g_cands) {
         void* tr = target(c.h);
         void* pv = tr ? inv(F.get_position, tr) : nullptr;
@@ -875,7 +883,8 @@ void* pick_player(long long now, bool force = false) {
         float d = sqrtf((f[0] - c.last[0]) * (f[0] - c.last[0]) + (f[1] - c.last[1]) * (f[1] - c.last[1]) + (f[2] - c.last[2]) * (f[2] - c.last[2]));
         if (c.path >= 0 && d < 40.f) c.path += d;
         memcpy(c.last, f, sizeof f);
-        if (c.path >= 0 && (!best || c.path > best->path + 0.5f)) best = &c;
+        float score = c.path + (c.how == "KCC" ? 100000.f : 0.f);  // мотор KCC — это сам игрок; остальные только если мотора нет
+        if (c.path >= 0 && (!best || score > bestScore + 0.5f)) { best = &c; bestScore = score; }
     }
     if (now - g_candLog > 15000 && !g_cands.empty()) {
         g_candLog = now;
@@ -898,6 +907,17 @@ void* find_player(const char** how = nullptr) {
 
 void teleport(void* tr, V3 pos) {
     void* go = F.get_gameobject ? inv(F.get_gameobject, tr) : nullptr;
+    if (go && F.type_kcm && F.kcm_set_pos && F.get_component) {  // KCC каждый тик возвращает объект на свою позицию — двигаем через мотор
+        void* b[1] = {F.type_kcm};
+        void* motor = inv(F.get_component, go, b);
+        if (motor) {
+            uint8_t bypass = 1;
+            void* a[2] = {&pos, &bypass};
+            bool ok = false;
+            inv(F.kcm_set_pos, motor, a, &ok);
+            if (ok) return;
+        }
+    }
     void* cc = nullptr;
     if (go && F.type_cc && F.get_component) { void* b[1] = {F.type_cc}; cc = inv(F.get_component, go, b); }
     uint8_t off = 0, on = 1;
@@ -1062,7 +1082,7 @@ void scan_near(const float* pp) {
         const float* f = (const float*)obj_unbox(bb);
         float dx = f[0] - pp[0], dy = f[1] - pp[1], dz = f[2] - pp[2];
         float d = sqrtf(dx * dx + dy * dy + dz * dz);
-        if (d > 8.f) continue;
+        if (d > 8.f || f[3] > 15.f || f[5] > 15.f) continue;
         void* tr = inv(F.get_transform, o);
         if (!tr) continue;
         void* par = F.get_parent ? inv(F.get_parent, tr) : nullptr;
@@ -1422,6 +1442,10 @@ void bind_unity() {
     F.cam_get_bg = m0(ca, "get_backgroundColor", 0);
     F.type_cc = type_of("UnityEngine", "CharacterController");
     g_typeTransform = type_of("UnityEngine", "Transform");
+    F.type_kcm = type_of("KinematicCharacterController", "KinematicCharacterMotor");
+    if (void* kk = bearite_find_class("KinematicCharacterController", "KinematicCharacterMotor"))
+        F.kcm_set_pos = find_method_types(kk, "SetPosition", {"Vector3", "Boolean"});
+    logf_("KinematicCharacterMotor: тип=%d SetPosition=%d", F.type_kcm != nullptr, F.kcm_set_pos != nullptr);
     void* shd = bearite_find_class("UnityEngine", "Shader");
     F.mat_has_prop = find_method_types(mt, "HasProperty", {"String"});
     F.mat_set_tex = find_method_types(mt, "SetTexture", {"String", "Texture"});
