@@ -794,20 +794,105 @@ std::string name_of(void* o) {
     return nm ? utf8(nm) : std::string("?");
 }
 
-/** Игрок: сначала CharacterController (двигается точно), потом объект с тегом Player (может оказаться неподвижным заготовкой). */
-void* find_player(const char** how = nullptr) {
-    if (F.find_obj && F.type_cc && F.get_transform) {
-        void* a[1] = {F.type_cc};
-        void* cc = inv(F.find_obj, nullptr, a);
-        void* tr = cc ? inv(F.get_transform, cc) : nullptr;
-        if (tr) { if (how) *how = "CharacterController"; return tr; }
-    }
+// ---- поиск игрока: кандидатов несколько (тег, CharacterController, объекты «…player…»), настоящий тот, что двигается
+struct Cand { uintptr_t h = 0; int id = 0; float last[3] = {0, 0, 0}; float path = 0; std::string name, how; };
+std::vector<Cand> g_cands;
+long long g_candBuild = 0, g_candPoll = 0, g_candLog = 0;
+void* g_typeTransform = nullptr;
+
+bool bad_name(std::string n) {
+    for (auto& c : n) c = (char)tolower((unsigned char)c);
+    static const char* bad[] = {"photo", "camera", "canvas", "hud", "ui ", "(ui", "menu", "shadow", "spawn", "marker", "icon", "label", "text"};
+    for (const char* b : bad) if (n.find(b) != std::string::npos) return true;
+    return false;
+}
+
+void cand_add(void* tr, const char* how) {
+    if (!tr) return;
+    int id = inst_id(tr);
+    for (auto& c : g_cands) if (c.id == id) return;
+    std::string nm = name_of(tr);
+    if (bad_name(nm)) return;
+    void* pv = inv(F.get_position, tr);
+    if (!pv) return;
+    Cand c;
+    c.h = gch_new(tr, 0);
+    c.id = id;
+    memcpy(c.last, obj_unbox(pv), sizeof c.last);
+    c.name = nm;
+    c.how = how;
+    g_cands.push_back(c);
+}
+
+void cands_rebuild() {
+    std::vector<Cand> old;
+    old.swap(g_cands);
+    bool oc = g_crumbs;
+    g_crumbs = false;
     if (F.find_tag && F.go_transform) {
         void* a[1] = {bearite_il2.string_new("Player")};
         void* go = inv(F.find_tag, nullptr, a);
-        void* tr = go ? inv(F.go_transform, go) : nullptr;
-        if (tr) { if (how) *how = "тег Player"; return tr; }
+        cand_add(go ? inv(F.go_transform, go) : nullptr, "тег Player");
     }
+    if (void* arr = find_objects(F.type_cc)) {
+        uintptr_t n = arr_len(arr);
+        for (uintptr_t i = 0; i < n && i < 200; ++i) {
+            void* cc = *(void**)arr_elem(arr, sizeof(void*), i);
+            cand_add(cc ? inv(F.get_transform, cc) : nullptr, "CharacterController");
+        }
+    }
+    if (g_typeTransform) if (void* arr = find_objects(g_typeTransform)) {
+        uintptr_t n = arr_len(arr);
+        if (n > 100000) n = 100000;
+        int added = 0;
+        for (uintptr_t i = 0; i < n && added < 24; ++i) {
+            void* tr = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!tr) continue;
+            std::string nm = name_of(tr);
+            std::string l = nm;
+            for (auto& c : l) c = (char)tolower((unsigned char)c);
+            if (l.find("player") == std::string::npos && l.find("bear") == std::string::npos && l.find("character") == std::string::npos) continue;
+            size_t before = g_cands.size();
+            cand_add(tr, "имя");
+            if (g_cands.size() > before) ++added;
+        }
+    }
+    g_crumbs = oc;
+    for (auto& c : g_cands) for (auto& o : old) if (o.id == c.id) c.path = o.path;  // накопленный путь не теряем
+    for (auto& o : old) gch_free(o.h);
+}
+
+/** Раз в секунду обновляет пути кандидатов; возвращает того, кто реально двигался (иначе первого). */
+void* pick_player(long long now, bool force = false) {
+    if (force || g_cands.empty() || now - g_candBuild > 5000) { g_candBuild = now; cands_rebuild(); }
+    Cand* best = nullptr;
+    for (auto& c : g_cands) {
+        void* tr = target(c.h);
+        void* pv = tr ? inv(F.get_position, tr) : nullptr;
+        if (!pv) { c.path = -1; continue; }
+        float f[3];
+        memcpy(f, obj_unbox(pv), sizeof f);
+        float d = sqrtf((f[0] - c.last[0]) * (f[0] - c.last[0]) + (f[1] - c.last[1]) * (f[1] - c.last[1]) + (f[2] - c.last[2]) * (f[2] - c.last[2]));
+        if (c.path >= 0 && d < 40.f) c.path += d;
+        memcpy(c.last, f, sizeof f);
+        if (c.path >= 0 && (!best || c.path > best->path + 0.5f)) best = &c;
+    }
+    if (now - g_candLog > 15000 && !g_cands.empty()) {
+        g_candLog = now;
+        logf_("кандидаты в игроки: %d", (int)g_cands.size());
+        for (size_t i = 0; i < g_cands.size() && i < 12; ++i)
+            logf_("  «%s» (%s) поз %.1f %.1f %.1f, пройдено %.1f%s", g_cands[i].name.c_str(), g_cands[i].how.c_str(), g_cands[i].last[0], g_cands[i].last[1],
+                  g_cands[i].last[2], g_cands[i].path, &g_cands[i] == best ? "  ← выбран" : "");
+    }
+    return best ? target(best->h) : nullptr;
+}
+
+void* find_player(const char** how = nullptr) {
+    long long now = 0;
+    { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); now = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }
+    void* tr = pick_player(now, true);
+    if (tr) { if (how) *how = "по движению"; return tr; }
+    if (!g_cands.empty()) { if (how) *how = "первый кандидат"; return target(g_cands[0].h); }
     return nullptr;
 }
 
@@ -1006,18 +1091,18 @@ void portals_tick(long long now) {
     bool diag = now - lastDiag > 3000;
     if (diag) lastDiag = now;
     void* tr = g_player ? target(g_player) : nullptr;
-    if (!tr || now - g_lastFind >= 1000) {  // перепроверяем раз в секунду: заготовка могла смениться настоящим игроком
+    if (!tr || now - g_lastFind >= 1000) {  // перепроверяем раз в секунду: выбираем того кандидата, кто двигается
         g_lastFind = now;
-        const char* how = "";
-        void* nt = find_player(&how);
+        void* nt = pick_player(now);
+        if (!nt && !tr) {
+            if (diag) logf_("круги: игрок не найден (нет кандидатов)");
+            return;
+        }
         if (nt && (!tr || inst_id(nt) != inst_id(tr))) {
             if (g_player) gch_free(g_player);
             g_player = gch_new(nt, 0);
             tr = nt;
-            logf_("круги: игрок = «%s» (%s)", name_of(nt).c_str(), how);
-        } else if (!nt && !tr) {
-            if (diag) logf_("круги: игрок не найден (CharacterController / тег Player)");
-            return;
+            logf_("круги: игрок = «%s»", name_of(nt).c_str());
         }
     }
     void* pv = tr ? inv(F.get_position, tr) : nullptr;
@@ -1336,6 +1421,7 @@ void bind_unity() {
     F.cam_set_bg = m0(ca, "set_backgroundColor", 1);
     F.cam_get_bg = m0(ca, "get_backgroundColor", 0);
     F.type_cc = type_of("UnityEngine", "CharacterController");
+    g_typeTransform = type_of("UnityEngine", "Transform");
     void* shd = bearite_find_class("UnityEngine", "Shader");
     F.mat_has_prop = find_method_types(mt, "HasProperty", {"String"});
     F.mat_set_tex = find_method_types(mt, "SetTexture", {"String", "Texture"});
