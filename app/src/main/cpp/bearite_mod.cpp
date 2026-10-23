@@ -16,6 +16,7 @@
  * а Dobby не умеет вешать два хука на одну функцию.
  */
 #include <cmath>
+#include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -788,18 +789,24 @@ void show_world() {
     W.hidden.clear();
 }
 
-void* find_player() {
-    if (F.find_tag && F.go_transform) {
-        void* a[1] = {bearite_il2.string_new("Player")};
-        void* go = inv(F.find_tag, nullptr, a);
-        void* tr = go ? inv(F.go_transform, go) : nullptr;
-        if (tr) return tr;
-    }
+std::string name_of(void* o) {
+    void* nm = o && F.get_name ? inv(F.get_name, o) : nullptr;
+    return nm ? utf8(nm) : std::string("?");
+}
+
+/** Игрок: сначала CharacterController (двигается точно), потом объект с тегом Player (может оказаться неподвижным заготовкой). */
+void* find_player(const char** how = nullptr) {
     if (F.find_obj && F.type_cc && F.get_transform) {
         void* a[1] = {F.type_cc};
         void* cc = inv(F.find_obj, nullptr, a);
         void* tr = cc ? inv(F.get_transform, cc) : nullptr;
-        if (tr) return tr;
+        if (tr) { if (how) *how = "CharacterController"; return tr; }
+    }
+    if (F.find_tag && F.go_transform) {
+        void* a[1] = {bearite_il2.string_new("Player")};
+        void* go = inv(F.find_tag, nullptr, a);
+        void* tr = go ? inv(F.go_transform, go) : nullptr;
+        if (tr) { if (how) *how = "тег Player"; return tr; }
     }
     return nullptr;
 }
@@ -951,6 +958,40 @@ const MapSpec* find_spec(const std::string& id) {
     return nullptr;
 }
 
+/** Что игра держит рядом с игроком (до 8 м): помогает найти родной круг телепорта. */
+void scan_near(const float* pp) {
+    if (!F.type_renderer || !F.rend_bounds || !F.get_transform) return;
+    void* arr = find_objects(F.type_renderer);
+    if (!arr) return;
+    struct Hit { float d; std::string desc; };
+    std::vector<Hit> hits;
+    uintptr_t cnt = arr_len(arr);
+    if (cnt > 200000) cnt = 200000;
+    bool oc = g_crumbs;
+    g_crumbs = false;
+    for (uintptr_t i = 0; i < cnt; ++i) {
+        void* o = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!o) continue;
+        void* bb = inv(F.rend_bounds, o);
+        if (!bb) continue;
+        const float* f = (const float*)obj_unbox(bb);
+        float dx = f[0] - pp[0], dy = f[1] - pp[1], dz = f[2] - pp[2];
+        float d = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (d > 8.f) continue;
+        void* tr = inv(F.get_transform, o);
+        if (!tr) continue;
+        void* par = F.get_parent ? inv(F.get_parent, tr) : nullptr;
+        char buf[320];
+        snprintf(buf, sizeof buf, "«%s» (родитель «%s») центр %.1f %.1f %.1f размер %.1f×%.1f×%.1f",
+                 name_of(tr).c_str(), par ? name_of(par).c_str() : "-", f[0], f[1], f[2], f[3] * 2, f[4] * 2, f[5] * 2);
+        hits.push_back({d, buf});
+    }
+    g_crumbs = oc;
+    std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.d < b.d; });
+    logf_("рядом с игроком (до 8 м): %d рендереров, ближайшие:", (int)hits.size());
+    for (size_t i = 0; i < hits.size() && i < 14; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
+}
+
 void portals_tick(long long now) {
     bool any = false;
     for (const auto& m : g_specs) {
@@ -965,20 +1006,28 @@ void portals_tick(long long now) {
     bool diag = now - lastDiag > 3000;
     if (diag) lastDiag = now;
     void* tr = g_player ? target(g_player) : nullptr;
-    void* pv = tr ? inv(F.get_position, tr) : nullptr;
-    if (!pv) {
-        if (g_player) { gch_free(g_player); g_player = 0; }
-        if (now - g_lastFind < 1000) return;
+    if (!tr || now - g_lastFind >= 1000) {  // перепроверяем раз в секунду: заготовка могла смениться настоящим игроком
         g_lastFind = now;
-        tr = find_player();
-        pv = tr ? inv(F.get_position, tr) : nullptr;
-        if (!pv) { if (diag) logf_("круги: игрок не найден (тег Player / CharacterController)"); return; }
-        g_player = gch_new(tr, 0);
-        logf_("круги: игрок найден");
+        const char* how = "";
+        void* nt = find_player(&how);
+        if (nt && (!tr || inst_id(nt) != inst_id(tr))) {
+            if (g_player) gch_free(g_player);
+            g_player = gch_new(nt, 0);
+            tr = nt;
+            logf_("круги: игрок = «%s» (%s)", name_of(nt).c_str(), how);
+        } else if (!nt && !tr) {
+            if (diag) logf_("круги: игрок не найден (CharacterController / тег Player)");
+            return;
+        }
     }
+    void* pv = tr ? inv(F.get_position, tr) : nullptr;
+    if (!pv) { if (g_player) { gch_free(g_player); g_player = 0; } return; }
     float pp[3];
     memcpy(pp, obj_unbox(pv), sizeof pp);
     if (diag) {
+        static float lastScan[3] = {1e9f, 0, 0};
+        float mx = pp[0] - lastScan[0], my = pp[1] - lastScan[1], mz = pp[2] - lastScan[2];
+        if (mx * mx + my * my + mz * mz > 9.f) { memcpy(lastScan, pp, sizeof lastScan); scan_near(pp); }
         float best = 1e30f, bdy = 0, br = 0; std::string bn;
         for (const auto& m : g_specs) {
             auto it = g_live.find(m.id);
