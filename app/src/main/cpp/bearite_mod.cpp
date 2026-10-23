@@ -1170,15 +1170,8 @@ void scan_names() {
 }
 
 void portals_tick(long long now) {
-    bool any = false;
-    for (const auto& m : g_specs) {
-        auto it = g_live.find(m.id);
-        if (it == g_live.end()) continue;
-        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i)
-            if (m.objs[i].shape == "portal" && it->second[i].h) { any = true; break; }
-        if (any) break;
-    }
-    if (!any) return;
+    // Диагностика должна работать и тогда, когда карты с порталами ещё не загружены.
+    // Иначе ранний return скрывает причину: игрок и родные порталы сцены вообще не сканируются.
     static long long lastDiag = 0;
     bool diag = now - lastDiag > 3000;
     if (diag) lastDiag = now;
