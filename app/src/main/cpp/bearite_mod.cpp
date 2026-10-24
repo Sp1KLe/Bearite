@@ -184,6 +184,7 @@ struct Fns {
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
+    void *instantiate, *get_local_scale;
     void *type_mono, *get_comps_children, *beh_get_enabled, *beh_set_enabled, *col_is_trigger;
     // диагностика и запасной путь для текстур
     void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
@@ -206,6 +207,7 @@ struct Obj {
     float tile[2] = {1, 1};
     std::string dest;       // круг телепорта: "" = точка этой карты, "@exit" = выход из мира, иначе id карты
     float dp[3] = {0, 0, 0};
+    bool clone = false;     // с bind: поставить копию платформы на месте круга, а не занимать оригинал
     std::string bind;       // имя родного объекта игры, который этот круг «занимает» (пусто = свой круг)
 };
 
@@ -237,7 +239,7 @@ struct Live {
     uintptr_t nat = 0;                                  // handle на Transform родного круга
     std::vector<std::pair<uintptr_t, int>> natOff;      // что мы выключили у него: (handle, 0 = скрипт, 1 = триггер)
     long long natTry = 0;
-    bool natHidden = false, natMiss = false;
+    bool natHidden = false, natMiss = false, natClone = false;
 };
 
 std::string g_mapsDir;
@@ -301,6 +303,7 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             if (p.size() > 17) o.dest = p[17];
             if (p.size() > 20) for (int i = 0; i < 3; ++i) o.dp[i] = num(p[18 + i], 0);
             if (p.size() > 21) o.bind = p[21];
+            if (p.size() > 22) o.clone = p[22] == "1";
             m.objs.push_back(o);
             continue;
         }
@@ -373,7 +376,16 @@ void release_native(Live& L, bool restore) {
         gch_free(e.first);
     }
     L.natOff.clear();
-    if (L.nat) { gch_free(L.nat); L.nat = 0; }
+    if (L.nat) {
+        if (L.natClone && restore && F.destroy && F.get_gameobject) {  // копию платформы убираем вместе с картой
+            void* tr = target(L.nat);
+            void* go = tr ? inv(F.get_gameobject, tr) : nullptr;
+            if (go) { void* a[1] = {go}; inv(F.destroy, nullptr, a); }
+        }
+        gch_free(L.nat);
+        L.nat = 0;
+    }
+    L.natClone = false;
     L.natHidden = false;
 }
 
@@ -659,7 +671,12 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     V3 pos{m.off[0] + m.scale * o.p[0], m.off[1] + m.scale * o.p[1], m.off[2] + m.scale * o.p[2]};
     V3 size{m.scale * o.s[0], m.scale * o.s[1], m.scale * o.s[2]};
     V3 rot{o.r[0], o.r[1], o.r[2]};
-    if (memcmp(L.pos, &pos, sizeof pos) != 0) { void* a[1] = {&pos}; inv(F.set_position, tr, a); memcpy(L.pos, &pos, sizeof pos); }
+    if (memcmp(L.pos, &pos, sizeof pos) != 0) {
+        void* a[1] = {&pos};
+        inv(F.set_position, tr, a);
+        memcpy(L.pos, &pos, sizeof pos);
+        if (L.natClone && L.nat) if (void* ct = target(L.nat)) inv(F.set_position, ct, a);
+    }
     if (memcmp(L.size, &size, sizeof size) != 0) { void* a[1] = {&size}; inv(F.set_scale, tr, a); memcpy(L.size, &size, sizeof size); }
     if (memcmp(L.rot, &rot, sizeof rot) != 0) { void* a[1] = {&rot}; inv(F.set_euler, tr, a); memcpy(L.rot, &rot, sizeof rot); }
     unsigned eff = o.tex.empty() ? o.color : 0xFFFFFFu;  // с текстурой цвет не красит её (иначе картинка тонет в коричневом)
@@ -769,7 +786,10 @@ int hide_world() {
         void* pos = ptr ? inv(F.get_position, ptr) : nullptr;
         if (pos) memcpy(W.here, obj_unbox(pos), sizeof W.here);
     }
-    for (auto& kv : g_live) for (auto& L : kv.second) if (L.tid) g_ownIds.insert(L.tid);
+    for (auto& kv : g_live) for (auto& L : kv.second) {
+        if (L.tid) g_ownIds.insert(L.tid);
+        if (L.natClone && L.nat) if (void* ct = target(L.nat)) g_ownIds.insert(inst_id(ct));
+    }
     int n = 0;
     for (int pass = 0; pass < 2; ++pass) {
         void* arr = find_objects(pass == 0 ? F.type_renderer : F.type_collider);
@@ -786,7 +806,15 @@ int hide_world() {
             if (id && W.hidden.count(id)) continue;
             void* tr = inv(F.get_transform, o);
             if (!tr) continue;
-            if (g_ownIds.count(inst_id(tr))) continue;
+            {
+                bool own = false;
+                void* t = tr;
+                for (int k = 0; k < 12 && t && !own; ++k) {
+                    own = g_ownIds.count(inst_id(t)) != 0;
+                    if (!own) t = F.get_parent ? inv(F.get_parent, t) : nullptr;
+                }
+                if (own) continue;
+            }
             if (is_protected(tr)) continue;
             if (pass == 0 && F.rend_bounds) {  // небольшие рендереры рядом с игроком (его модель) оставляем
                 void* bb = inv(F.rend_bounds, o);
@@ -1144,11 +1172,10 @@ void scan_near(const float* pp, int pid) {
     for (size_t i = 0; i < hits.size() && i < 25; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
 }
 
-/** Ищет родной объект по имени и выключает то, что запускает уровень: скрипты и триггеры внутри него. */
-bool bind_native(Live& L, const std::string& name) {
-    if (!g_typeTransform || !F.get_transform) return false;
+void* find_native(const std::string& name) {
+    if (!g_typeTransform || !F.get_transform) return nullptr;
     void* arr = find_objects(g_typeTransform);
-    if (!arr) return false;
+    if (!arr) return nullptr;
     bool oc = g_crumbs;
     g_crumbs = false;
     void* found = nullptr;
@@ -1159,9 +1186,11 @@ bool bind_native(Live& L, const std::string& name) {
         if (tr && name_of(tr) == name) found = tr;
     }
     g_crumbs = oc;
-    if (!found) return false;
-    L.nat = gch_new(found, 0);
-    void* go = F.get_gameobject ? inv(F.get_gameobject, found) : nullptr;
+    return found;
+}
+
+/** Выключает скрипты и триггеры внутри объекта (платформа перестаёт запускать уровень). */
+void disable_scripts(Live& L, void* go, const std::string& what) {
     int nb = 0, nt = 0;
     std::string names;
     if (go && F.get_comps_children) {
@@ -1195,7 +1224,62 @@ bool bind_native(Live& L, const std::string& name) {
             }
         }
     }
-    logf_("родной круг «%s» найден и занят: выключено скриптов %d, триггеров %d%s%s", name.c_str(), nb, nt, names.empty() ? "" : " — ", names.c_str());
+    logf_("%s: выключено скриптов %d, триггеров %d%s%s", what.c_str(), nb, nt, names.empty() ? "" : " — ", names.c_str());
+}
+
+/** Ищет родной объект по имени и занимает его: выключает то, что запускает уровень. */
+bool bind_native(Live& L, const std::string& name) {
+    void* found = find_native(name);
+    if (!found) return false;
+    L.nat = gch_new(found, 0);
+    void* go = F.get_gameobject ? inv(F.get_gameobject, found) : nullptr;
+    disable_scripts(L, go, "родной круг «" + name + "» найден и занят");
+    return true;
+}
+
+/** Делает копию родного объекта (платформа запуска уровня) на месте круга; оригинал не трогает. */
+bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
+    void* tmpl = find_native(name);
+    if (!tmpl || !F.instantiate || !F.go_transform) return false;
+    void* tgo = F.get_gameobject ? inv(F.get_gameobject, tmpl) : nullptr;
+    if (!tgo) return false;
+    void* a[1] = {tgo};
+    void* cgo = inv(F.instantiate, nullptr, a);
+    if (!cgo) return false;
+    void* ctr = inv(F.go_transform, cgo);
+    if (!ctr) return false;
+    L.nat = gch_new(ctr, 0);
+    L.natClone = true;
+    // то, что мир спрятал у оригинала, в копии должно быть включено
+    if (F.get_comps_children) for (int pass = 0; pass < 2; ++pass) {
+        void* type = pass == 0 ? F.type_renderer : F.type_collider;
+        void* setEn = pass == 0 ? F.rend_set_enabled : F.collider_enabled;
+        if (!type || !setEn) continue;
+        uint8_t inc = 1;
+        void* b1[2] = {type, &inc};
+        void* b2[2] = {type, &inc};
+        void* tc = inv(F.get_comps_children, tgo, b1);
+        void* cc = inv(F.get_comps_children, cgo, b2);
+        if (!tc || !cc) continue;
+        uintptr_t n = arr_len(tc);
+        if (arr_len(cc) < n) n = arr_len(cc);
+        for (uintptr_t i = 0; i < n && i < 400; ++i) {
+            void* t1 = *(void**)arr_elem(tc, sizeof(void*), i);
+            void* c1 = *(void**)arr_elem(cc, sizeof(void*), i);
+            if (t1 && c1 && W.hidden.count(inst_id(t1))) { uint8_t on = 1; void* e[1] = {&on}; inv(setEn, c1, e); }
+        }
+    }
+    disable_scripts(L, cgo, "копия платформы «" + name + "» создана");
+    void* sc = F.get_local_scale ? inv(F.get_local_scale, tmpl) : nullptr;
+    if (sc) {
+        float v[3];
+        memcpy(v, obj_unbox(sc), sizeof v);
+        V3 ns{v[0] * k, v[1] * k, v[2] * k};
+        void* c[1] = {&ns};
+        inv(F.set_scale, ctr, c);
+    }
+    void* pp[1] = {const_cast<V3*>(&pos)};
+    inv(F.set_position, ctr, pp);
     return true;
 }
 
@@ -1236,6 +1320,18 @@ void scan_names() {
 
 /** Центр круга: свой — по координатам карты, родной — там, где сейчас стоит занятый объект игры. */
 bool portal_center(const MapSpec& m, const Obj& o, Live& L, long long now, float* c) {
+    if (!o.bind.empty() && o.clone) {  // копия платформы на месте круга: центр — координаты круга
+        for (int k = 0; k < 3; ++k) c[k] = m.off[k] + m.scale * o.p[k];
+        if (!L.nat && now - L.natTry >= 3000) {
+            L.natTry = now;
+            float kk = m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]) / 3.0f;
+            if (!clone_native(L, o.bind, V3{c[0], c[1], c[2]}, kk < 0.05f ? 0.05f : kk) && !L.natMiss) {
+                L.natMiss = true;
+                logf_("платформа «%s» для копии в этой сцене не найдена (повторю, когда сменится сцена)", o.bind.c_str());
+            }
+        }
+        return true;
+    }
     if (o.bind.empty()) {
         for (int k = 0; k < 3; ++k) c[k] = m.off[k] + m.scale * o.p[k];
         return true;
@@ -1588,6 +1684,8 @@ void bind_unity() {
     F.set_color = m0(mt, "set_color", 1);
     F.collider_enabled = m0(co, "set_enabled", 1);
     F.col_is_trigger = m0(co, "get_isTrigger", 0);
+    F.instantiate = find_method_types(ob, "Instantiate", {"Object"});
+    F.get_local_scale = m0(tr, "get_localScale", 0);
     F.type_mono = type_of("UnityEngine", "MonoBehaviour");
     if (void* bh = bearite_find_class("UnityEngine", "Behaviour")) {
         F.beh_get_enabled = m0(bh, "get_enabled", 0);

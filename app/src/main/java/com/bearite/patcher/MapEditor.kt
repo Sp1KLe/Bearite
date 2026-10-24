@@ -483,16 +483,30 @@ class MapEditor(
     }
 
     private fun nativeSection(o: MapObj) {
-        section("Родной круг игры")
-        inspector.addView(ui.label("Круг можно посадить на настоящую платформу игры: она перестанет запускать уровень и будет телепортировать по этим настройкам. Свой диск при этом скрыт.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(2), 0, dp(4)) })
-        inspector.addView(ui.textInput(o.bind, 260, "имя объекта в игре") { v -> if (v.trim() != o.bind) { o.bind = v.trim(); commit("bind") } }.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)) })
-        inspector.addView(ui.pill("Платформа Черепахограда", sizeSp = 12f) {
-            o.bind = "Launch Platform (Turtletown)"; commit(); showInspector()
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
-        if (o.bind.isNotEmpty()) inspector.addView(ui.pill("Отвязать (снова свой круг)", sizeSp = 12f) {
-            o.bind = ""; commit(); showInspector()
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
-        if (o.bind.isNotEmpty()) inspector.addView(ui.label("Радиус срабатывания берётся из размера круга (по умолчанию 1,5 м вокруг центра платформы).", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        section("Круг как в Черепахограде")
+        inspector.addView(ui.label("Круг может выглядеть и работать как платформа запуска уровня из игры. Выбери, как использовать родную платформу.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(2), 0, dp(4)) })
+        inspector.addView(ui.pill(
+            when { o.bind.isEmpty() -> "Свой простой круг"; o.clone -> "Копия платформы (на месте круга)"; else -> "Занять родную платформу" }, sizeSp = 13f
+        ) {
+            ui.choose("Какой круг", listOf("Свой простой круг", "Копия платформы Черепахограда (на месте круга)", "Занять родную платформу Черепахограда"),
+                when { o.bind.isEmpty() -> 0; o.clone -> 1; else -> 2 }) { i ->
+                when (i) {
+                    0 -> { o.bind = ""; o.clone = false }
+                    1 -> { o.bind = "Launch Platform (Turtletown)"; o.clone = true }
+                    else -> { o.bind = "Launch Platform (Turtletown)"; o.clone = false }
+                }
+                commit(); showInspector(); vp.invalidate()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(4) })
+        if (o.bind.isNotEmpty()) {
+            inspector.addView(ui.label(
+                if (o.clone) "Копия появится на месте этого круга в любой сцене, где есть оригинал (хаб). Оригинал продолжает запускать уровень. У копии выключены скрипты, она только телепортирует. Размер: 3 м = размер оригинала."
+                else "Оригинальная платформа перестанет запускать уровень и будет телепортировать по настройкам ниже. Позиция круга не используется: берётся место платформы.",
+                11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+            inspector.addView(ui.label("Имя объекта в игре", 12f, GameUi.MUTED).apply { setPadding(dp(4), dp(8), 0, dp(2)) })
+            inspector.addView(ui.textInput(o.bind, 260, "имя объекта в игре") { v -> if (v.trim() != o.bind && v.isNotBlank()) { o.bind = v.trim(); commit("bind") } }
+                .apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)) })
+        }
     }
 
     private fun portalSection(o: MapObj) {
