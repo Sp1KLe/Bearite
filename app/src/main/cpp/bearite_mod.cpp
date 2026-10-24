@@ -184,7 +184,7 @@ struct Fns {
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
-    void *instantiate, *get_local_scale;
+    void *instantiate, *get_local_scale, *get_layer, *load_scene;
     void *type_mono, *get_comps_children, *beh_get_enabled, *beh_set_enabled, *col_is_trigger;
     // диагностика и запасной путь для текстур
     void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
@@ -254,6 +254,11 @@ int g_liveCount = 0;
 bool g_engineOk = false;
 std::string g_worldWant;  // id карты-мира, которая должна быть активна ("" = нет)
 std::string g_worldFile;  // мир, включённый переключателем в файлах
+std::string g_pendingWorld;       // мир, который надо открыть после загрузки сцены-хозяина
+std::string g_returnScene;        // откуда пришли в сцену-хозяина (туда вернёмся при выходе из мира)
+bool g_wantRedirect = false;      // мир только что включили (переключатель/круг): можно перейти в сцену level_1
+long long g_lastLoad = 0;
+const char* const HOST_SCENE = "level_1";  // сцена, в которой строится любой мир: свежая, без хаба и его скриптов видимости
 std::string g_worldRt;    // выбор круга телепорта: "" нет, "@exit" выйти из мира, иначе id мира
 
 /** Мир из файлов: включённый и привязанный к этой сцене (или ни к какой). Мир со сценой level_1 открывается, когда игра сама загрузит уровень. */
@@ -369,7 +374,11 @@ void reload_maps() {
         if (parse_map(n.substr(0, n.size() - 4), g_mapsDir + "/" + n, m)) specs.push_back(std::move(m));
     }
     g_specs = std::move(specs);
-    pick_world_file();
+    {
+        std::string before = g_worldFile;
+        pick_world_file();
+        if (!g_worldFile.empty() && g_worldFile != before) g_wantRedirect = true;
+    }
     g_worldRt.clear();  // карты правили: выбор круга телепорта сбрасывается
     refresh_world_want();
     g_dirty = true;
@@ -804,10 +813,31 @@ bool is_protected(void* tr) {
     return false;
 }
 
+int g_uiKept = 0;
+std::string name_of(void* o);
+
+/** Элемент интерфейса (значок монеты в углу и т.п.): слой UI или под объектом с «canvas/hud» в имени. Такое не прячем. */
+bool is_ui(void* rend, void* tr) {
+    void* go = F.get_gameobject ? inv(F.get_gameobject, rend) : nullptr;
+    if (go && F.get_layer) {
+        void* l = inv(F.get_layer, go);
+        if (l && *(const int*)obj_unbox(l) == 5) return true;
+    }
+    void* t = tr;
+    for (int k = 0; k < 8 && t; ++k) {
+        std::string n = name_of(t);
+        for (auto& c : n) c = (char)tolower((unsigned char)c);
+        if (n.find("canvas") != std::string::npos || n.find("hud") != std::string::npos || n.find("overlay") != std::string::npos) return true;
+        t = F.get_parent ? inv(F.get_parent, t) : nullptr;
+    }
+    return false;
+}
+
 /** Выключает все рендереры и коллайдеры сцены, кроме игрока и объектов Bearite. Возвращает, сколько выключено. */
 int hide_world() {
     g_ownIds.clear();
     W.nearKept = 0;
+    g_uiKept = 0;
     if (W.active && W.player) {  // повторный обход: берём текущее место игрока
         void* ptr = target(W.player);
         void* pos = ptr ? inv(F.get_position, ptr) : nullptr;
@@ -843,6 +873,7 @@ int hide_world() {
                 if (own) { if (id) W.kept.insert(id); continue; }
             }
             if (is_protected(tr)) { if (id) W.kept.insert(id); continue; }
+            if (pass == 0 && is_ui(o, tr)) { if (id) W.kept.insert(id); ++g_uiKept; continue; }
             if (pass == 0 && F.rend_bounds) {  // небольшие рендереры рядом с игроком (его модель) оставляем
                 void* bb = inv(F.rend_bounds, o);
                 if (bb) {
@@ -1100,7 +1131,7 @@ bool world_enter(const MapSpec& m) {
     W.lastCheck = 0;
     W.fixes = 0;
     memcpy(W.sp, &sp, sizeof W.sp);
-    logf_("мир «%s»: вход, скрыто объектов %d (рядом с игроком оставлено %d), игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, W.nearKept, sp.x, sp.y, sp.z);
+    logf_("мир «%s»: вход, скрыто объектов %d (рядом с игроком оставлено %d, интерфейса %d), игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, W.nearKept, g_uiKept, sp.x, sp.y, sp.z);
     return true;
 }
 
@@ -1119,7 +1150,7 @@ void world_exit(bool restore) {
     } else {
         for (uintptr_t h : W.hr) gch_free(h);
         for (uintptr_t h : W.hc) gch_free(h);
-        W.hr.clear(); W.hc.clear(); W.hidden.clear();
+        W.hr.clear(); W.hc.clear(); W.hidden.clear(); W.kept.clear();
         W.camSaved = false;
     }
     if (W.player) { gch_free(W.player); W.player = 0; }
@@ -1127,12 +1158,40 @@ void world_exit(bool restore) {
     W.id.clear();
 }
 
+bool load_scene(const std::string& name) {
+    if (!F.load_scene) return false;
+    void* a[1] = {bearite_il2.string_new(name.c_str())};
+    bool ok = false;
+    inv(F.load_scene, nullptr, a, &ok);
+    logf_("загрузка сцены «%s»: %s", name.c_str(), ok ? "запрошена" : "не удалась");
+    return ok;
+}
+
 void world_update(long long now) {
     const MapSpec* want = nullptr;
     for (const auto& m : g_specs) if (m.world && m.id == g_worldWant && g_engineOk) { want = &m; break; }
-    if (W.active && (!want || want->id != W.id)) world_exit(true);
+    if (W.active && (!want || want->id != W.id)) {
+        world_exit(true);
+        if (!want && g_scene == HOST_SCENE && now - g_lastLoad > 5000) {  // вышли из мира: возвращаемся туда, откуда пришли
+            g_lastLoad = now;
+            load_scene(g_returnScene.empty() ? "hub" : g_returnScene);
+            g_returnScene.clear();
+        }
+    }
     if (!want) return;
     if (!W.active) {
+        if ((want->scene.empty() || want->scene == HOST_SCENE) && g_scene != HOST_SCENE) {
+            // мир без привязки живёт только в сцене level_1: свежая сцена без скриптов хаба, без мерцания и лагов
+            if (!g_wantRedirect || (g_scene != "hub" && g_scene != "backrooms") || !F.load_scene) return;
+            if (now - g_lastLoad < 8000) return;
+            g_lastLoad = now;
+            g_wantRedirect = false;
+            g_returnScene = g_scene;
+            g_pendingWorld = want->id;
+            logf_("мир «%s»: перехожу в сцену «%s» (вернусь в «%s»)", want->name.c_str(), HOST_SCENE, g_returnScene.c_str());
+            load_scene(HOST_SCENE);
+            return;
+        }
         if (now - W.lastTry < 1000) return;
         W.lastTry = now;
         // карта должна быть уже построена, иначе игрок упадёт в пустоту
@@ -1504,6 +1563,7 @@ void portals_tick(long long now) {
         if (t->world && !(W.active && W.id == t->id)) {
             g_pending = sp;
             g_hasPending = true;
+            g_wantRedirect = true;
             g_worldRt = t->id;
             refresh_world_want();
             logf_("круг телепорта «%s»: вход в мир «%s»", hitObj->name.c_str(), t->name.c_str());
@@ -1601,6 +1661,10 @@ void update() {
             drop_player();
             g_worldRt.clear();
             pick_world_file();
+            if (!g_pendingWorld.empty()) {
+                if (g_scene == HOST_SCENE) g_worldRt = g_pendingWorld;
+                g_pendingWorld.clear();
+            }
             refresh_world_want();
             g_dirty = true;
         } else if (!check_alive()) {
@@ -1740,6 +1804,10 @@ void bind_unity() {
     F.destroy = m0(ob, "Destroy", 1);
     F.get_active = m0(go, "get_activeSelf", 0);
     F.set_layer = m0(go, "set_layer", 1);
+    F.get_layer = m0(go, "get_layer", 0);
+    if (void* smk = bearite_find_class("UnityEngine.SceneManagement", "SceneManager")) F.load_scene = find_method_types(smk, "LoadScene", {"String"});
+    logf_("загрузка сцен: LoadScene=%d, get_layer=%d", F.load_scene != nullptr, F.get_layer != nullptr);
+    dump_class("", "LaunchPlatform");
     F.get_component = find_method_p0(go, "GetComponent", 1, "Type");
     F.get_material = m0(rd, "get_material", 0);
     F.set_color = m0(mt, "set_color", 1);
