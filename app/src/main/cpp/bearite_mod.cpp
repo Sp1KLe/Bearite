@@ -497,7 +497,13 @@ void* make_texture(const std::string& id) {
         inv(ap0, tex, nullptr, &applied);
     }
     if (F.set_hideflags) { int hf = 61; void* a[1] = {&hf}; inv(F.set_hideflags, tex, a); }  // HideAndDontSave: не выгружать при смене сцены
-    logf_("текстура %s загружена (%dx%d, %s, Apply %s)", id.c_str(), w, h, how, applied ? "ok" : "нет");
+    {
+        unsigned long long sr = 0, sg = 0, sb = 0, sa = 0;
+        size_t cnt = (size_t)w * h;
+        for (size_t i = 0; i < cnt; ++i) { sr += px[i * 4]; sg += px[i * 4 + 1]; sb += px[i * 4 + 2]; sa += px[i * 4 + 3]; }
+        logf_("текстура %s загружена (%dx%d, %s, Apply %s), средний цвет RGBA %llu %llu %llu %llu", id.c_str(), w, h, how, applied ? "ok" : "нет",
+              sr / cnt, sg / cnt, sb / cnt, sa / cnt);
+    }
     return tex;
 }
 
@@ -656,15 +662,16 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     if (memcmp(L.pos, &pos, sizeof pos) != 0) { void* a[1] = {&pos}; inv(F.set_position, tr, a); memcpy(L.pos, &pos, sizeof pos); }
     if (memcmp(L.size, &size, sizeof size) != 0) { void* a[1] = {&size}; inv(F.set_scale, tr, a); memcpy(L.size, &size, sizeof size); }
     if (memcmp(L.rot, &rot, sizeof rot) != 0) { void* a[1] = {&rot}; inv(F.set_euler, tr, a); memcpy(L.rot, &rot, sizeof rot); }
-    if (L.color != o.color && F.type_renderer && F.get_component && F.get_material && F.set_color) {
+    unsigned eff = o.tex.empty() ? o.color : 0xFFFFFFu;  // с текстурой цвет не красит её (иначе картинка тонет в коричневом)
+    if (L.color != eff && F.type_renderer && F.get_component && F.get_material && F.set_color) {
         void* b[1] = {F.type_renderer};
         void* rend = inv(F.get_component, go, b);
         void* mat = rend ? inv(F.get_material, rend) : nullptr;
         if (mat) {
-            Col c{((o.color >> 16) & 255) / 255.f, ((o.color >> 8) & 255) / 255.f, (o.color & 255) / 255.f, 1.f};
+            Col c{((eff >> 16) & 255) / 255.f, ((eff >> 8) & 255) / 255.f, (eff & 255) / 255.f, 1.f};
             void* a[1] = {&c};
             inv(F.set_color, mat, a);
-            L.color = o.color;
+            L.color = eff;
         }
     }
     if (!o.bind.empty() && !L.natHidden && F.type_renderer && F.get_component && F.rend_set_enabled) {  // свой диск не нужен: круг — родной объект
