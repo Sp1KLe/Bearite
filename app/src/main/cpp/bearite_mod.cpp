@@ -184,6 +184,7 @@ struct Fns {
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
+    void *type_mono, *get_comps_children, *beh_get_enabled, *beh_set_enabled, *col_is_trigger;
     // диагностика и запасной путь для текстур
     void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
         *rend_set_material, *mat_class, *mat_ctor_shader, *rend_bounds;
@@ -205,6 +206,7 @@ struct Obj {
     float tile[2] = {1, 1};
     std::string dest;       // круг телепорта: "" = точка этой карты, "@exit" = выход из мира, иначе id карты
     float dp[3] = {0, 0, 0};
+    std::string bind;       // имя родного объекта игры, который этот круг «занимает» (пусто = свой круг)
 };
 
 struct MapSpec {
@@ -231,6 +233,11 @@ struct Live {
     std::string tex;
     float tile[2] = {0, 0};
     int tid = 0;  // instance id Transform объекта: по нему отличаем свои объекты от чужих
+    // привязка к родному объекту игры
+    uintptr_t nat = 0;                                  // handle на Transform родного круга
+    std::vector<std::pair<uintptr_t, int>> natOff;      // что мы выключили у него: (handle, 0 = скрипт, 1 = триггер)
+    long long natTry = 0;
+    bool natHidden = false, natMiss = false;
 };
 
 std::string g_mapsDir;
@@ -293,6 +300,7 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             if (p.size() > 16) { o.tile[0] = num(p[15], 1); o.tile[1] = num(p[16], 1); }
             if (p.size() > 17) o.dest = p[17];
             if (p.size() > 20) for (int i = 0; i < 3; ++i) o.dp[i] = num(p[18 + i], 0);
+            if (p.size() > 21) o.bind = p[21];
             m.objs.push_back(o);
             continue;
         }
@@ -355,6 +363,20 @@ void reload_maps() {
 
 void* target(uintptr_t h) { return h ? gch_target(h) : nullptr; }
 
+void release_native(Live& L, bool restore) {
+    for (auto& e : L.natOff) {
+        if (restore) {
+            void* o = target(e.first);
+            void* fn = e.second == 0 ? F.beh_set_enabled : F.collider_enabled;
+            if (o && fn) { uint8_t on = 1; void* a[1] = {&on}; inv(fn, o, a); }
+        }
+        gch_free(e.first);
+    }
+    L.natOff.clear();
+    if (L.nat) { gch_free(L.nat); L.nat = 0; }
+    L.natHidden = false;
+}
+
 void destroy_live(Live& L) {
     if (!L.h) return;
     void* go = target(L.h);
@@ -362,12 +384,14 @@ void destroy_live(Live& L) {
         void* a[1] = {go};
         inv(F.destroy, nullptr, a);
     }
+    release_native(L, true);
     gch_free(L.h);
     L = Live();
     if (g_liveCount > 0) --g_liveCount;
 }
 
 void drop_live(Live& L) {  // объект уже уничтожен Unity (смена сцены): только освобождаем handle
+    release_native(L, false);
     if (L.h) { gch_free(L.h); if (g_liveCount > 0) --g_liveCount; }
     L = Live();
 }
@@ -642,6 +666,11 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
             inv(F.set_color, mat, a);
             L.color = o.color;
         }
+    }
+    if (!o.bind.empty() && !L.natHidden && F.type_renderer && F.get_component && F.rend_set_enabled) {  // свой диск не нужен: круг — родной объект
+        void* b[1] = {F.type_renderer};
+        void* rend = inv(F.get_component, go, b);
+        if (rend) { uint8_t off = 0; void* c[1] = {&off}; inv(F.rend_set_enabled, rend, c); L.natHidden = true; }
     }
     if (L.tex != o.tex || (!o.tex.empty() && (L.tile[0] != o.tile[0] || L.tile[1] != o.tile[1]))) apply_texture(L, go, o);
 }
@@ -1108,6 +1137,61 @@ void scan_near(const float* pp, int pid) {
     for (size_t i = 0; i < hits.size() && i < 25; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
 }
 
+/** Ищет родной объект по имени и выключает то, что запускает уровень: скрипты и триггеры внутри него. */
+bool bind_native(Live& L, const std::string& name) {
+    if (!g_typeTransform || !F.get_transform) return false;
+    void* arr = find_objects(g_typeTransform);
+    if (!arr) return false;
+    bool oc = g_crumbs;
+    g_crumbs = false;
+    void* found = nullptr;
+    uintptr_t n = arr_len(arr);
+    if (n > 100000) n = 100000;
+    for (uintptr_t i = 0; i < n && !found; ++i) {
+        void* tr = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (tr && name_of(tr) == name) found = tr;
+    }
+    g_crumbs = oc;
+    if (!found) return false;
+    L.nat = gch_new(found, 0);
+    void* go = F.get_gameobject ? inv(F.get_gameobject, found) : nullptr;
+    int nb = 0, nt = 0;
+    std::string names;
+    if (go && F.get_comps_children) {
+        for (int pass = 0; pass < 2; ++pass) {
+            void* type = pass == 0 ? F.type_mono : F.type_collider;
+            void* getEn = pass == 0 ? F.beh_get_enabled : F.col_get_enabled;
+            void* setEn = pass == 0 ? F.beh_set_enabled : F.collider_enabled;
+            if (!type || !getEn || !setEn) continue;
+            uint8_t inc = 1;
+            void* a[2] = {type, &inc};
+            void* comps = inv(F.get_comps_children, go, a);
+            if (!comps) continue;
+            uintptr_t cn = arr_len(comps);
+            for (uintptr_t i = 0; i < cn && i < 200; ++i) {
+                void* c = *(void**)arr_elem(comps, sizeof(void*), i);
+                if (!c) continue;
+                if (pass == 1) {  // у коллайдеров гасим только триггеры: твёрдую платформу оставляем
+                    void* it = F.col_is_trigger ? inv(F.col_is_trigger, c) : nullptr;
+                    if (!it || !*(const uint8_t*)obj_unbox(it)) continue;
+                }
+                void* en = inv(getEn, c);
+                if (!en || !*(const uint8_t*)obj_unbox(en)) continue;
+                uint8_t off = 0;
+                void* b[1] = {&off};
+                bool ok = false;
+                inv(setEn, c, b, &ok);
+                if (!ok) continue;
+                L.natOff.push_back({gch_new(c, 0), pass});
+                if (pass == 0) { ++nb; void* k = obj_class ? obj_class(c) : nullptr; if (k && names.size() < 200) names += std::string(names.empty() ? "" : ", ") + class_name(k); }
+                else ++nt;
+            }
+        }
+    }
+    logf_("родной круг «%s» найден и занят: выключено скриптов %d, триггеров %d%s%s", name.c_str(), nb, nt, names.empty() ? "" : " — ", names.c_str());
+    return true;
+}
+
 /** Один раз за сцену: ищет по имени объекты, похожие на круг/портал/вход (чтобы найти родной круг телепорта). */
 void scan_names() {
     if (!g_typeTransform || !F.get_transform) return;
@@ -1141,6 +1225,27 @@ void scan_names() {
         ++shown;
     }
     g_crumbs = oc;
+}
+
+/** Центр круга: свой — по координатам карты, родной — там, где сейчас стоит занятый объект игры. */
+bool portal_center(const MapSpec& m, const Obj& o, Live& L, long long now, float* c) {
+    if (o.bind.empty()) {
+        for (int k = 0; k < 3; ++k) c[k] = m.off[k] + m.scale * o.p[k];
+        return true;
+    }
+    if (!L.nat) {
+        if (now - L.natTry < 3000) return false;
+        L.natTry = now;
+        if (!bind_native(L, o.bind)) {
+            if (!L.natMiss) { L.natMiss = true; logf_("родной круг «%s» в этой сцене не найден (повторю поиск, когда сменится сцена)", o.bind.c_str()); }
+            return false;
+        }
+    }
+    void* tr = target(L.nat);
+    void* pv = tr ? inv(F.get_position, tr) : nullptr;
+    if (!pv) { release_native(L, false); return false; }
+    memcpy(c, obj_unbox(pv), 3 * sizeof(float));
+    return true;
 }
 
 void portals_tick(long long now) {
@@ -1193,9 +1298,11 @@ void portals_tick(long long now) {
             for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
                 const Obj& o = m.objs[i];
                 if (o.shape != "portal" || !it->second[i].h) continue;
-                float dx = pp[0] - (m.off[0] + m.scale * o.p[0]), dz = pp[2] - (m.off[2] + m.scale * o.p[2]);
+                float cc[3];
+                if (!portal_center(m, o, it->second[i], now, cc)) continue;
+                float dx = pp[0] - cc[0], dz = pp[2] - cc[2];
                 float d = sqrtf(dx * dx + dz * dz);
-                if (d < best) { best = d; bdy = pp[1] - (m.off[1] + m.scale * o.p[1]); br = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]); bn = o.name; }
+                if (d < best) { best = d; bdy = pp[1] - cc[1]; br = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]); bn = o.name; }
             }
         }
         logf_("круги: игрок (%.1f %.1f %.1f), ближайший «%s»: расстояние %.1f, радиус %.1f, dy %.1f, защёлка %d",
@@ -1209,7 +1316,9 @@ void portals_tick(long long now) {
         for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
             const Obj& o = m.objs[i];
             if (o.shape != "portal" || !it->second[i].h) continue;
-            float cx = m.off[0] + m.scale * o.p[0], cy = m.off[1] + m.scale * o.p[1], cz = m.off[2] + m.scale * o.p[2];
+            float cc[3];
+            if (!portal_center(m, o, it->second[i], now, cc)) continue;
+            float cx = cc[0], cy = cc[1], cz = cc[2];
             float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]);
             float dx = pp[0] - cx, dz = pp[2] - cz, dy = pp[1] - cy;
             if (dx * dx + dz * dz < r * r && dy > -1.0f * m.scale && dy < (2.5f + o.s[1]) * m.scale) { hit = &m; hitObj = &o; break; }
@@ -1471,6 +1580,13 @@ void bind_unity() {
     F.get_material = m0(rd, "get_material", 0);
     F.set_color = m0(mt, "set_color", 1);
     F.collider_enabled = m0(co, "set_enabled", 1);
+    F.col_is_trigger = m0(co, "get_isTrigger", 0);
+    F.type_mono = type_of("UnityEngine", "MonoBehaviour");
+    if (void* bh = bearite_find_class("UnityEngine", "Behaviour")) {
+        F.beh_get_enabled = m0(bh, "get_enabled", 0);
+        F.beh_set_enabled = m0(bh, "set_enabled", 1);
+    }
+    F.get_comps_children = find_method_types(go, "GetComponentsInChildren", {"Type", "Boolean"});
     F.get_scene = m0(sm, "GetActiveScene", 0);
     F.scene_name = m0(sc, "GetNameInternal", 1);
     F.tex2d = bearite_find_class("UnityEngine", "Texture2D");

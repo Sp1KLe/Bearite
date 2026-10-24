@@ -16,6 +16,7 @@ data class MapObj(
     var tu: Double = 1.0, var tv: Double = 1.0,  // повторы текстуры по осям
     var dest: String = "",       // круг телепорта: "" = точка этой карты, "@exit" = выход из мира, иначе id карты
     var dx: Double = 0.0, var dy: Double = 1.0, var dz: Double = 0.0,  // точка назначения в этой карте
+    var bind: String = "",       // имя родного объекта игры (платформа запуска уровня), который круг «занимает»; пусто = свой круг
 )
 
 data class GameMap(
@@ -214,7 +215,7 @@ class MapStore(private val dir: File) {
                 append('\t').append(String.format("%06X", o.color and 0xFFFFFF))
                 append('\t').append(if (o.solid) 1 else 0)
                 append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv))
-                append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\n')
+                append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\t').append(clean(o.bind)).append('\n')
             }
         }
 
@@ -238,6 +239,7 @@ class MapStore(private val dir: File) {
                             dest = p.getOrNull(17) ?: "",
                             dx = p.getOrNull(18)?.toDoubleOrNull() ?: 0.0, dy = p.getOrNull(19)?.toDoubleOrNull() ?: 1.0,
                             dz = p.getOrNull(20)?.toDoubleOrNull() ?: 0.0,
+                            bind = p.getOrNull(21) ?: "",
                         )
                     )
                     continue

@@ -465,7 +465,7 @@ class MapEditor(
         })
         inspector.addView(hex)
 
-        if (o.shape == "portal") portalSection(o)
+        if (o.shape == "portal") { portalSection(o); nativeSection(o) }
         textureSection(o)
 
         inspector.addView(ui.pill("К камере игры", sizeSp = 13f) { toGameCamera() },
@@ -480,6 +480,19 @@ class MapEditor(
         "" -> "В точку на этой карте"
         "@exit" -> "Выход в обычный мир"
         else -> store.list().firstOrNull { it.id == o.dest }?.let { "На карту «${it.name}»" } ?: "Карта не найдена"
+    }
+
+    private fun nativeSection(o: MapObj) {
+        section("Родной круг игры")
+        inspector.addView(ui.label("Круг можно посадить на настоящую платформу игры: она перестанет запускать уровень и будет телепортировать по этим настройкам. Свой диск при этом скрыт.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(2), 0, dp(4)) })
+        inspector.addView(ui.textInput(o.bind, 260, "имя объекта в игре") { v -> if (v.trim() != o.bind) { o.bind = v.trim(); commit("bind") } }.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)) })
+        inspector.addView(ui.pill("Платформа Черепахограда", sizeSp = 12f) {
+            o.bind = "Launch Platform (Turtletown)"; commit(); showInspector()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
+        if (o.bind.isNotEmpty()) inspector.addView(ui.pill("Отвязать (снова свой круг)", sizeSp = 12f) {
+            o.bind = ""; commit(); showInspector()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)).apply { topMargin = dp(6) })
+        if (o.bind.isNotEmpty()) inspector.addView(ui.label("Радиус срабатывания берётся из размера круга (по умолчанию 1,5 м вокруг центра платформы).", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
     }
 
     private fun portalSection(o: MapObj) {
