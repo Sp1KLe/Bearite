@@ -81,7 +81,7 @@ void logf_(const char* fmt, ...) {
         "вход", "выход", "защита:", "не найден", "не запущен",
         "нет методов", "позиция камеры", "хуков кадра", "карты читаются",
         "ошибка", "не удалось", "недоступен", "поиск круга/портала",
-        "рядом с игроком (до 8 м)"
+        "рядом с игроком (до 8 м)", "сцены Unity"
     };
     bool relevant = false;
     for (const char* token : keep) {
@@ -180,6 +180,40 @@ void dump_class(const char* ns, const char* name) {
         s += ' ';
     }
     logf_("методы %s.%s: %s", ns, name, s.c_str());
+}
+
+/** Диагностика API сцен: только перечисляет найденные методы, ничего не загружает. */
+void dump_scene_api() {
+    const char* targets[][2] = {
+        {"UnityEngine.SceneManagement", "SceneManager"},
+        {"UnityEngine.SceneManagement", "Scene"},
+        {"UnityEngine.SceneManagement", "SceneUtility"}
+    };
+    for (const auto& target : targets) {
+        void* k = bearite_find_class(target[0], target[1]);
+        if (!k) {
+            logf_("сцены Unity: класс %s.%s не найден", target[0], target[1]);
+            continue;
+        }
+        std::string found;
+        void* it = nullptr;
+        int matches = 0;
+        while (void* m = class_methods(k, &it)) {
+            const char* n = method_name(m);
+            if (!n) continue;
+            if (strstr(n, "Scene") || strstr(n, "scene") ||
+                strstr(n, "Load") || strstr(n, "load") ||
+                strstr(n, "BuildIndex") || strstr(n, "buildIndex")) {
+                if (matches++ >= 40) continue;
+                if (!found.empty()) found += " ";
+                found += n;
+                found += "/";
+                found += std::to_string(method_pcount(m));
+            }
+        }
+        logf_("сцены Unity: %s.%s найден; методов-кандидатов=%d; %s",
+              target[0], target[1], matches, found.empty() ? "(нет подходящих методов)" : found.c_str());
+    }
 }
 
 std::string utf8(void* il2str) {
@@ -1583,6 +1617,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         return;
     }
     bind_unity();
+    dump_scene_api();  // диагностика API сцен без переключения локаций
 
     std::string missing;
     if (!F.create_primitive) missing += " GameObject.CreatePrimitive";
