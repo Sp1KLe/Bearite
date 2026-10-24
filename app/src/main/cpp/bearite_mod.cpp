@@ -233,6 +233,8 @@ struct Obj {
     float dp[3] = {0, 0, 0};
 };
 
+std::string g_worldWant;  // id карты-мира, которая должна быть активна ("" = нет)
+
 struct MapSpec {
     std::string id, name, scene;
     bool enabled = true;
@@ -280,7 +282,7 @@ std::string g_status = "unknown";
 std::string g_msg;
 int g_liveCount = 0;
 bool g_engineOk = false;
-std::string g_worldWant;  // id карты-мира, которая должна быть активна ("" = нет)
+
 std::string g_worldFile;  // мир, включённый переключателем в файлах
 std::string g_worldRt;    // выбор круга телепорта: "" нет, "@exit" выйти из мира, иначе id мира
 
