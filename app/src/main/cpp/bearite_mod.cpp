@@ -260,6 +260,14 @@ std::string g_worldRt;    // выбор круга телепорта: "" нет
 void pick_world_file() {
     g_worldFile.clear();
     for (const auto& m : g_specs) if (m.world && m.enabled && (m.scene.empty() || m.scene == g_scene)) { g_worldFile = m.id; break; }
+    static std::string lastLogged;
+    std::string key = g_scene + "|" + g_worldFile;
+    if (key != lastLogged) {
+        lastLogged = key;
+        std::string all;
+        for (const auto& m : g_specs) if (m.world) all += " «" + m.name + "» (" + (m.enabled ? "вкл" : "выкл") + ", сцена: " + (m.scene.empty() ? "любая" : m.scene) + ")";
+        logf_("сцена «%s»: мир из файлов = %s; миров всего:%s", g_scene.c_str(), g_worldFile.empty() ? "нет" : g_worldFile.c_str(), all.empty() ? " нет" : all.c_str());
+    }
 }
 
 void refresh_world_want() {
@@ -771,6 +779,9 @@ struct World {
     int tries = 0;
     float here[3] = {0, 0, 0};  // где игрок сейчас: рядом с ним ничего не прячем (его модель может быть не в иерархии игрока)
     int nearKept = 0;
+    long long enteredAt = 0, lastCheck = 0;  // игра при загрузке уровня может вернуть игрока на свою стартовую точку: первые секунды следим
+    float sp[3] = {0, 0, 0};
+    int fixes = 0;
 } W;
 bool g_hasPending = false;  // круг телепорта задал точку входа в мир
 V3 g_pending{0, 0, 0};
@@ -1085,6 +1096,10 @@ bool world_enter(const MapSpec& m) {
     W.id = m.id;
     W.tries = 0;
     W.lastScan = now_ms_fwd();
+    W.enteredAt = W.lastScan;
+    W.lastCheck = 0;
+    W.fixes = 0;
+    memcpy(W.sp, &sp, sizeof W.sp);
     logf_("мир «%s»: вход, скрыто объектов %d (рядом с игроком оставлено %d), игрок в (%.1f %.1f %.1f)", m.name.c_str(), n, W.nearKept, sp.x, sp.y, sp.z);
     return true;
 }
@@ -1124,11 +1139,28 @@ void world_update(long long now) {
         auto it = g_live.find(want->id);
         if (it == g_live.end() || it->second.empty()) return;
         world_enter(*want);
-    } else if (now - W.lastScan > 3000) {
+    } else {
+      if (now - W.enteredAt < 12000 && now - W.lastCheck > 400 && W.fixes < 8 && W.player) {
+        W.lastCheck = now;
+        void* ptr = target(W.player);
+        void* pv = ptr ? inv(F.get_position, ptr) : nullptr;
+        if (pv) {
+            float pp[3];
+            memcpy(pp, obj_unbox(pv), sizeof pp);
+            float dx = pp[0] - W.sp[0], dy = pp[1] - W.sp[1], dz = pp[2] - W.sp[2];
+            if (dx * dx + dy * dy + dz * dz > 25.f * 25.f) {  // игру вернула на старт уровня или игрок упал: ставим обратно
+                ++W.fixes;
+                teleport(ptr, V3{W.sp[0], W.sp[1], W.sp[2]});
+                logf_("мир: игрок оказался в (%.1f %.1f %.1f), возвращаю на точку появления (%d)", pp[0], pp[1], pp[2], W.fixes);
+            }
+        }
+      }
+      if (now - W.lastScan > 3000) {
         W.lastScan = now;
         g_crumbs = false;
         hide_world();  // то, что игра успела создать после входа (враги, эффекты)
         g_crumbs = true;
+      }
     }
 }
 
