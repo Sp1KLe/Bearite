@@ -366,6 +366,19 @@ void reload_maps() {
 
 void* target(uintptr_t h) { return h ? gch_target(h) : nullptr; }
 
+/** Показывает или прячет собственный диск круга (когда его место занимает родная платформа). */
+void set_disc(Live& L, bool visible) {
+    void* go = L.h ? target(L.h) : nullptr;
+    if (!go || !F.type_renderer || !F.get_component || !F.rend_set_enabled) return;
+    void* b[1] = {F.type_renderer};
+    void* rend = inv(F.get_component, go, b);
+    if (!rend) return;
+    uint8_t on = visible ? 1 : 0;
+    void* c[1] = {&on};
+    inv(F.rend_set_enabled, rend, c);
+    L.natHidden = !visible;
+}
+
 void release_native(Live& L, bool restore) {
     for (auto& e : L.natOff) {
         if (restore) {
@@ -386,17 +399,18 @@ void release_native(Live& L, bool restore) {
         L.nat = 0;
     }
     L.natClone = false;
+    if (L.natHidden && restore) set_disc(L, true);
     L.natHidden = false;
 }
 
 void destroy_live(Live& L) {
     if (!L.h) return;
+    release_native(L, true);  // копию платформы убираем и возвращаем диск, пока объект ещё жив
     void* go = target(L.h);
     if (go && F.destroy) {
         void* a[1] = {go};
         inv(F.destroy, nullptr, a);
     }
-    release_native(L, true);
     gch_free(L.h);
     L = Live();
     if (g_liveCount > 0) --g_liveCount;
@@ -691,11 +705,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
             L.color = eff;
         }
     }
-    if (!o.bind.empty() && !L.natHidden && F.type_renderer && F.get_component && F.rend_set_enabled) {  // свой диск не нужен: круг — родной объект
-        void* b[1] = {F.type_renderer};
-        void* rend = inv(F.get_component, go, b);
-        if (rend) { uint8_t off = 0; void* c[1] = {&off}; inv(F.rend_set_enabled, rend, c); L.natHidden = true; }
-    }
+    if (L.nat && !L.natHidden) set_disc(L, false);  // свой диск не нужен, пока на его месте родная платформа или её копия
     if (L.tex != o.tex || (!o.tex.empty() && (L.tile[0] != o.tile[0] || L.tile[1] != o.tile[1]))) apply_texture(L, go, o);
 }
 
@@ -748,6 +758,7 @@ struct World {
     float saved[3] = {0, 0, 0};
     std::vector<uintptr_t> hr, hc;  // спрятанные рендереры и коллайдеры
     std::unordered_set<int> hidden;
+    std::unordered_set<int> kept;  // уже проверенные и оставленные (игрок, свои объекты, мелочь рядом): повторно не разбираем
     bool camSaved = false;
     int camFlags = 1;
     float camBg[4] = {0, 0, 0, 1};
@@ -803,7 +814,7 @@ int hide_world() {
             void* o = *(void**)arr_elem(arr, sizeof(void*), i);
             if (!o) continue;
             int id = inst_id(o);
-            if (id && W.hidden.count(id)) continue;
+            if (id && (W.hidden.count(id) || W.kept.count(id))) continue;
             void* tr = inv(F.get_transform, o);
             if (!tr) continue;
             {
@@ -813,15 +824,15 @@ int hide_world() {
                     own = g_ownIds.count(inst_id(t)) != 0;
                     if (!own) t = F.get_parent ? inv(F.get_parent, t) : nullptr;
                 }
-                if (own) continue;
+                if (own) { if (id) W.kept.insert(id); continue; }
             }
-            if (is_protected(tr)) continue;
+            if (is_protected(tr)) { if (id) W.kept.insert(id); continue; }
             if (pass == 0 && F.rend_bounds) {  // небольшие рендереры рядом с игроком (его модель) оставляем
                 void* bb = inv(F.rend_bounds, o);
                 if (bb) {
                     const float* f = (const float*)obj_unbox(bb);  // центр xyz, размеры xyz (половина)
                     float dx = f[0] - W.here[0], dy = f[1] - W.here[1], dz = f[2] - W.here[2];
-                    if (dx * dx + dy * dy + dz * dz < 12.f && f[3] < 3.f && f[4] < 3.f && f[5] < 3.f) { ++W.nearKept; continue; }
+                    if (dx * dx + dy * dy + dz * dz < 12.f && f[3] < 3.f && f[4] < 3.f && f[5] < 3.f) { ++W.nearKept; if (id) W.kept.insert(id); continue; }
                 }
             }
             void* en = inv(getEn, o);
@@ -851,6 +862,7 @@ void show_world() {
         v.clear();
     }
     W.hidden.clear();
+    W.kept.clear();
 }
 
 std::string name_of(void* o) {
@@ -859,9 +871,11 @@ std::string name_of(void* o) {
 }
 
 // ---- поиск игрока: кандидатов несколько (тег, CharacterController, объекты «…player…»), настоящий тот, что двигается
+bool g_debug = false;  // есть файл maps/_debug: тяжёлая диагностика (списки объектов, кандидаты) включена
+long long g_candBuild = 0;
 struct Cand { uintptr_t h = 0; int id = 0; float last[3] = {0, 0, 0}; float path = 0; std::string name, how; };
 std::vector<Cand> g_cands;
-long long g_candBuild = 0, g_candPoll = 0, g_candLog = 0;
+long long g_candPoll = 0, g_candLog = 0;
 void* g_typeTransform = nullptr;
 
 bool bad_name(std::string n) {
@@ -912,7 +926,9 @@ void cands_rebuild() {
             cand_add(cc ? inv(F.get_transform, cc) : nullptr, "CharacterController");
         }
     }
-    if (g_typeTransform) if (void* arr = find_objects(g_typeTransform)) {
+    bool haveKcc = false;
+    for (auto& c : g_cands) if (c.how == "KCC") haveKcc = true;
+    if (g_typeTransform && (g_debug || !haveKcc)) if (void* arr = find_objects(g_typeTransform)) {  // перебор всех объектов дорогой: только если мотора нет
         uintptr_t n = arr_len(arr);
         if (n > 100000) n = 100000;
         int added = 0;
@@ -935,7 +951,7 @@ void cands_rebuild() {
 
 /** Раз в секунду обновляет пути кандидатов; возвращает того, кто реально двигался (иначе первого). */
 void* pick_player(long long now, bool force = false) {
-    if (force || g_cands.empty() || now - g_candBuild > 5000) { g_candBuild = now; cands_rebuild(); }
+    if (force || g_cands.empty() || now - g_candBuild > ((g_debug || g_cands.empty()) ? 5000 : 20000)) { g_candBuild = now; cands_rebuild(); }
     Cand* best = nullptr;
     float bestScore = 0;
     for (auto& c : g_cands) {
@@ -950,7 +966,7 @@ void* pick_player(long long now, bool force = false) {
         float score = c.path + (c.how == "KCC" ? 100000.f : 0.f);  // мотор KCC — это сам игрок; остальные только если мотора нет
         if (c.path >= 0 && (!best || score > bestScore + 0.5f)) { best = &c; bestScore = score; }
     }
-    if (now - g_candLog > 15000 && !g_cands.empty()) {
+    if (g_debug && now - g_candLog > 15000 && !g_cands.empty()) {
         g_candLog = now;
         logf_("кандидаты в игроки: %d", (int)g_cands.size());
         for (size_t i = 0; i < g_cands.size() && i < 12; ++i)
@@ -1119,6 +1135,7 @@ long long g_portalCool = 0, g_lastFind = 0;
 
 void drop_player() {
     if (g_player) { gch_free(g_player); g_player = 0; }
+    g_candBuild = 0;  // кандидатов пересоберём заново: в новой сцене старые объекты уничтожены
     g_portalLatched = true;
 }
 
@@ -1234,6 +1251,7 @@ bool bind_native(Live& L, const std::string& name) {
     L.nat = gch_new(found, 0);
     void* go = F.get_gameobject ? inv(F.get_gameobject, found) : nullptr;
     disable_scripts(L, go, "родной круг «" + name + "» найден и занят");
+    set_disc(L, false);
     return true;
 }
 
@@ -1280,6 +1298,7 @@ bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
     }
     void* pp[1] = {const_cast<V3*>(&pos)};
     inv(F.set_position, ctr, pp);
+    set_disc(L, false);
     return true;
 }
 
@@ -1362,8 +1381,12 @@ void portals_tick(long long now) {
     }
     if (!any) return;
     static long long lastDiag = 0;
-    bool diag = now - lastDiag > 3000;
-    if (diag) lastDiag = now;
+    bool diag = false;
+    if (now - lastDiag > 3000) {
+        lastDiag = now;
+        g_debug = access((g_mapsDir + "/_debug").c_str(), F_OK) == 0;  // подробная диагностика только по файлу maps/_debug
+        diag = g_debug;
+    }
     void* tr = g_player ? target(g_player) : nullptr;
     if (!tr || now - g_lastFind >= 1000) {  // перепроверяем раз в секунду: выбираем того кандидата, кто двигается
         g_lastFind = now;

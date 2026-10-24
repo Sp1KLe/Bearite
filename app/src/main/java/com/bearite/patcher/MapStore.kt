@@ -180,7 +180,7 @@ class MapStore(private val dir: File) {
             val o = MapObj(SHAPE_NAMES[shape] ?: "Блок", shape)
             when (shape) {
                 "plane" -> { o.sx = 2.0; o.sz = 2.0 }
-                "portal" -> { o.sx = 3.0; o.sy = 0.1; o.sz = 3.0; o.color = 0x6FE0D0; o.solid = false }
+                "portal" -> { o.sx = 3.0; o.sy = 0.1; o.sz = 3.0; o.color = 0x6FE0D0; o.solid = false; o.bind = "Launch Platform (Turtletown)"; o.clone = true }
             }
             return o
         }
