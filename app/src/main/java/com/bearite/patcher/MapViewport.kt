@@ -325,6 +325,28 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             path.close()
             c.drawPath(path, fill)
         }
+        // Круг телепорта всегда виден как кольцо, а не просто плоский цилиндр.
+        // Контур показывает реальный радиус срабатывания, даже когда объект не выбран.
+        for (portal in map.objects) {
+            if (portal.shape != "portal") continue
+            line.color = if (map.objects.getOrNull(selected) === portal) 0xFF8BFFF0.toInt() else 0xCC6FE0D0.toInt()
+            line.strokeWidth = if (map.objects.getOrNull(selected) === portal) 2.6f * d else 1.5f * d
+            val cx = portal.x.toFloat()
+            val cy = portal.y.toFloat()
+            val cz = portal.z.toFloat()
+            val radiusX = max(0.05, portal.sx / 2.0).toFloat()
+            val radiusZ = max(0.05, portal.sz / 2.0).toFloat()
+            val y = cy + max(0.02, portal.sy * 0.55).toFloat()
+            var px = cx + radiusX
+            var pz = cz
+            for (step in 1..48) {
+                val a = step * Math.PI * 2.0 / 48.0
+                val nx = cx + radiusX * cos(a).toFloat()
+                val nz = cz + radiusZ * sin(a).toFloat()
+                seg(c, px, y, pz, nx, y, nz)
+                px = nx; pz = nz
+            }
+        }
         // контур выбранного объекта
         val o = map.objects.getOrNull(selected) ?: return
         rot(o, m9)
