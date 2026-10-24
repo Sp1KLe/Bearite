@@ -135,12 +135,25 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         val sceneBtn = ui.pill(sceneText(m)) {}
         sceneBtn.setOnClickListener {
             val cur = store.readState().scene
-            m.scene = if (m.scene.isEmpty()) cur else ""
-            if (m.scene.isEmpty() || cur.isNotEmpty()) save()
-            sceneBtn.text = sceneText(m)
-            Toast.makeText(act, if (m.scene.isEmpty()) "Карта будет появляться в любой сцене" else "Карта привязана к сцене «${m.scene}»", Toast.LENGTH_SHORT).show()
+            val ids = listOf("", "level_1", "hub", "backrooms", cur)
+            val items = if (m.world) listOf(
+                "Везде: мир включается сразу (круг телепорта или переключатель)",
+                "Заменяет уровень Черепахограда: открывается, когда игра сама загрузит level_1 (родная платформа, окно «Вперёд!»)",
+                "Только в хабе", "Только в backrooms", "Текущая сцена: ${cur.ifEmpty { "неизвестна" }}",
+            ) else listOf("Любая сцена", "level_1", "hub", "backrooms", "Текущая сцена: ${cur.ifEmpty { "неизвестна" }}")
+            ui.choose("Где появляется карта", items, ids.indexOf(m.scene).let { if (it < 0) 4 else it }) { i ->
+                val pick = ids[i]
+                if (i == 4 && pick.isEmpty()) {
+                    Toast.makeText(act, "Текущая сцена пока неизвестна: запусти игру", Toast.LENGTH_SHORT).show()
+                } else {
+                    m.scene = pick
+                    save()
+                    sceneBtn.text = sceneText(m)
+                }
+            }
         }
         add(ui.row("Сцена", sceneBtn))
+        if (m.world) add(ui.label("Отдельный мир со сценой level_1 заменяет уровень Черепахограда: встаёшь на родную платформу, жмёшь «Вперёд!», игра грузит уровень сама, а вместо него появляется твой мир. Выход: меню паузы.", 11f, GameUi.DIM, bold = false).apply { setPadding(ui.dp(4), ui.dp(2), 0, ui.dp(4)) })
 
         add(ui.numberRow("Сдвиг X", m.ox, -1000.0, 1000.0, 0.5, 2) { m.ox = it; save() })
         add(ui.numberRow("Сдвиг Y", m.oy, -1000.0, 1000.0, 0.5, 2) { m.oy = it; save() })

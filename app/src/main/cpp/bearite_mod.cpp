@@ -256,6 +256,12 @@ std::string g_worldWant;  // id карты-мира, которая должна
 std::string g_worldFile;  // мир, включённый переключателем в файлах
 std::string g_worldRt;    // выбор круга телепорта: "" нет, "@exit" выйти из мира, иначе id мира
 
+/** Мир из файлов: включённый и привязанный к этой сцене (или ни к какой). Мир со сценой level_1 открывается, когда игра сама загрузит уровень. */
+void pick_world_file() {
+    g_worldFile.clear();
+    for (const auto& m : g_specs) if (m.world && m.enabled && (m.scene.empty() || m.scene == g_scene)) { g_worldFile = m.id; break; }
+}
+
 void refresh_world_want() {
     std::string w = g_worldRt == "@exit" ? "" : !g_worldRt.empty() ? g_worldRt : g_worldFile;
     if (w != g_worldWant) { g_worldWant = w; g_dirty = true; }
@@ -355,8 +361,7 @@ void reload_maps() {
         if (parse_map(n.substr(0, n.size() - 4), g_mapsDir + "/" + n, m)) specs.push_back(std::move(m));
     }
     g_specs = std::move(specs);
-    g_worldFile.clear();
-    for (const auto& m : g_specs) if (m.world && m.enabled) { g_worldFile = m.id; break; }
+    pick_world_file();
     g_worldRt.clear();  // карты правили: выбор круга телепорта сбрасывается
     refresh_world_want();
     g_dirty = true;
@@ -1563,6 +1568,7 @@ void update() {
             drop_textures();
             drop_player();
             g_worldRt.clear();
+            pick_world_file();
             refresh_world_want();
             g_dirty = true;
         } else if (!check_alive()) {
