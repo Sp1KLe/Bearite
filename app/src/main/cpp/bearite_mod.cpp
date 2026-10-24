@@ -245,6 +245,17 @@ struct MapSpec {
     std::vector<Obj> objs;
 };
 
+// В изолированной локации координаты карты локальные: редакторский offset
+// нужен только для раскладки карт в обычной сцене и не должен уносить игрока вдаль.
+float map_offset(const MapSpec& m, int axis) {
+    return (!g_worldWant.empty() && m.id == g_worldWant) ? 0.0f : m.off[axis];
+}
+V3 map_position(const MapSpec& m, const float p[3]) {
+    return V3{map_offset(m, 0) + m.scale * p[0],
+              map_offset(m, 1) + m.scale * p[1],
+              map_offset(m, 2) + m.scale * p[2]};
+}
+
 /** То, что реально применено к объекту в сцене. */
 struct Live {
     uintptr_t h = 0;  // GC-handle на GameObject, 0 = объекта нет
@@ -652,7 +663,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     }
     void* tr = inv(F.go_transform, go);  // у GameObject свой get_transform, не Component'ский
     if (!tr) return;
-    V3 pos{m.off[0] + m.scale * o.p[0], m.off[1] + m.scale * o.p[1], m.off[2] + m.scale * o.p[2]};
+    V3 pos = map_position(m, o.p);
     V3 size{m.scale * o.s[0], m.scale * o.s[1], m.scale * o.s[2]};
     V3 rot{o.r[0], o.r[1], o.r[2]};
     if (memcmp(L.pos, &pos, sizeof pos) != 0) { void* a[1] = {&pos}; inv(F.set_position, tr, a); memcpy(L.pos, &pos, sizeof pos); }
@@ -1021,7 +1032,7 @@ bool world_enter(const MapSpec& m) {
     int n = hide_world();
     g_crumbs = true;
     set_sky(m.sky);
-    V3 sp{m.off[0] + m.scale * m.spawn[0], m.off[1] + m.scale * m.spawn[1], m.off[2] + m.scale * m.spawn[2]};
+    V3 sp = map_position(m, m.spawn);
     if (g_hasPending) { sp = g_pending; g_hasPending = false; }
     teleport(tr, sp);
     memcpy(W.here, &sp, sizeof W.here);
@@ -1217,7 +1228,7 @@ void portals_tick(long long now) {
             for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
                 const Obj& o = m.objs[i];
                 if (o.shape != "portal" || !it->second[i].h) continue;
-                float dx = pp[0] - (m.off[0] + m.scale * o.p[0]), dz = pp[2] - (m.off[2] + m.scale * o.p[2]);
+                float dx = pp[0] - (map_offset(m, 0) + m.scale * o.p[0]), dz = pp[2] - (map_offset(m, 2) + m.scale * o.p[2]);
                 float d = sqrtf(dx * dx + dz * dz);
                 if (d < best) { best = d; bdy = pp[1] - (m.off[1] + m.scale * o.p[1]); br = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]); bn = o.name; }
             }
@@ -1233,7 +1244,7 @@ void portals_tick(long long now) {
         for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
             const Obj& o = m.objs[i];
             if (o.shape != "portal" || !it->second[i].h) continue;
-            float cx = m.off[0] + m.scale * o.p[0], cy = m.off[1] + m.scale * o.p[1], cz = m.off[2] + m.scale * o.p[2];
+            float cx = map_offset(m, 0) + m.scale * o.p[0], cy = map_offset(m, 1) + m.scale * o.p[1], cz = map_offset(m, 2) + m.scale * o.p[2];
             float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]);
             float dx = pp[0] - cx, dz = pp[2] - cz, dy = pp[1] - cy;
             if (dx * dx + dz * dz < r * r && dy > -1.0f * m.scale && dy < (2.5f + o.s[1]) * m.scale) { hit = &m; hitObj = &o; break; }
@@ -1249,10 +1260,11 @@ void portals_tick(long long now) {
     if (d == "@exit") {
         if (W.active) { g_worldRt = "@exit"; refresh_world_want(); logf_("круг телепорта «%s»: выход из мира", hitObj->name.c_str()); }
     } else if (d.empty()) {
-        teleport(tr, V3{hit->off[0] + hit->scale * hitObj->dp[0], hit->off[1] + hit->scale * hitObj->dp[1], hit->off[2] + hit->scale * hitObj->dp[2]});
+        float dp[3] = {hitObj->dp[0], hitObj->dp[1], hitObj->dp[2]};
+        teleport(tr, map_position(*hit, dp));
         logf_("круг телепорта «%s»: в точку этой карты", hitObj->name.c_str());
     } else if (const MapSpec* t = find_spec(d)) {
-        V3 sp{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
+        V3 sp = map_position(*t, t->spawn);
         if (!(W.active && W.id == t->id)) {
             // Портал на другую карту — это переход в отдельную локацию даже если
             // автор не включал флаг «Отдельный мир» для автоматического запуска.
