@@ -185,6 +185,8 @@ struct Fns {
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
     void *instantiate, *get_local_scale, *get_layer, *load_scene;
+    int load_arity;
+    void *go_ctor_str, *set_active, *set_parent, *instantiate_parent, *destroy_imm;
     void *type_mono, *get_comps_children, *beh_get_enabled, *beh_set_enabled, *col_is_trigger;
     // диагностика и запасной путь для текстур
     void *mat_has_prop, *mat_set_tex, *mat_set_scale, *mat_get_shader, *get_name, *mat_get_main_tex, *shader_find,
@@ -213,6 +215,7 @@ struct Obj {
 
 struct MapSpec {
     std::string id, name, scene;
+    std::string cover, desc;  // обложка (id текстуры) и описание для окна уровня
     bool enabled = true;
     float off[3] = {0, 0, 0};
     float scale = 1;
@@ -332,6 +335,8 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
         if (k == "name") m.name = v;
         else if (k == "enabled") m.enabled = v == "1" || v == "true";
         else if (k == "scene") m.scene = v;
+        else if (k == "cover") m.cover = v;
+        else if (k == "desc") m.desc = v;
         else if (k == "ox") m.off[0] = num(v, 0);
         else if (k == "oy") m.off[1] = num(v, 0);
         else if (k == "oz") m.off[2] = num(v, 0);
@@ -815,6 +820,7 @@ bool is_protected(void* tr) {
 
 int g_uiKept = 0;
 std::string name_of(void* o);
+void* goClass_();
 
 /** Элемент интерфейса (значок монеты в углу и т.п.): слой UI или под объектом с «canvas/hud» в имени. Такое не прячем. */
 bool is_ui(void* rend, void* tr) {
@@ -1160,9 +1166,15 @@ void world_exit(bool restore) {
 
 bool load_scene(const std::string& name) {
     if (!F.load_scene) return false;
-    void* a[1] = {bearite_il2.string_new(name.c_str())};
     bool ok = false;
-    inv(F.load_scene, nullptr, a, &ok);
+    if (F.load_arity == 2) {
+        int mode = 0;  // LoadSceneMode.Single
+        void* a[2] = {bearite_il2.string_new(name.c_str()), &mode};
+        inv(F.load_scene, nullptr, a, &ok);
+    } else {
+        void* a[1] = {bearite_il2.string_new(name.c_str())};
+        inv(F.load_scene, nullptr, a, &ok);
+    }
     logf_("загрузка сцены «%s»: %s", name.c_str(), ok ? "запрошена" : "не удалась");
     return ok;
 }
@@ -1182,7 +1194,8 @@ void world_update(long long now) {
     if (!W.active) {
         if ((want->scene.empty() || want->scene == HOST_SCENE) && g_scene != HOST_SCENE) {
             // мир без привязки живёт только в сцене level_1: свежая сцена без скриптов хаба, без мерцания и лагов
-            if (!g_wantRedirect || (g_scene != "hub" && g_scene != "backrooms") || !F.load_scene) return;
+            if (!F.load_scene) goto enter_here;  // загрузка сцен недоступна: мир строится прямо в текущей сцене
+            if (!g_wantRedirect || (g_scene != "hub" && g_scene != "backrooms")) return;
             if (now - g_lastLoad < 8000) return;
             g_lastLoad = now;
             g_wantRedirect = false;
@@ -1192,6 +1205,7 @@ void world_update(long long now) {
             load_scene(HOST_SCENE);
             return;
         }
+        enter_here:
         if (now - W.lastTry < 1000) return;
         W.lastTry = now;
         // карта должна быть уже построена, иначе игрок упадёт в пустоту
@@ -1285,6 +1299,8 @@ void scan_near(const float* pp, int pid) {
     for (size_t i = 0; i < hits.size() && i < 25; ++i) logf_("  %.1f м: %s", hits[i].d, hits[i].desc.c_str());
 }
 
+void* goClass_() { static void* k = bearite_find_class("UnityEngine", "GameObject"); return k; }
+
 void* find_native(const std::string& name) {
     if (!g_typeTransform || !F.get_transform) return nullptr;
     void* arr = find_objects(g_typeTransform);
@@ -1351,15 +1367,38 @@ bool bind_native(Live& L, const std::string& name) {
     return true;
 }
 
-/** Делает копию родного объекта (платформа запуска уровня) на месте круга; оригинал не трогает. */
+/** Делает копию родного объекта (платформа запуска уровня) на месте круга; оригинал не трогает.
+ *  Копия создаётся под выключенным родителем: пока он выключен, Awake/OnEnable не вызываются, поэтому PhotonView и прочие скрипты
+ *  не успевают зарегистрироваться (иначе «Duplicate key» у Photon). Скрипты удаляются до включения. */
 bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
     void* tmpl = find_native(name);
-    if (!tmpl || !F.instantiate || !F.go_transform) return false;
+    if (!tmpl || !F.go_transform) return false;
     void* tgo = F.get_gameobject ? inv(F.get_gameobject, tmpl) : nullptr;
     if (!tgo) return false;
-    void* a[1] = {tgo};
-    void* cgo = inv(F.instantiate, nullptr, a);
-    if (!cgo) return false;
+    void* holder = nullptr;
+    void* cgo = nullptr;
+    bool safe = F.instantiate_parent && F.go_ctor_str && F.set_active && F.set_parent && F.destroy_imm && F.get_comps_children && F.type_mono && goClass_();
+    if (safe) {
+        holder = obj_new(goClass_());
+        bool ok = false;
+        void* na[1] = {bearite_il2.string_new("Bearite/holder")};
+        inv(F.go_ctor_str, holder, na, &ok);
+        if (ok) {
+            uint8_t off = 0;
+            void* sa[1] = {&off};
+            inv(F.set_active, holder, sa);
+            void* htr = inv(F.go_transform, holder);
+            void* ia[2] = {tgo, htr};
+            cgo = inv(F.instantiate_parent, nullptr, ia);
+        }
+        if (!cgo) { safe = false; holder = nullptr; }
+    }
+    if (!cgo) {  // запасной путь: прямая копия (скрипты выключаем после; Photon может ругнуться)
+        if (!F.instantiate) return false;
+        void* a[1] = {tgo};
+        cgo = inv(F.instantiate, nullptr, a);
+        if (!cgo) return false;
+    }
     void* ctr = inv(F.go_transform, cgo);
     if (!ctr) return false;
     L.nat = gch_new(ctr, 0);
@@ -1383,7 +1422,38 @@ bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
             if (t1 && c1 && W.hidden.count(inst_id(t1))) { uint8_t on = 1; void* e[1] = {&on}; inv(setEn, c1, e); }
         }
     }
-    disable_scripts(L, cgo, "копия платформы «" + name + "» создана");
+    if (safe) {
+        // скрипты и триггеры удаляем целиком, пока копия выключена
+        int nb = 0, nt = 0;
+        std::string names;
+        for (int pass = 0; pass < 2; ++pass) {
+            void* type = pass == 0 ? F.type_mono : F.type_collider;
+            uint8_t inc = 1;
+            void* a[2] = {type, &inc};
+            void* comps = inv(F.get_comps_children, cgo, a);
+            if (!comps) continue;
+            uintptr_t cn = arr_len(comps);
+            for (uintptr_t i = 0; i < cn && i < 200; ++i) {
+                void* c = *(void**)arr_elem(comps, sizeof(void*), i);
+                if (!c) continue;
+                if (pass == 1) {
+                    void* it = F.col_is_trigger ? inv(F.col_is_trigger, c) : nullptr;
+                    if (!it || !*(const uint8_t*)obj_unbox(it)) continue;
+                }
+                if (pass == 0) { void* kl = obj_class ? obj_class(c) : nullptr; if (kl && names.size() < 200) names += std::string(names.empty() ? "" : ", ") + class_name(kl); }
+                void* da[1] = {c};
+                bool ok = false;
+                inv(F.destroy_imm, nullptr, da, &ok);
+                if (ok) (pass == 0 ? nb : nt)++;
+            }
+        }
+        void* pa[1] = {nullptr};
+        inv(F.set_parent, ctr, pa);  // отцепляем от выключенного родителя: копия становится активной уже без скриптов
+        if (holder) { void* da[1] = {holder}; inv(F.destroy, nullptr, da); }
+        logf_("копия платформы «%s» создана без скриптов: удалено скриптов %d, триггеров %d — %s", name.c_str(), nb, nt, names.c_str());
+    } else {
+        disable_scripts(L, cgo, "копия платформы «" + name + "» создана (запасной путь)");
+    }
     void* sc = F.get_local_scale ? inv(F.get_local_scale, tmpl) : nullptr;
     if (sc) {
         float v[3];
@@ -1464,6 +1534,65 @@ bool portal_center(const MapSpec& m, const Obj& o, Live& L, long long now, float
     if (!pv) { release_native(L, false); return false; }
     memcpy(c, obj_unbox(pv), 3 * sizeof(float));
     return true;
+}
+
+bool g_promptOpen = false;
+long long g_promptT = 0;
+std::string g_promptId;
+
+/** Вход в мир после ответа «Вперёд!» в окне уровня. */
+void enter_world_from_prompt(const MapSpec* t) {
+    V3 sp{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
+    if (W.active && W.id == t->id) {
+        void* tr = g_player ? target(g_player) : nullptr;
+        if (tr) teleport(tr, sp);
+        return;
+    }
+    g_pending = sp;
+    g_hasPending = true;
+    g_wantRedirect = true;
+    g_worldRt = t->id;
+    refresh_world_want();
+    logf_("окно уровня: вход в мир «%s»", t->name.c_str());
+}
+
+/** Окно уровня рисует лаунчер (процесс игры, GameActivity): мы кладём maps/_prompt и ждём maps/_answer. */
+void prompt_poll(long long now) {
+    if (!g_promptOpen) return;
+    std::string ans = g_mapsDir + "/_answer";
+    if (FILE* f = fopen(ans.c_str(), "r")) {
+        char buf[200] = {0};
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        fclose(f);
+        (void)n;
+        unlink((g_mapsDir + "/_prompt").c_str());
+        unlink(ans.c_str());
+        g_promptOpen = false;
+        if (strncmp(buf, "go", 2) == 0) {
+            if (const MapSpec* t = find_spec(g_promptId)) enter_world_from_prompt(t);
+        } else {
+            logf_("окно уровня: отмена");
+        }
+    } else if (now - g_promptT > 180000) {
+        unlink((g_mapsDir + "/_prompt").c_str());
+        g_promptOpen = false;
+        logf_("окно уровня: ответа не было, закрываю");
+    }
+}
+
+void prompt_open(const MapSpec* t, long long now) {
+    std::string tmp = g_mapsDir + "/_prompt.tmp";
+    FILE* f = fopen(tmp.c_str(), "w");
+    if (!f) { logf_("окно уровня: не удалось записать файл"); return; }
+    auto clean = [](std::string s) { for (auto& c : s) if (c == '\t' || c == '\n' || c == '\r') c = ' '; return s; };
+    fprintf(f, "%s\t%s\t%s\t%s\n", t->id.c_str(), clean(t->name).c_str(), clean(t->cover).c_str(), clean(t->desc).c_str());
+    fclose(f);
+    rename(tmp.c_str(), (g_mapsDir + "/_prompt").c_str());
+    unlink((g_mapsDir + "/_answer").c_str());
+    g_promptOpen = true;
+    g_promptT = now;
+    g_promptId = t->id;
+    logf_("окно уровня «%s»: показываю", t->name.c_str());
 }
 
 void portals_tick(long long now) {
@@ -1561,12 +1690,7 @@ void portals_tick(long long now) {
     } else if (const MapSpec* t = find_spec(d)) {
         V3 sp{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
         if (t->world && !(W.active && W.id == t->id)) {
-            g_pending = sp;
-            g_hasPending = true;
-            g_wantRedirect = true;
-            g_worldRt = t->id;
-            refresh_world_want();
-            logf_("круг телепорта «%s»: вход в мир «%s»", hitObj->name.c_str(), t->name.c_str());
+            if (!g_promptOpen) prompt_open(t, now);  // как у родной платформы: окно с названием и «Вперёд!»
         } else {
             teleport(tr, sp);
             logf_("круг телепорта «%s»: на точку появления карты «%s»", hitObj->name.c_str(), t->name.c_str());
@@ -1685,6 +1809,7 @@ void update() {
         g_in_sync = false;
         unlink(guard.c_str());
     }
+    prompt_poll(now);
     if (g_engineOk && !g_dirty) portals_tick(now);
     if (slow && g_engineOk) {
         std::string guard = g_mapsDir + "/_guard";
@@ -1805,8 +1930,23 @@ void bind_unity() {
     F.get_active = m0(go, "get_activeSelf", 0);
     F.set_layer = m0(go, "set_layer", 1);
     F.get_layer = m0(go, "get_layer", 0);
-    if (void* smk = bearite_find_class("UnityEngine.SceneManagement", "SceneManager")) F.load_scene = find_method_types(smk, "LoadScene", {"String"});
-    logf_("загрузка сцен: LoadScene=%d, get_layer=%d", F.load_scene != nullptr, F.get_layer != nullptr);
+    if (void* smk = bearite_find_class("UnityEngine.SceneManagement", "SceneManager")) {
+        // методы загрузки сцены в сборке могли вырезать: пробуем все известные варианты
+        const char* names[] = {"LoadScene", "LoadSceneAsync"};
+        for (const char* n : names) {
+            if (!F.load_scene) { F.load_scene = find_method_types(smk, n, {"String"}); if (F.load_scene) { F.load_arity = 1; logf_("загрузка сцен: %s(String)", n); } }
+        }
+        for (const char* n : names) {
+            if (!F.load_scene) { F.load_scene = find_method_types(smk, n, {"String", "LoadSceneMode"}); if (F.load_scene) { F.load_arity = 2; logf_("загрузка сцен: %s(String, LoadSceneMode)", n); } }
+        }
+        if (!F.load_scene) dump_class("UnityEngine.SceneManagement", "SceneManager");
+    }
+    logf_("загрузка сцен: метод=%d, get_layer=%d", F.load_scene != nullptr, F.get_layer != nullptr);
+    F.go_ctor_str = find_method_types(go, ".ctor", {"String"});
+    F.set_active = m0(go, "SetActive", 1);
+    if (void* trk = bearite_find_class("UnityEngine", "Transform")) F.set_parent = find_method_types(trk, "SetParent", {"Transform"});
+    F.instantiate_parent = find_method_types(ob, "Instantiate", {"Object", "Transform"});
+    F.destroy_imm = m0(ob, "DestroyImmediate", 1);
     dump_class("", "LaunchPlatform");
     F.get_component = find_method_p0(go, "GetComponent", 1, "Type");
     F.get_material = m0(rd, "get_material", 0);

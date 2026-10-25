@@ -153,6 +153,41 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
             }
         }
         add(ui.row("Сцена", sceneBtn))
+        if (m.world) {
+            // окно уровня: показывается, когда в мир заходят через круг (как у платформы Черепахограда)
+            add(ui.label("Окно уровня (появляется при входе через круг)", 12f, GameUi.MUTED))
+            add(ui.row("Описание", ui.textInput(m.desc, 230, "коротко о карте") { m.desc = it; save() }))
+            val coverBtn = ui.pill(if (m.cover.isEmpty()) "Без обложки" else "Обложка выбрана") {}
+            coverBtn.setOnClickListener {
+                val ids = store.textures()
+                if (ids.isEmpty()) {
+                    Toast.makeText(act, "Сначала добавь текстуру в редакторе карты", Toast.LENGTH_LONG).show()
+                } else {
+                    val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+                    var dlgRef: android.app.Dialog? = null
+                    fun thumbView(id: String?): View {
+                        val sel = m.cover == (id ?: "")
+                        return android.widget.ImageView(act).apply {
+                            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            background = ui.round(GameUi.SURFACE3, 12, if (sel) GameUi.CREAM else GameUi.LINE_TAN, if (sel) 3 else 1)
+                            setPadding(ui.dp(3), ui.dp(3), ui.dp(3), ui.dp(3))
+                            if (id != null) try { setImageBitmap(android.graphics.BitmapFactory.decodeFile(store.texturePng(id).path, android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 })) } catch (_: Throwable) {}
+                            setOnClickListener {
+                                m.cover = id ?: ""; save()
+                                coverBtn.text = if (m.cover.isEmpty()) "Без обложки" else "Обложка выбрана"
+                                dlgRef?.dismiss()
+                            }
+                        }
+                    }
+                    row.addView(thumbView(null), LinearLayout.LayoutParams(ui.dp(76), ui.dp(76)).apply { rightMargin = ui.dp(6) })
+                    for (id in ids) row.addView(thumbView(id), LinearLayout.LayoutParams(ui.dp(76), ui.dp(76)).apply { rightMargin = ui.dp(6) })
+                    val sv = android.widget.HorizontalScrollView(act).apply { addView(row) }
+                    dlgRef = ui.dialog("Обложка уровня", sv, listOf(GameUi.Btn("Закрыть")))
+                    dlgRef?.show()
+                }
+            }
+            add(ui.row("Обложка", coverBtn))
+        }
         if (m.world) add(ui.label("Отдельный мир со сценой level_1 заменяет уровень Черепахограда: встаёшь на родную платформу, жмёшь «Вперёд!», игра грузит уровень сама, а вместо него появляется твой мир. Выход: меню паузы.", 11f, GameUi.DIM, bold = false).apply { setPadding(ui.dp(4), ui.dp(2), 0, ui.dp(4)) })
 
         add(ui.numberRow("Сдвиг X", m.ox, -1000.0, 1000.0, 0.5, 2) { m.ox = it; save() })

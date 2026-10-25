@@ -25,6 +25,8 @@ data class GameMap(
     var name: String,
     var enabled: Boolean = true,
     var scene: String = "",  // пусто = в любой сцене
+    var cover: String = "",  // id текстуры-обложки для окна уровня
+    var desc: String = "",   // описание в окне уровня
     var ox: Double = 0.0, var oy: Double = 0.0, var oz: Double = 0.0,
     var scale: Double = 1.0,
     var layer: Int = 0,
@@ -198,6 +200,8 @@ class MapStore(private val dir: File) {
             append("name=").append(clean(m.name)).append('\n')
             append("enabled=").append(if (m.enabled) 1 else 0).append('\n')
             append("scene=").append(clean(m.scene)).append('\n')
+            append("cover=").append(clean(m.cover)).append('\n')
+            append("desc=").append(clean(m.desc)).append('\n')
             append("ox=").append(f(m.ox)).append('\n')
             append("oy=").append(f(m.oy)).append('\n')
             append("oz=").append(f(m.oz)).append('\n')
@@ -254,6 +258,8 @@ class MapStore(private val dir: File) {
                     "name" -> m.name = v.ifBlank { id }
                     "enabled" -> m.enabled = v == "1" || v == "true"
                     "scene" -> m.scene = v
+                    "cover" -> m.cover = v
+                    "desc" -> m.desc = v
                     "ox" -> m.ox = v.toDoubleOrNull() ?: 0.0
                     "oy" -> m.oy = v.toDoubleOrNull() ?: 0.0
                     "oz" -> m.oz = v.toDoubleOrNull() ?: 0.0
