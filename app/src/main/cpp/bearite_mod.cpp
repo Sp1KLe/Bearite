@@ -506,6 +506,7 @@ void set_disc(Live& L, bool visible) {
     L.natHidden = !visible;
 }
 
+int inst_id(void* o);
 void release_native(Live& L, bool restore) {
     for (auto& e : L.natOff) {
         if (restore) {
@@ -519,6 +520,7 @@ void release_native(Live& L, bool restore) {
     if (L.nat) {
         if (L.natClone && restore && F.destroy && F.get_gameobject) {  // копию платформы убираем вместе с картой
             void* tr = target(L.nat);
+            if (tr) g_cloneWorld.erase(inst_id(tr));
             void* go = tr ? inv(F.get_gameobject, tr) : nullptr;
             if (go) { void* a[1] = {go}; inv(F.destroy, nullptr, a); }
         }
@@ -526,6 +528,7 @@ void release_native(Live& L, bool restore) {
         L.nat = 0;
     }
     L.natClone = false;
+    L.nativeFull = false;
     if (L.natHidden && restore) set_disc(L, true);
     L.natHidden = false;
 }
@@ -1642,6 +1645,11 @@ void scan_names() {
 bool portal_center(const MapSpec& m, const Obj& o, Live& L, long long now, float* c) {
     if (!o.bind.empty() && o.clone) {  // копия платформы на месте круга: центр — координаты круга
         for (int k = 0; k < 3; ++k) c[k] = m.off[k] + m.scale * o.p[k];
+        {   // назначение круга могли поменять после создания копии: пересоздаём в нужном виде
+            const MapSpec* wt0 = o.dest.empty() || o.dest[0] == '@' ? nullptr : find_spec(o.dest);
+            bool needFull = wt0 && wt0->world;
+            if (L.nat && L.natClone && L.nativeFull != needFull) { release_native(L, true); L.natTry = 0; }
+        }
         if (!L.nat && now - L.natTry >= 3000) {
             L.natTry = now;
             float kk = m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]) / 3.0f;
