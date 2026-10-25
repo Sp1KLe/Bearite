@@ -177,7 +177,7 @@ void scan_classes() {
     static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
                                   "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
                                   "worldmap", "stage", "player"};
-    static const char* deep[] = {"LaunchPlatform", "VoteTrigger"};
+    static const char* deep[] = {"LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
@@ -189,7 +189,7 @@ void scan_classes() {
             std::string piece = body.substr(pos, 300);
             logf_("%s%s: %s", head.c_str(), part ? " (продолжение)" : "", piece.c_str());
             pos += 300; ++part;
-        } while (pos < body.size() && part < 8);
+        } while (pos < body.size() && part < 14);
     };
     for (size_t i = 0; i < na && asms; ++i) {
         void* img = asm_image(asms[i]);
@@ -217,10 +217,20 @@ void scan_classes() {
             void* it = nullptr;
             int mc = 0;
             while (void* m = class_methods(k, &it)) {
-                if (mc++ >= (isDeep ? 80 : 30)) { body += "…"; break; }
+                if (mc++ >= (isDeep ? 120 : 30)) { body += "…"; break; }
                 body += method_name(m);
-                body += '/';
-                body += std::to_string(method_pcount(m));
+                if (isDeep && type_name && method_param) {
+                    body += '(';
+                    for (uint32_t pi = 0; pi < method_pcount(m); ++pi) {
+                        void* pt = method_param(m, pi);
+                        body += pt ? type_name(pt) : "?";
+                        if (pi + 1 < method_pcount(m)) body += ',';
+                    }
+                    body += ')';
+                } else {
+                    body += '/';
+                    body += std::to_string(method_pcount(m));
+                }
                 body += ' ';
             }
             if (cls_fields && fld_name && fld_type && type_name) {
@@ -228,7 +238,7 @@ void scan_classes() {
                 void* fit = nullptr;
                 int fc = 0;
                 while (void* f = cls_fields(k, &fit)) {
-                    if (fc++ >= (isDeep ? 60 : 14)) { body += "…"; break; }
+                    if (fc++ >= (isDeep ? 90 : 14)) { body += "…"; break; }
                     void* ft = fld_type(f);
                     body += fld_name(f);
                     body += ':';
@@ -264,6 +274,7 @@ struct Fns {
     void *cam_main, *set_name, *destroy, *get_active, *set_layer, *get_component, *get_material, *set_color,
         *collider_enabled, *get_scene, *scene_name;
     void *type_renderer, *type_collider;
+    void* get_root;
     // текстуры
     void *tex2d, *set_main_tex, *set_main_tex_scale, *set_hideflags, *image_conv;
     // отдельный мир
@@ -329,7 +340,10 @@ struct Live {
     std::vector<std::pair<uintptr_t, int>> natOff;      // что мы выключили у него: (handle, 0 = скрипт, 1 = триггер)
     long long natTry = 0;
     bool natHidden = false, natMiss = false, natClone = false;
+    bool nativeFull = false;  // копия платформы с родными скриптами: окно, анимацию и загрузку уровня ведёт сама игра
 };
+
+std::map<int, std::string> g_cloneWorld;  // instance id корня копии платформы → id мира, куда она ведёт
 
 std::string g_mapsDir;
 std::vector<MapSpec> g_specs;
@@ -907,6 +921,7 @@ bool is_protected(void* tr) {
 int g_uiKept = 0;
 std::string name_of(void* o);
 void* goClass_();
+void* type_of(const char* ns, const char* name);
 
 /** Элемент интерфейса (значок монеты в углу и т.п.): слой UI или под объектом с «canvas/hud» в имени. Такое не прячем. */
 bool is_ui(void* rend, void* tr) {
@@ -1456,7 +1471,7 @@ bool bind_native(Live& L, const std::string& name) {
 /** Делает копию родного объекта (платформа запуска уровня) на месте круга; оригинал не трогает.
  *  Копия создаётся под выключенным родителем: пока он выключен, Awake/OnEnable не вызываются, поэтому PhotonView и прочие скрипты
  *  не успевают зарегистрироваться (иначе «Duplicate key» у Photon). Скрипты удаляются до включения. */
-bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
+bool clone_native(Live& L, const std::string& name, const V3& pos, float k, const std::string& worldId = "") {
     void* tmpl = find_native(name);
     if (!tmpl || !F.go_transform) return false;
     void* tgo = F.get_gameobject ? inv(F.get_gameobject, tmpl) : nullptr;
@@ -1508,7 +1523,41 @@ bool clone_native(Live& L, const std::string& name, const V3& pos, float k) {
             if (t1 && c1 && W.hidden.count(inst_id(t1))) { uint8_t on = 1; void* e[1] = {&on}; inv(setEn, c1, e); }
         }
     }
-    if (safe) {
+    bool full = false;
+    if (safe && !worldId.empty()) {
+        // копия остаётся настоящей платформой: свой PhotonView-id, чтобы не было «Duplicate key», остальное родное
+        void* pvT = type_of("Photon.Pun", "PhotonView");
+        void* pvK = bearite_find_class("Photon.Pun", "PhotonView");
+        void* setId = pvK ? bearite_il2.class_get_method_from_name(pvK, "set_ViewID", 1) : nullptr;
+        if (pvT && setId && F.get_comps_children) {
+            uint8_t inc = 1;
+            void* a[2] = {pvT, &inc};
+            void* arr = inv(F.get_comps_children, cgo, a);
+            static int nextId = 960;
+            int cnt = 0;
+            if (arr) for (uintptr_t i = 0; i < arr_len(arr) && i < 8; ++i) {
+                void* pv = *(void**)arr_elem(arr, sizeof(void*), i);
+                if (!pv) continue;
+                int nid = nextId--;
+                void* ia[1] = {&nid};
+                bool ok = false;
+                inv(setId, pv, ia, &ok);
+                if (ok) ++cnt;
+            }
+            full = cnt > 0;
+            logf_("копия платформы: PhotonView переназначено %d", cnt);
+        } else {
+            logf_("копия платформы: нет PhotonView.set_ViewID (type=%d set=%d), делаю без скриптов", pvT != nullptr, setId != nullptr);
+        }
+    }
+    if (full) {
+        void* pa[1] = {nullptr};
+        inv(F.set_parent, ctr, pa);
+        if (holder) { void* da[1] = {holder}; inv(F.destroy, nullptr, da); }
+        L.nativeFull = true;
+        g_cloneWorld[inst_id(ctr)] = worldId;
+        logf_("копия платформы «%s» создана с родными скриптами (мир «%s»)", name.c_str(), worldId.c_str());
+    } else if (safe) {
         // скрипты и триггеры удаляем целиком, пока копия выключена
         int nb = 0, nt = 0;
         std::string names;
@@ -1596,7 +1645,9 @@ bool portal_center(const MapSpec& m, const Obj& o, Live& L, long long now, float
         if (!L.nat && now - L.natTry >= 3000) {
             L.natTry = now;
             float kk = m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]) / 3.0f;
-            if (!clone_native(L, o.bind, V3{c[0], c[1], c[2]}, kk < 0.05f ? 0.05f : kk) && !L.natMiss) {
+            const MapSpec* wt = o.dest.empty() || o.dest[0] == '@' ? nullptr : find_spec(o.dest);
+            std::string wid = wt && wt->world ? wt->id : "";
+            if (!clone_native(L, o.bind, V3{c[0], c[1], c[2]}, kk < 0.05f ? 0.05f : kk, wid) && !L.natMiss) {
                 L.natMiss = true;
                 logf_("платформа «%s» для копии в этой сцене не найдена (повторю, когда сменится сцена)", o.bind.c_str());
             }
@@ -1755,6 +1806,7 @@ void portals_tick(long long now) {
             if (o.shape != "portal" || !it->second[i].h) continue;
             float cc[3];
             if (!portal_center(m, o, it->second[i], now, cc)) continue;
+            if (it->second[i].nativeFull) continue;  // такой круг обрабатывает сама игра
             float cx = cc[0], cy = cc[1], cz = cc[2];
             float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]);
             float dx = pp[0] - cx, dz = pp[2] - cz, dy = pp[1] - cy;
@@ -2056,6 +2108,7 @@ void bind_unity() {
     F.get_parent = m0(tr, "get_parent", 0);
     F.get_child_count = m0(tr, "get_childCount", 0);
     F.get_gameobject = m0(cm, "get_gameObject", 0);
+    F.get_root = m0(tr, "get_root", 0);
     F.find_tag = find_method_p0(go, "FindWithTag", 1, "String");
     F.find_obj = find_method_p0(ob, "FindObjectOfType", 1, "Type");
     F.find_objs = find_method_p0(ob, "FindObjectsOfType", 1, "Type");
@@ -2087,6 +2140,28 @@ void bind_unity() {
     F.rend_bounds = m0(rd, "get_bounds", 0);
     F.type_renderer = type_of("UnityEngine", "Renderer");
     F.type_collider = type_of("UnityEngine", "Collider");
+}
+
+void (*o_load_level)(void*, const void*) = nullptr;
+/** Родная платформа запускает уровень. Если это наша копия — запоминаем мир: игра сама загрузит level_1 (с родным окном и переходом),
+ *  а движок откроет в нём мир, как только сцена сменится. */
+void h_load_level(void* self, const void* mi) {
+    try {
+        void* go = self && F.get_gameobject ? inv(F.get_gameobject, self) : nullptr;
+        void* tr = go && F.go_transform ? inv(F.go_transform, go) : nullptr;
+        void* root = tr && F.get_root ? inv(F.get_root, tr) : nullptr;
+        auto it = root ? g_cloneWorld.find(inst_id(root)) : g_cloneWorld.end();
+        if (it != g_cloneWorld.end()) {
+            if (const MapSpec* t = find_spec(it->second)) {
+                g_pendingWorld = t->id;
+                g_returnScene = g_scene;
+                g_pending = V3{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
+                g_hasPending = true;
+                logf_("платформа запускает уровень: после загрузки открою мир «%s» (вернусь в «%s»)", t->name.c_str(), g_scene.c_str());
+            }
+        }
+    } catch (...) {}
+    if (o_load_level) o_load_level(self, mi);
 }
 
 int hook_time(const char* name, void* repl, void** orig) {
@@ -2154,6 +2229,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     if (hook_time("get_unscaledDeltaTime", (void*)h_udt, (void**)&o_udt) == 0) ++hooks;
     if (hook_time("get_time", (void*)h_time, (void**)&o_time) == 0) ++hooks;
     if (hook_time("get_unscaledTime", (void*)h_utime, (void**)&o_utime) == 0) ++hooks;
+    {
+        int rc = bearite_hook_method(A, ID, "", "LevelEntrance", "LoadLevel", 0, (void*)h_load_level, (void**)&o_load_level);
+        if (rc != 0) logf_("перехват запуска уровня платформой: не вышло (%d)", rc);
+    }
     logf_("движок карт: хуков кадра %d, карты читаются из %s", hooks, g_mapsDir.c_str());
     if (hooks == 0) {
         g_status = "error";
