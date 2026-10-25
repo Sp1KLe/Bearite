@@ -64,6 +64,9 @@ void* (*obj_new)(void*);
 void* (*arr_new)(void*, uintptr_t);
 void* (*get_corlib)();
 
+template <typename T>
+T sym(const char* n) { return reinterpret_cast<T>(A->il2cpp_symbol(n)); }
+
 void logf_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void logf_(const char* fmt, ...) {
     char buf[400];
@@ -154,6 +157,89 @@ void dump_class(const char* ns, const char* name) {
         s += ' ';
     }
     logf_("методы %s.%s: %s", ns, name, s.c_str());
+}
+
+/** Разведка: классы игры, в имени которых есть слова про уровни, запуск, переходы, окна. Пишет в лог методы и поля. */
+void scan_classes() {
+    auto img_count = sym<size_t (*)(void*)>("il2cpp_image_get_class_count");
+    auto img_class = sym<void* (*)(void*, size_t)>("il2cpp_image_get_class");
+    auto cls_ns = sym<const char* (*)(void*)>("il2cpp_class_get_namespace");
+    auto cls_parent = sym<void* (*)(void*)>("il2cpp_class_get_parent");
+    auto cls_fields = sym<void* (*)(void*, void**)>("il2cpp_class_get_fields");
+    auto fld_name = sym<const char* (*)(void*)>("il2cpp_field_get_name");
+    auto fld_type = sym<void* (*)(void*)>("il2cpp_field_get_type");
+    auto type_name = sym<const char* (*)(void*)>("il2cpp_type_get_name");
+    auto asm_image = sym<void* (*)(void*)>("il2cpp_assembly_get_image");
+    auto img_name = sym<const char* (*)(void*)>("il2cpp_image_get_name");
+    auto dom_get = sym<void* (*)()>("il2cpp_domain_get");
+    auto dom_asms = sym<void** (*)(void*, size_t*)>("il2cpp_domain_get_assemblies");
+    if (!img_count || !img_class || !cls_ns || !dom_get || !dom_asms || !asm_image) { logf_("разведка классов: нет функций il2cpp"); return; }
+    static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
+                                  "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
+                                  "worldmap", "stage", "player"};
+    static const char* deep[] = {"LaunchPlatform", "VoteTrigger"};
+    size_t na = 0;
+    void** asms = dom_asms(dom_get(), &na);
+    int shown = 0;
+    auto chunked = [&](const std::string& head, const std::string& body) {
+        // длинные строки режем на куски, чтобы лог их не обрезал
+        size_t pos = 0;
+        int part = 0;
+        do {
+            std::string piece = body.substr(pos, 300);
+            logf_("%s%s: %s", head.c_str(), part ? " (продолжение)" : "", piece.c_str());
+            pos += 300; ++part;
+        } while (pos < body.size() && part < 8);
+    };
+    for (size_t i = 0; i < na && asms; ++i) {
+        void* img = asm_image(asms[i]);
+        if (!img) continue;
+        const char* iname = img_name ? img_name(img) : "?";
+        if (!iname || strstr(iname, "Assembly-CSharp") == nullptr) continue;
+        size_t n = img_count(img);
+        logf_("разведка классов: сборка %s, классов %zu", iname, n);
+        for (size_t c = 0; c < n && shown < 160; ++c) {
+            void* k = img_class(img, c);
+            if (!k) continue;
+            const char* nm = class_name(k);
+            if (!nm) continue;
+            std::string low = nm;
+            for (auto& ch : low) ch = (char)tolower((unsigned char)ch);
+            bool hit = false, isDeep = false;
+            for (auto w : words) if (low.find(w) != std::string::npos) { hit = true; break; }
+            for (auto dn : deep) if (strcmp(nm, dn) == 0) isDeep = true;
+            if (!hit && !isDeep) continue;
+            if (nm[0] == '<') continue;
+            ++shown;
+            void* par = cls_parent ? cls_parent(k) : nullptr;
+            std::string head = std::string("класс ") + (cls_ns ? cls_ns(k) : "") + "." + nm + " : " + (par ? class_name(par) : "-");
+            std::string body;
+            void* it = nullptr;
+            int mc = 0;
+            while (void* m = class_methods(k, &it)) {
+                if (mc++ >= (isDeep ? 80 : 30)) { body += "…"; break; }
+                body += method_name(m);
+                body += '/';
+                body += std::to_string(method_pcount(m));
+                body += ' ';
+            }
+            if (cls_fields && fld_name && fld_type && type_name) {
+                body += "| поля: ";
+                void* fit = nullptr;
+                int fc = 0;
+                while (void* f = cls_fields(k, &fit)) {
+                    if (fc++ >= (isDeep ? 60 : 14)) { body += "…"; break; }
+                    void* ft = fld_type(f);
+                    body += fld_name(f);
+                    body += ':';
+                    body += ft && type_name ? type_name(ft) : "?";
+                    body += ' ';
+                }
+            }
+            chunked(head, body);
+        }
+    }
+    logf_("разведка классов: показано %d", shown);
 }
 
 std::string utf8(void* il2str) {
@@ -1870,8 +1956,6 @@ float h_udt(const void* mi) { float r = o_udt(mi); on_tick(); return r; }
 float h_time(const void* mi) { float r = o_time(mi); on_tick(); return r; }
 float h_utime(const void* mi) { float r = o_utime(mi); on_tick(); return r; }
 
-template <typename T>
-T sym(const char* n) { return reinterpret_cast<T>(A->il2cpp_symbol(n)); }
 
 bool bind_il2cpp() {
     gch_new = sym<uintptr_t (*)(void*, int)>("il2cpp_gchandle_new");
@@ -1947,7 +2031,7 @@ void bind_unity() {
     if (void* trk = bearite_find_class("UnityEngine", "Transform")) F.set_parent = find_method_types(trk, "SetParent", {"Transform"});
     F.instantiate_parent = find_method_types(ob, "Instantiate", {"Object", "Transform"});
     F.destroy_imm = m0(ob, "DestroyImmediate", 1);
-    dump_class("", "LaunchPlatform");
+    scan_classes();
     F.get_component = find_method_p0(go, "GetComponent", 1, "Type");
     F.get_material = m0(rd, "get_material", 0);
     F.set_color = m0(mt, "set_color", 1);
