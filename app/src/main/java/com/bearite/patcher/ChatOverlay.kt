@@ -49,6 +49,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     @Volatile private var running = false
     @Volatile private var room = ""
+    val inRoom: Boolean get() = room.isNotEmpty()
+    var onRoomChanged: (() -> Unit)? = null
     private var after = 0L
 
     private var url: String get() = prefs.getString("url", DEFAULT_URL) ?: DEFAULT_URL; set(v) { prefs.edit().putString("url", v.trim().trimEnd('/')).apply() }
@@ -292,6 +294,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 room = r
                 if (r != shownRoom) {
                     shownRoom = r; after = 0; ntfySince = "5m"; seen.clear()
+                    main.post { onRoomChanged?.invoke() }
                     main.post {
                         title.text = if (r.isEmpty()) "Чат · нет комнаты" else "Чат · $r"
                         list.removeAllViews()
