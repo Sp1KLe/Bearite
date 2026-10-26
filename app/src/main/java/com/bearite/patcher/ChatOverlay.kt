@@ -176,8 +176,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val dx = (e.rawX - sx).toInt(); val dy = (e.rawY - sy).toInt()
                     var nl = l; var nt = t; var nw = w0; var nh = h0
-                    if (edge and 4 != 0) nw = (w0 + dx).coerceIn(minW, parent.width - l)
-                    if (edge and 8 != 0) nh = (h0 + dy).coerceIn(minH, parent.height - t)
+                    if (edge and 4 != 0) nw = (w0 + dx).coerceIn(minW, this@ChatOverlay.parent.width - l)
+                    if (edge and 8 != 0) nh = (h0 + dy).coerceIn(minH, this@ChatOverlay.parent.height - t)
                     if (edge and 1 != 0) { nw = (w0 - dx).coerceIn(minW, l + w0); nl = l + w0 - nw }
                     if (edge and 2 != 0) { nh = (h0 - dy).coerceIn(minH, t + h0); nt = t + h0 - nh }
                     lp.leftMargin = nl; lp.topMargin = nt; lp.width = nw; lp.height = nh
