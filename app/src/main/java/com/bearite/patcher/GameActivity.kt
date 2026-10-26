@@ -43,6 +43,7 @@ import java.lang.reflect.Proxy
  */
 class GameActivity : Activity() {
     private var levelPrompt: LevelPrompt? = null
+    private var chat: ChatOverlay? = null
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
 
@@ -157,6 +158,7 @@ class GameActivity : Activity() {
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
+        chat = ChatOverlay(this, root).also { it.start() }
         updateModButton()
         view.requestFocus()
         BLog.i("UnityPlayer создан: ${p.javaClass.name}")
@@ -370,6 +372,7 @@ class GameActivity : Activity() {
     override fun onDestroy() {
         BLog.i("GameActivity: нормальный выход")
         try { levelPrompt?.stop() } catch (_: Throwable) {}
+        try { chat?.stop() } catch (_: Throwable) {}
         try { File(filesDir, RUNNING_MARKER).delete() } catch (_: Throwable) {}
         val hasDestroy = player?.javaClass?.methods?.any { it.name == "destroy" && it.parameterTypes.isEmpty() } == true
         callPlayer(if (hasDestroy) "destroy" else "quit")

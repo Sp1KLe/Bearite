@@ -1912,6 +1912,33 @@ long long now_ms() {
 }
 long long now_ms_fwd() { return now_ms(); }
 
+/** Имя текущей комнаты Photon (для чата лаунчера): пишем в maps/_room, пусто = игрок не в комнате. */
+void publish_room() {
+    static void *pnK = nullptr, *getRoom = nullptr, *getName = nullptr;
+    static bool tried = false;
+    static std::string last = "?";
+    if (!tried) {
+        tried = true;
+        pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
+        getRoom = pnK ? bearite_il2.class_get_method_from_name(pnK, "get_CurrentRoom", 0) : nullptr;
+        logf_("чат: PhotonNetwork=%d get_CurrentRoom=%d", pnK != nullptr, getRoom != nullptr);
+    }
+    if (!getRoom) return;
+    std::string name;
+    if (void* room = inv(getRoom, nullptr)) {
+        if (!getName) {
+            void* rk = obj_class(room);
+            getName = rk ? bearite_il2.class_get_method_from_name(rk, "get_Name", 0) : nullptr;
+        }
+        if (getName) name = utf8(inv(getName, room));
+    }
+    if (name == last) return;
+    last = name;
+    std::string path = g_mapsDir + "/_room", tmp = g_mapsDir + "/.room.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(name.c_str(), f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+    logf_("чат: комната «%s»", name.c_str());
+}
+
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
@@ -1921,6 +1948,7 @@ void update() {
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
+        publish_room();
         std::string sc = read_scene();
         if (!sc.empty() && sc != g_scene) {
             logf_("сцена: «%s» → «%s»", g_scene.c_str(), sc.c_str());
