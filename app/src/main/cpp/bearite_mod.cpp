@@ -176,8 +176,8 @@ void scan_classes() {
     if (!img_count || !img_class || !cls_ns || !dom_get || !dom_asms || !asm_image) { logf_("разведка классов: нет функций il2cpp"); return; }
     static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
                                   "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
-                                  "worldmap", "stage", "player"};
-    static const char* deep[] = {"LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
+                                  "worldmap", "stage", "player", "pause", "ingamemenu", "gamemenu", "mainmenu"};
+    static const char* deep[] = {"PauseMenu", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
@@ -198,7 +198,7 @@ void scan_classes() {
         if (!iname || strstr(iname, "Assembly-CSharp") == nullptr) continue;
         size_t n = img_count(img);
         logf_("разведка классов: сборка %s, классов %zu", iname, n);
-        for (size_t c = 0; c < n && shown < 160; ++c) {
+        for (size_t c = 0; c < n && shown < 300; ++c) {
             void* k = img_class(img, c);
             if (!k) continue;
             const char* nm = class_name(k);
