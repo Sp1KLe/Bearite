@@ -40,6 +40,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private lateinit var bubble: TextView
     private lateinit var badge: TextView
     private lateinit var panel: LinearLayout
+    private lateinit var win: ResizableFrame
     private lateinit var list: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var title: TextView
@@ -50,7 +51,13 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     @Volatile private var room = ""
     private var after = 0L
 
-    private var url: String get() = prefs.getString("url", "") ?: ""; set(v) { prefs.edit().putString("url", v.trim().trimEnd('/')).apply() }
+    private var url: String get() = prefs.getString("url", DEFAULT_URL) ?: DEFAULT_URL; set(v) { prefs.edit().putString("url", v.trim().trimEnd('/')).apply() }
+    private val cid: String get() = prefs.getString("cid", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs.edit().putString("cid", it).apply() }
+    private fun ntfyMode(u: String) = u.contains("ntfy")
+    private fun topic(room: String): String {
+        val h = java.security.MessageDigest.getInstance("SHA-256").digest(room.toByteArray()).joinToString("") { "%02x".format(it) }
+        return "bearite-" + h.take(32)
+    }
     private var nick: String get() = prefs.getString("nick", "") ?: ""; set(v) { prefs.edit().putString("nick", v.trim().take(24)).apply() }
     private var key: String get() = prefs.getString("key", "") ?: ""; set(v) { prefs.edit().putString("key", v.trim()).apply() }
 
@@ -108,13 +115,84 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(ui.label("➤", 22f, GameUi.CREAM).apply { gravity = Gravity.CENTER; setOnClickListener { send() } }, LinearLayout.LayoutParams(dp(44), dp(40)))
         panel.addView(row)
-        parent.addView(panel, FrameLayout.LayoutParams(w, h, Gravity.TOP or Gravity.START).apply { leftMargin = dp(64); topMargin = dp(60) })
-        sys("Нажми ⚙, чтобы указать адрес сервера чата и ник.")
+        win = ResizableFrame(act).apply { visibility = View.GONE }
+        win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(GameUi.DIM); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val sw = prefs.getInt("w", w); val sh = prefs.getInt("h", h)
+        parent.addView(win, FrameLayout.LayoutParams(sw, sh, Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("x", dp(64)); topMargin = prefs.getInt("y", dp(60)) })
+        // перетаскивание окна за заголовок
+        head.setOnTouchListener(object : View.OnTouchListener {
+            var sx = 0f; var sy = 0f; var l = 0; var t = 0
+            override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
+                val lp = win.layoutParams as FrameLayout.LayoutParams
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        lp.leftMargin = (l + e.rawX - sx).toInt().coerceIn(0, maxOf(0, parent.width - lp.width))
+                        lp.topMargin = (t + e.rawY - sy).toInt().coerceIn(0, maxOf(0, parent.height - lp.height))
+                        win.layoutParams = lp
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> saveWin()
+                }
+                return true
+            }
+        })
+        sys("Нажми ⚙ и впиши ник. Тяни окно за заголовок, размер меняй за края и углы.")
+    }
+
+    private fun saveWin() {
+        val lp = win.layoutParams as FrameLayout.LayoutParams
+        prefs.edit().putInt("w", lp.width).putInt("h", lp.height).putInt("x", lp.leftMargin).putInt("y", lp.topMargin).apply()
+    }
+
+    /** Окно с изменением размера «как в Windows»: тяни за любой край или угол. */
+    private inner class ResizableFrame(ctx: Context) : FrameLayout(ctx) {
+        private var edge = 0   // 1 слева, 2 сверху, 4 справа, 8 снизу
+        private var sx = 0f; private var sy = 0f
+        private var l = 0; private var t = 0; private var w0 = 0; private var h0 = 0
+        private val grip = dp(18)
+        override fun onInterceptTouchEvent(e: android.view.MotionEvent): Boolean {
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                var ed = 0
+                if (e.x < grip) ed = ed or 1
+                if (e.y < grip && e.x > dp(120)) ed = ed or 2   // верхний край не мешает заголовку с кнопками
+                if (e.x > width - grip) ed = ed or 4
+                if (e.y > height - grip) ed = ed or 8
+                edge = ed
+                if (ed != 0) {
+                    val lp = layoutParams as LayoutParams
+                    sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin; w0 = lp.width; h0 = lp.height
+                    return true
+                }
+            }
+            return false
+        }
+        override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+            if (edge == 0) return false
+            val lp = layoutParams as LayoutParams
+            val minW = dp(220); val minH = dp(150)
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = (e.rawX - sx).toInt(); val dy = (e.rawY - sy).toInt()
+                    var nl = l; var nt = t; var nw = w0; var nh = h0
+                    if (edge and 4 != 0) nw = (w0 + dx).coerceIn(minW, parent.width - l)
+                    if (edge and 8 != 0) nh = (h0 + dy).coerceIn(minH, parent.height - t)
+                    if (edge and 1 != 0) { nw = (w0 - dx).coerceIn(minW, l + w0); nl = l + w0 - nw }
+                    if (edge and 2 != 0) { nh = (h0 - dy).coerceIn(minH, t + h0); nt = t + h0 - nh }
+                    lp.leftMargin = nl; lp.topMargin = nt; lp.width = nw; lp.height = nh
+                    layoutParams = lp
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { edge = 0; saveWin() }
+            }
+            return true
+        }
     }
 
     private fun toggle() {
-        val open = panel.visibility != View.VISIBLE
-        panel.visibility = if (open) View.VISIBLE else View.GONE
+        val open = win.visibility != View.VISIBLE
+        win.visibility = if (open) View.VISIBLE else View.GONE
+        panel.visibility = View.VISIBLE
         if (open) {
             unread = 0; updateBadge()
             scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
@@ -149,7 +227,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun settings() {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(ui.label("Адрес сервера (https://…)", 12f, GameUi.MUTED))
+        col.addView(ui.label("Сервер (по умолчанию общий ntfy.sh, трогать не нужно)", 12f, GameUi.MUTED))
         col.addView(ui.textInput(url, 300, "https://chat.example.com") { url = it })
         col.addView(ui.label("Ник", 12f, GameUi.MUTED).apply { setPadding(0, dp(8), 0, 0) })
         col.addView(ui.textInput(nick, 300, "как тебя звать") { nick = it })
@@ -168,16 +246,24 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         if (r.isEmpty()) { sys("Ты не в комнате игры — чат пока недоступен."); return }
         input.setText("")
         val who = nick.ifBlank { "игрок" }
+        val payload = JSONObject().put("n", who).put("t", text.take(200)).put("c", cid).toString()
         Thread {
             try {
-                val c = open("$u/send")
-                c.requestMethod = "POST"; c.doOutput = true
-                c.setRequestProperty("Content-Type", "application/json")
-                val body = JSONObject().put("room", r).put("name", who).put("text", text).toString()
-                c.outputStream.use { it.write(body.toByteArray()) }
+                val c: HttpURLConnection
+                if (ntfyMode(u)) {
+                    c = open("$u/${topic(r)}")
+                    c.requestMethod = "POST"; c.doOutput = true
+                    c.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+                    c.outputStream.use { it.write(payload.toByteArray()) }
+                } else {
+                    c = open("$u/send")
+                    c.requestMethod = "POST"; c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json")
+                    c.outputStream.use { it.write(JSONObject().put("room", r).put("name", who).put("text", text).toString().toByteArray()) }
+                }
                 val code = c.responseCode
-                if (code == 429) main.post { sys("Слишком часто, подожди секунду.") }
-                else if (code != 200) main.post { sys("Сообщение не ушло (код $code).") }
+                if (code == 429) main.post { sys("Слишком часто, подожди немного.") }
+                else if (code !in 200..299) main.post { sys("Сообщение не ушло (код $code).") }
                 c.disconnect()
             } catch (t: Throwable) { main.post { sys("Нет связи с сервером.") } }
         }.start()
@@ -185,20 +271,27 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun open(u: String): HttpURLConnection {
         val c = URL(u).openConnection() as HttpURLConnection
-        c.connectTimeout = 8000; c.readTimeout = 35000
+        c.connectTimeout = 8000; c.readTimeout = 95000
         if (key.isNotEmpty()) c.setRequestProperty("X-Key", key)
         return c
+    }
+
+    private fun show(who: String, text: String, mine: Boolean) = main.post {
+        line(who, text, mine)
+        if (win.visibility != View.VISIBLE && !mine) { unread++; updateBadge() }
     }
 
     private fun loop() {
         var shownRoom = "?"
         var failed = 0
+        var ntfySince = "5m"
+        val seen = HashSet<String>()
         while (running) {
             try {
                 val r = try { roomFile.readText().trim() } catch (_: Throwable) { "" }
                 room = r
                 if (r != shownRoom) {
-                    shownRoom = r; after = 0
+                    shownRoom = r; after = 0; ntfySince = "5m"; seen.clear()
                     main.post {
                         title.text = if (r.isEmpty()) "Чат · нет комнаты" else "Чат · $r"
                         list.removeAllViews()
@@ -207,30 +300,53 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 }
                 val u = url
                 if (u.isEmpty() || r.isEmpty()) { Thread.sleep(1000); continue }
-                val c = open("$u/poll?room=${URLEncoder.encode(r, "UTF-8")}&after=$after&wait=20")
-                val code = c.responseCode
-                if (code != 200) { c.disconnect(); throw RuntimeException("код $code") }
-                val j = JSONObject(c.inputStream.bufferedReader().readText())
-                c.disconnect()
-                if (failed > 0) { failed = 0; main.post { sys("Связь восстановлена.") } }
-                val arr = j.getJSONArray("msgs")
-                var last = after
-                val me = nick.ifBlank { "игрок" }
-                for (i in 0 until arr.length()) {
-                    val m = arr.getJSONObject(i)
-                    last = maxOf(last, m.getLong("id"))
-                    val who = m.getString("name"); val text = m.getString("text")
-                    main.post {
-                        line(who, text, who == me)
-                        if (panel.visibility != View.VISIBLE && who != me) { unread++; updateBadge() }
+                if (ntfyMode(u)) {
+                    // публичный ntfy: поток событий по теме комнаты, с продолжением с последнего сообщения
+                    val c = open("$u/${topic(r)}/json?since=$ntfySince")
+                    val code = c.responseCode
+                    if (code != 200) { c.disconnect(); throw RuntimeException("код $code") }
+                    if (failed > 0) { failed = 0; main.post { sys("Связь восстановлена.") } }
+                    c.inputStream.bufferedReader().use { rd ->
+                        while (running) {
+                            val ln = rd.readLine() ?: break
+                            if (roomFile.exists() && (try { roomFile.readText().trim() } catch (_: Throwable) { r }) != r) break
+                            val j = try { JSONObject(ln) } catch (_: Throwable) { continue }
+                            if (j.optString("event") != "message") continue
+                            val id = j.optString("id")
+                            if (id.isNotEmpty()) { ntfySince = id; if (!seen.add(id)) continue }
+                            val m = try { JSONObject(j.optString("message")) } catch (_: Throwable) { continue }
+                            show(m.optString("n", "игрок"), m.optString("t"), m.optString("c") == cid)
+                        }
                     }
+                    c.disconnect()
+                } else {
+                    val c = open("$u/poll?room=${URLEncoder.encode(r, "UTF-8")}&after=$after&wait=20")
+                    val code = c.responseCode
+                    if (code != 200) { c.disconnect(); throw RuntimeException("код $code") }
+                    val j = JSONObject(c.inputStream.bufferedReader().readText())
+                    c.disconnect()
+                    if (failed > 0) { failed = 0; main.post { sys("Связь восстановлена.") } }
+                    val arr = j.getJSONArray("msgs")
+                    var last = after
+                    val me = nick.ifBlank { "игрок" }
+                    for (i in 0 until arr.length()) {
+                        val m = arr.getJSONObject(i)
+                        last = maxOf(last, m.getLong("id"))
+                        val who = m.getString("name")
+                        show(who, m.getString("text"), who == me)
+                    }
+                    after = maxOf(last, j.optLong("last", last))
                 }
-                after = maxOf(last, j.optLong("last", last))
             } catch (t: InterruptedException) { return
             } catch (t: Throwable) {
                 if (failed++ == 0) main.post { sys("Нет связи с сервером, пробую снова…") }
                 try { Thread.sleep(minOf(10000L, 1500L * failed)) } catch (_: InterruptedException) { return }
             }
         }
+    }
+
+    companion object {
+        /** Общий бесплатный публичный сервер ntfy: свой сервер поднимать не нужно. */
+        const val DEFAULT_URL = "https://ntfy.sh"
     }
 }
