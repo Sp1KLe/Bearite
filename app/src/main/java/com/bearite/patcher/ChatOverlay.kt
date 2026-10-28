@@ -77,15 +77,36 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         bubble = TextView(act).apply {
             text = "💬"; textSize = 22f; gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xCC241A15.toInt()); setStroke(dp(2), GameUi.CREAM) }
-            setOnClickListener { toggle() }
         }
-        parent.addView(bubble, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START).apply { leftMargin = dp(10); topMargin = dp(72) })
+        parent.addView(bubble, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)); topMargin = prefs.getInt("by", dp(72)) })
+        // кнопку чата можно перетащить в любое место; короткое касание открывает окно
+        bubble.setOnTouchListener(object : View.OnTouchListener {
+            var sx = 0f; var sy = 0f; var l = 0; var t = 0; var moved = false
+            override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
+                val lp = bubble.layoutParams as FrameLayout.LayoutParams
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin; moved = false }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        if (Math.abs(e.rawX - sx) > dp(6) || Math.abs(e.rawY - sy) > dp(6)) moved = true
+                        if (moved) {
+                            lp.leftMargin = (l + e.rawX - sx).toInt().coerceIn(0, maxOf(0, parent.width - lp.width))
+                            lp.topMargin = (t + e.rawY - sy).toInt().coerceIn(0, maxOf(0, parent.height - lp.height))
+                            bubble.layoutParams = lp
+                            val bl = badge.layoutParams as FrameLayout.LayoutParams
+                            bl.leftMargin = lp.leftMargin + dp(30); bl.topMargin = lp.topMargin - dp(4); badge.layoutParams = bl
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP -> { if (moved) prefs.edit().putInt("bx", lp.leftMargin).putInt("by", lp.topMargin).apply() else toggle() }
+                }
+                return true
+            }
+        })
         badge = TextView(act).apply {
             textSize = 11f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFE5483A.toInt()) }
             visibility = View.GONE; isClickable = false
         }
-        parent.addView(badge, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP or Gravity.START).apply { leftMargin = dp(40); topMargin = dp(68) })
+        parent.addView(badge, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)) + dp(30); topMargin = prefs.getInt("by", dp(72)) - dp(4) })
 
         val dm = act.resources.displayMetrics
         val w = minOf(dp(340), (dm.widthPixels * 0.5f).toInt())

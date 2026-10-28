@@ -237,7 +237,7 @@ class GameActivity : Activity() {
     private fun menuButton(): View {
         val d = resources.displayMetrics.density
         val b = TextView(this)
-        b.text = "Моды"
+        b.text = "Меню"
         b.textSize = 20f
         b.typeface = Typeface.DEFAULT_BOLD
         b.setTextColor(GameUi.ON_CREAM)
