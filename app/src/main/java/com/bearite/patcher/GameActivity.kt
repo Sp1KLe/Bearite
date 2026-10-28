@@ -44,6 +44,7 @@ import java.lang.reflect.Proxy
 class GameActivity : Activity() {
     private var levelPrompt: LevelPrompt? = null
     private var chat: ChatOverlay? = null
+    private var miniGames: MiniGames? = null
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
 
@@ -146,7 +147,9 @@ class GameActivity : Activity() {
             view,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
-        val menu = GameModMenu(this, ModManager(this))
+        val games = MiniGames(this)
+        miniGames = games
+        val menu = GameModMenu(this, ModManager(this), games)
         modMenu = menu
         val gameHud = GameHud(this, ModManager(this))
         hud = gameHud
@@ -155,6 +158,7 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
+        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * resources.displayMetrics.density).toInt(); rightMargin = (12 * resources.displayMetrics.density).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
@@ -391,6 +395,7 @@ class GameActivity : Activity() {
         BLog.i("GameActivity: нормальный выход")
         try { levelPrompt?.stop() } catch (_: Throwable) {}
         try { chat?.stop() } catch (_: Throwable) {}
+        try { miniGames?.stopAll() } catch (_: Throwable) {}
         try { File(filesDir, RUNNING_MARKER).delete() } catch (_: Throwable) {}
         val hasDestroy = player?.javaClass?.methods?.any { it.name == "destroy" && it.parameterTypes.isEmpty() } == true
         callPlayer(if (hasDestroy) "destroy" else "quit")

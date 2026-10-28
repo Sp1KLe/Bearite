@@ -41,6 +41,12 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private lateinit var badge: TextView
     private lateinit var panel: LinearLayout
     private lateinit var win: ResizableFrame
+    private lateinit var inputRow: View
+    private lateinit var playersScroll: ScrollView
+    private lateinit var playersBox: LinearLayout
+    private lateinit var tabChat: TextView
+    private lateinit var tabPlayers: TextView
+    private var showPlayers = false
     private lateinit var list: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var title: TextView
@@ -123,9 +129,18 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         head.addView(ui.label("⚙", 20f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(8), 0); setOnClickListener { settings() } })
         head.addView(ui.label("✕", 18f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
         panel.addView(head)
+        val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        tabChat = ui.label("Чат", 13f, GameUi.ON_CREAM).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
+        tabPlayers = ui.label("Игроки", 13f, GameUi.MUTED).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
+        tabs.addView(tabChat, LinearLayout.LayoutParams(0, dp(30), 1f).apply { rightMargin = dp(3) })
+        tabs.addView(tabPlayers, LinearLayout.LayoutParams(0, dp(30), 1f).apply { leftMargin = dp(3) })
+        panel.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         scroll = ScrollView(act).apply { addView(list); isVerticalScrollBarEnabled = false }
         panel.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6); bottomMargin = dp(6) })
+        playersBox = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        playersScroll = ScrollView(act).apply { addView(playersBox); isVerticalScrollBarEnabled = false; visibility = View.GONE }
+        panel.addView(playersScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6); bottomMargin = dp(6) })
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         input = EditText(act).apply {
             hint = "Сообщение…"; setHintTextColor(GameUi.DIM); setTextColor(GameUi.CREAM); textSize = 14f
@@ -137,7 +152,10 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         }
         row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(ui.label("➤", 22f, GameUi.CREAM).apply { gravity = Gravity.CENTER; setOnClickListener { send() } }, LinearLayout.LayoutParams(dp(44), dp(40)))
+        inputRow = row
         panel.addView(row)
+        setTab(false)
+        main.post(object : Runnable { override fun run() { if (running) { if (win.visibility == View.VISIBLE && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
         win = ResizableFrame(act).apply { visibility = View.GONE }
         win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(GameUi.DIM); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
@@ -209,6 +227,36 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { edge = 0; saveWin() }
             }
             return true
+        }
+    }
+
+    private fun setTab(players: Boolean) {
+        showPlayers = players
+        scroll.visibility = if (players) View.GONE else View.VISIBLE
+        inputRow.visibility = if (players) View.GONE else View.VISIBLE
+        playersScroll.visibility = if (players) View.VISIBLE else View.GONE
+        for ((t, on) in listOf(tabChat to !players, tabPlayers to players)) {
+            t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
+            t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 15)
+        }
+        if (players) renderPlayers()
+    }
+
+    /** Список игроков комнаты, как TAB в Minecraft: ник и номер, ты отмечен. Данные пишет мод в maps/_players. */
+    private fun renderPlayers() {
+        val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
+        playersBox.removeAllViews()
+        if (lines.isEmpty()) { playersBox.addView(ui.label("Ты не в игровой комнате.", 13f, GameUi.MUTED, bold = false)); tabPlayers.text = "Игроки"; return }
+        val head = lines[0].split('\t')
+        val n = head.getOrNull(0)?.toIntOrNull() ?: (lines.size - 1)
+        val mx = head.getOrNull(1)?.toIntOrNull() ?: 0
+        tabPlayers.text = "Игроки ($n)"
+        playersBox.addView(ui.label("Онлайн: $n" + (if (mx > 0) " из $mx" else ""), 13f, GameUi.MUTED, bold = false))
+        for (l in lines.drop(1)) {
+            val p = l.split('\t')
+            val nm = p.getOrElse(1) { "" }.ifBlank { "игрок ${p.getOrElse(0) { "?" }}" }
+            val mine = p.getOrElse(2) { "0" } == "1"
+            playersBox.addView(ui.label("• $nm" + (if (mine) "  (ты)" else ""), 14f, if (mine) 0xFFB9D58A.toInt() else GameUi.CREAM, bold = mine).apply { setPadding(0, dp(3), 0, dp(3)) })
         }
     }
 

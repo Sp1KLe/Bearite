@@ -901,6 +901,8 @@ struct World {
     int fixes = 0;
 } W;
 bool g_hasPending = false;  // круг телепорта задал точку входа в мир
+bool g_noReturnLoad = false;  // арена мини-игры: при выходе не возвращаемся загрузкой сцены
+bool g_inPlace = false;     // мир (арена мини-игры) строится в текущей сцене без перехода в level_1: в комнате все остаются в одной сцене
 V3 g_pending{0, 0, 0};
 
 std::unordered_set<int> g_ownIds;
@@ -956,6 +958,17 @@ int hide_world() {
     for (auto& kv : g_live) for (auto& L : kv.second) {
         if (L.tid) g_ownIds.insert(L.tid);
         if (L.natClone && L.nat) if (void* ct = target(L.nat)) g_ownIds.insert(inst_id(ct));
+    }
+    if (void* npcT = type_of("", "NetworkPlayerController")) {  // другие игроки комнаты остаются видимыми
+        if (void* na = find_objects(npcT)) {
+            uintptr_t nn = arr_len(na);
+            for (uintptr_t i = 0; i < nn && i < 64; ++i) {
+                void* c = *(void**)arr_elem(na, sizeof(void*), i);
+                void* tr = c ? inv(F.get_transform, c) : nullptr;
+                void* root = tr && F.get_root ? inv(F.get_root, tr) : tr;
+                if (root) g_ownIds.insert(inst_id(root));
+            }
+        }
     }
     int n = 0;
     for (int pass = 0; pass < 2; ++pass) {
@@ -1288,7 +1301,7 @@ void world_update(long long now) {
     for (const auto& m : g_specs) if (m.world && m.id == g_worldWant && g_engineOk) { want = &m; break; }
     if (W.active && (!want || want->id != W.id)) {
         world_exit(true);
-        if (!want && g_scene == HOST_SCENE && now - g_lastLoad > 5000) {  // вышли из мира: возвращаемся туда, откуда пришли
+        if (!want && g_scene == HOST_SCENE && !g_noReturnLoad && now - g_lastLoad > 5000) {  // вышли из мира: возвращаемся туда, откуда пришли
             g_lastLoad = now;
             load_scene(g_returnScene.empty() ? "hub" : g_returnScene);
             g_returnScene.clear();
@@ -1296,7 +1309,7 @@ void world_update(long long now) {
     }
     if (!want) return;
     if (!W.active) {
-        if ((want->scene.empty() || want->scene == HOST_SCENE) && g_scene != HOST_SCENE) {
+        if ((want->scene.empty() || want->scene == HOST_SCENE) && g_scene != HOST_SCENE && !g_inPlace) {
             // мир без привязки живёт только в сцене level_1: свежая сцена без скриптов хаба, без мерцания и лагов
             if (!F.load_scene) goto enter_here;  // загрузка сцен недоступна: мир строится прямо в текущей сцене
             if (!g_wantRedirect || (g_scene != "hub" && g_scene != "backrooms")) return;
@@ -1693,6 +1706,7 @@ void enter_world_from_prompt(const MapSpec* t) {
         if (tr) teleport(tr, sp);
         return;
     }
+    g_noReturnLoad = false;
     g_pending = sp;
     g_hasPending = true;
     g_wantRedirect = true;
@@ -1939,16 +1953,189 @@ void publish_room() {
     logf_("чат: комната «%s»", name.c_str());
 }
 
+/** Игроки комнаты Photon: maps/_players = «число\tмакс», дальше «актёр\tник\tсвой(0/1)». Для списка TAB и мини-игр. */
+void publish_players() {
+    static void *pnK = nullptr, *getList = nullptr, *getRoom = nullptr, *getMax = nullptr;
+    static bool tried = false;
+    static std::string last = "?";
+    if (!tried) {
+        tried = true;
+        pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
+        getList = pnK ? bearite_il2.class_get_method_from_name(pnK, "get_PlayerList", 0) : nullptr;
+        getRoom = pnK ? bearite_il2.class_get_method_from_name(pnK, "get_CurrentRoom", 0) : nullptr;
+        logf_("игроки: get_PlayerList=%d", getList != nullptr);
+    }
+    if (!getList || !getRoom) return;
+    std::string out;
+    void* room = inv(getRoom, nullptr);
+    if (room) {
+        if (!getMax) { void* rk = obj_class(room); getMax = rk ? bearite_il2.class_get_method_from_name(rk, "get_MaxPlayers", 0) : nullptr; }
+        int mx = 0;
+        if (getMax) { void* r = inv(getMax, room); if (r) { void* ub = obj_unbox(r); mx = *(const uint8_t*)ub; if (mx == 0) mx = 0; } }
+        void* arr = inv(getList, nullptr);
+        uintptr_t n = arr ? arr_len(arr) : 0;
+        if (n > 200) n = 200;
+        std::string body;
+        for (uintptr_t i = 0; i < n; ++i) {
+            void* pl = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!pl) continue;
+            void* pk = obj_class(pl);
+            static void *gA = nullptr, *gN = nullptr, *gL = nullptr;
+            if (!gA && pk) { gA = bearite_il2.class_get_method_from_name(pk, "get_ActorNumber", 0); gN = bearite_il2.class_get_method_from_name(pk, "get_NickName", 0); gL = bearite_il2.class_get_method_from_name(pk, "get_IsLocal", 0); }
+            int actor = 0, local = 0;
+            if (gA) if (void* r = inv(gA, pl)) actor = *(const int*)obj_unbox(r);
+            if (gL) if (void* r = inv(gL, pl)) local = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
+            std::string nick = gN ? utf8(inv(gN, pl)) : "";
+            for (auto& ch : nick) if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
+            body += std::to_string(actor) + "\t" + nick + "\t" + std::to_string(local) + "\n";
+        }
+        out = std::to_string((int)n) + "\t" + std::to_string(mx) + "\n" + body;
+    }
+    if (out == last) return;
+    last = out;
+    std::string path = g_mapsDir + "/_players", tmp = g_mapsDir + "/.players.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+}
+
+/** Позиции игроков комнаты в мировых координатах (для мини-игр): maps/_pos = «актёр\tник\tсвой\tx\ty\tz». Пишется, пока есть maps/_mg. */
+void publish_positions(long long now) {
+    static long long lastT = 0;
+    if (now - lastT < 250) return;
+    lastT = now;
+    if (access((g_mapsDir + "/_mg").c_str(), F_OK) != 0) return;
+    static void *npcT = nullptr, *pvT = nullptr, *pvK = nullptr, *getOwner = nullptr;
+    if (!npcT) { npcT = type_of("", "NetworkPlayerController"); pvT = type_of("Photon.Pun", "PhotonView"); pvK = bearite_find_class("Photon.Pun", "PhotonView"); getOwner = pvK ? bearite_il2.class_get_method_from_name(pvK, "get_Owner", 0) : nullptr; }
+    if (!npcT) return;
+    void* arr = find_objects(npcT);
+    uintptr_t n = arr ? arr_len(arr) : 0;
+    std::string out;
+    for (uintptr_t i = 0; i < n && i < 64; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!c) continue;
+        void* tr = inv(F.get_transform, c);
+        void* pv = tr ? inv(F.get_position, tr) : nullptr;
+        if (!pv) continue;
+        float f3[3];
+        memcpy(f3, obj_unbox(pv), sizeof f3);
+        int actor = 0, local = 0;
+        std::string nick;
+        void* go = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (go && pvT && getOwner && F.get_component) {
+            void* a[1] = {pvT};
+            if (void* view = inv(F.get_component, go, a)) if (void* owner = inv(getOwner, view)) {
+                void* pk = obj_class(owner);
+                void *gA = bearite_il2.class_get_method_from_name(pk, "get_ActorNumber", 0), *gN = bearite_il2.class_get_method_from_name(pk, "get_NickName", 0), *gL = bearite_il2.class_get_method_from_name(pk, "get_IsLocal", 0);
+                if (gA) if (void* r = inv(gA, owner)) actor = *(const int*)obj_unbox(r);
+                if (gL) if (void* r = inv(gL, owner)) local = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
+                if (gN) nick = utf8(inv(gN, owner));
+            }
+        }
+        for (auto& ch : nick) if (ch == '\t' || ch == '\n') ch = ' ';
+        char buf[160];
+        snprintf(buf, sizeof buf, "\t%d\t%.2f\t%.2f\t%.2f\n", local, f3[0], f3[1], f3[2]);
+        out += std::to_string(actor) + "\t" + nick + buf;
+    }
+    std::string path = g_mapsDir + "/_pos", tmp = g_mapsDir + "/.pos.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+}
+
+/** Команды лаунчера (maps/_cmd): «enter\tid» — войти в мир-арену в текущей сцене, «exit», «tp\tx\ty\tz» — в координатах активного мира. */
+void cmd_poll() {
+    std::string path = g_mapsDir + "/_cmd";
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return;
+    std::string text;
+    char buf[256];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, n);
+    fclose(f);
+    unlink(path.c_str());
+    size_t st = 0;
+    while (st < text.size()) {
+        size_t e = text.find('\n', st);
+        if (e == std::string::npos) e = text.size();
+        auto parts = split_tab(text.substr(st, e - st));
+        st = e + 1;
+        if (parts.empty()) continue;
+        if (parts[0] == "enter" && parts.size() >= 2) {
+            if (const MapSpec* t = find_spec(parts[1])) {
+                g_inPlace = true;
+                g_noReturnLoad = true;
+                g_pending = V3{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
+                g_hasPending = true;
+                g_worldRt = t->id;
+                refresh_world_want();
+                logf_("команда: вход в арену «%s» (в текущей сцене)", t->name.c_str());
+            } else logf_("команда: арена «%s» не найдена", parts[1].c_str());
+        } else if (parts[0] == "exit") {
+            g_inPlace = false;
+            if (W.active) { g_worldRt = "@exit"; refresh_world_want(); logf_("команда: выход из арены"); }
+        } else if (parts[0] == "tp" && parts.size() >= 4 && W.active && W.player) {
+            if (const MapSpec* t = find_spec(W.id)) {
+                V3 v{t->off[0] + t->scale * num(parts[1], 0), t->off[1] + t->scale * num(parts[2], 0), t->off[2] + t->scale * num(parts[3], 0)};
+                if (void* tr = target(W.player)) teleport(tr, v);
+            }
+        }
+    }
+}
+
+bool set_room_max(void* opts) {
+    std::string v;
+    if (FILE* f = fopen((g_mapsDir + "/_maxplayers").c_str(), "r")) { char b[32] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); v = b; }
+    if (v.empty() || !opts) return false;
+    int mx = atoi(v.c_str());
+    if (mx < 0) return false;
+    if (mx > 255) mx = 255;
+    void* k = obj_class(opts);
+    static void *fieldFn = nullptr, *offFn = nullptr, *ftypeFn = nullptr, *tnameFn = nullptr;
+    if (!fieldFn) {
+        fieldFn = A->il2cpp_symbol("il2cpp_class_get_field_from_name");
+        offFn = A->il2cpp_symbol("il2cpp_field_get_offset");
+        ftypeFn = A->il2cpp_symbol("il2cpp_field_get_type");
+        tnameFn = A->il2cpp_symbol("il2cpp_type_get_name");
+    }
+    if (!k || !fieldFn || !offFn) return false;
+    for (const char* nm : {"MaxPlayers", "maxPlayers"}) {
+        void* fl = reinterpret_cast<void* (*)(void*, const char*)>(fieldFn)(k, nm);
+        if (!fl) continue;
+        int off = reinterpret_cast<int (*)(void*)>(offFn)(fl);
+        std::string tn;
+        if (ftypeFn && tnameFn) if (void* ft = reinterpret_cast<void* (*)(void*)>(ftypeFn)(fl)) { const char* c = reinterpret_cast<const char* (*)(void*)>(tnameFn)(ft); if (c) tn = c; }
+        char* base = (char*)opts + off;
+        if (tn == "System.Byte" || tn == "System.SByte") *(uint8_t*)base = (uint8_t)mx;
+        else if (tn == "System.Int32") *(int32_t*)base = mx;
+        else if (tn == "System.Int16") *(int16_t*)base = (int16_t)mx;
+        else { logf_("лимит комнаты: поле %s типа %s не поддерживается", nm, tn.c_str()); return false; }
+        logf_("лимит игроков комнаты: поле %s (%s) = %d", nm, tn.c_str(), mx);
+        return true;
+    }
+    logf_("лимит комнаты: поля MaxPlayers у RoomOptions нет");
+    return false;
+}
+uint8_t (*o_create_room)(void*, void*, void*, void*, const void*) = nullptr;
+uint8_t h_create_room(void* name, void* opts, void* lobby, void* friends, const void* mi) {
+    try { set_room_max(opts); } catch (...) {}
+    return o_create_room ? o_create_room(name, opts, lobby, friends, mi) : 0;
+}
+uint8_t (*o_join_create_room)(void*, void*, void*, void*, const void*) = nullptr;
+uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, const void* mi) {
+    try { set_room_max(opts); } catch (...) {}
+    return o_join_create_room ? o_join_create_room(name, opts, lobby, friends, mi) : 0;
+}
+
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
 void update() {
     long long now = now_ms();
     reload_maps();
+    cmd_poll();
+    publish_positions(now);
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
         publish_room();
+        publish_players();
         std::string sc = read_scene();
         if (!sc.empty() && sc != g_scene) {
             logf_("сцена: «%s» → «%s»", g_scene.c_str(), sc.c_str());
@@ -2203,6 +2390,7 @@ void h_load_level(void* self, const void* mi) {
         auto it = root ? g_cloneWorld.find(inst_id(root)) : g_cloneWorld.end();
         if (it != g_cloneWorld.end()) {
             if (const MapSpec* t = find_spec(it->second)) {
+                g_noReturnLoad = false;
                 g_pendingWorld = t->id;
                 g_returnScene = g_scene;
                 g_pending = V3{t->off[0] + t->scale * t->spawn[0], t->off[1] + t->scale * t->spawn[1], t->off[2] + t->scale * t->spawn[2]};
@@ -2286,6 +2474,11 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     {
         int rc = bearite_hook_method(A, ID, "", "PauseMenuManager", "EnablePauseMenu", 1, (void*)h_pause_menu, (void**)&o_pause_menu);
         if (rc != 0) logf_("перехват меню паузы: не вышло (%d)", rc);
+    }
+    {
+        int r1 = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "CreateRoom", 4, (void*)h_create_room, (void**)&o_create_room);
+        int r2 = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "JoinOrCreateRoom", 4, (void*)h_join_create_room, (void**)&o_join_create_room);
+        if (r1 != 0 && r2 != 0) logf_("перехват создания комнаты: не вышло (%d, %d)", r1, r2);
     }
     logf_("движок карт: хуков кадра %d, карты читаются из %s", hooks, g_mapsDir.c_str());
     if (hooks == 0) {

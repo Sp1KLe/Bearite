@@ -2,226 +2,189 @@ package com.bearite.patcher
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Мини-игры по комнатам. Создатель комнаты (хост) ведёт игру, остальные подключаются по четырёхзначному коду.
- * Лимит игроков задаёт хост (0 = без ограничений). Подключиться могут только игроки с лаунчером Bearite.
- * Сообщения идут через тот же публичный ntfy, что и чат; тема комнаты зависит от кода.
- * Игры: крестики-нолики (двое играют, остальные смотрят), гонка тапов, викторина.
+ * Мини-игры внутри самой игры: ты бегаешь своим медведем по специальной арене, а игроки комнаты Photon играют вместе.
+ * Арены (assets/minigames/*.map) создаются как миры Bearite в текущей сцене, чтобы все в комнате оставались в одной сцене.
+ * Игру запускает хост комнаты (игрок с наименьшим номером). Хост же считает очки по позициям игроков
+ * (мод пишет их в maps/_pos) и рассылает таблицу через тот же публичный ntfy, что и чат.
+ * Игры: паркур-гонка, царь горы, догонялки.
  */
-class MiniGames(private val act: Activity, private val ui: GameUi) {
+class MiniGames(private val act: Activity) {
+    private val ui = GameUi(act)
+    private val d = act.resources.displayMetrics.density
+    private fun dp(v: Int) = (v * d).toInt()
     private val main = Handler(Looper.getMainLooper())
+    private val dir = File(act.filesDir, "maps")
     private val prefs = act.getSharedPreferences("chat", Context.MODE_PRIVATE)
-    private val me: String = prefs.getString("cid", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs.edit().putString("cid", it).apply() }
-    private var name: String get() = (prefs.getString("nick", "") ?: "").ifBlank { "игрок" }; set(v) { prefs.edit().putString("nick", v.trim().take(24)).apply() }
+    private val room = act.getSharedPreferences("room", Context.MODE_PRIVATE)
+    private val cid: String get() = prefs.getString("cid", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs.edit().putString("cid", it).apply() }
     private val base get() = (prefs.getString("url", ChatOverlay.DEFAULT_URL) ?: ChatOverlay.DEFAULT_URL).ifBlank { ChatOverlay.DEFAULT_URL }
 
-    private var list: LinearLayout? = null
-    private var code = ""
-    private var isHost = false
-    private var state: JSONObject? = null
-    private var maxInput = "0"
-    private var codeInput = ""
-    private var notice = ""
-    @Volatile private var gen = 0          // номер подключения: старые потоки сами выходят
-    private var hostState: JSONObject? = null
-    private var timer: Runnable? = null
+    /** Табло поверх игры (добавляется в корневой FrameLayout GameActivity). */
+    val hud = TextView(act).apply {
+        textSize = 14f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+        background = GradientDrawable().apply { setColor(0xAA101010.toInt()); cornerRadius = dp(14).toFloat() }
+        setPadding(dp(12), dp(8), dp(12), dp(8)); visibility = View.GONE; isClickable = false
+    }
+    var onStarted: (() -> Unit)? = null
 
-    // локальное состояние игр у каждого игрока
-    private var tapRid = ""; private var tapCount = 0; private var tapLeft = 0; private var tapSent = false
-    private var tapView: TextView? = null; private var tapTimeView: TextView? = null
-    private var answered = -1; private var answeredQ = -1
+    private class P(val actor: Int, val nick: String, val local: Boolean)
+    private class Pos(val x: Float, val y: Float, val z: Float)
 
-    // ------------------------------------------------------------------ экран
+    private var players = listOf<P>()
+    private var maxPlayers = 0
+    private var roomName = ""
+    private var phase = "idle"     // idle, prep, play
+    private var game = ""
+    private var prepUntil = 0L
+    private var startedAt = 0L
+    private var durMs = 0L
+    private val scores = HashMap<Int, Int>()
+    private val finished = HashMap<Int, Long>()
+    private var itActor = 0
+    private var immuneUntil = 0L
+    private var lastScoreSend = 0L
+    private var lastSecond = 0L
+    private var lastTp = 0L
+    private var cpIdx = 0
+    private var message = ""
+    private var tabList: LinearLayout? = null
+    @Volatile private var relayGen = 0
+    private var relayRoom = ""
+
+    private val me: P? get() = players.firstOrNull { it.local }
+    private val isHost: Boolean get() = players.isEmpty() || (me != null && me!!.actor == players.minOf { it.actor })
+    private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
+
+    init { main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } }) }
+
+    fun stopAll() { relayGen++ }
+
+    // ------------------------------------------------------------------ вкладка меню
 
     fun render(into: LinearLayout) {
-        list = into
-        draw()
-    }
-
-    private fun draw() {
-        val l = list ?: return
-        l.removeAllViews()
-        tapView = null; tapTimeView = null
-        val st = state
-        if (code.isEmpty() || st == null) { drawStart(l); return }
-        l.addView(ui.label("Комната $code" + (if (isHost) " · ты хост" else ""), 17f), ui.matchWrap().apply { topMargin = ui.dp(8) })
-        val players = st.getJSONArray("players")
-        val max = st.optInt("max", 0)
-        l.addView(ui.label("Игроков: ${players.length()}" + (if (max > 0) " из $max" else " (без лимита)"), 13f, GameUi.MUTED, bold = false))
-        val sb = StringBuilder()
-        for (i in 0 until players.length()) { val p = players.getJSONObject(i); sb.append(p.getString("n")).append(" — ").append(p.optInt("s")).append("\n") }
-        l.addView(ui.label(sb.toString().trim(), 14f, GameUi.CREAM, bold = false).apply { setPadding(0, ui.dp(6), 0, ui.dp(6)) })
-        if (notice.isNotEmpty()) l.addView(ui.label(notice, 13f, GameUi.RUST, bold = false))
-        when (st.optString("game")) {
-            "" -> drawLobby(l, st)
-            "ttt" -> drawTtt(l, st)
-            "tap" -> drawTap(l, st)
-            "quiz" -> drawQuiz(l, st)
+        tabList = into
+        readPlayers()
+        into.removeAllViews()
+        into.addView(ui.label(if (roomName.isEmpty()) "Ты не в комнате" else "Комната: $roomName", 16f), ui.matchWrap().apply { topMargin = dp(8) })
+        into.addView(ui.label(
+            if (roomName.isEmpty()) "Мини-игры работают в мультиплеере: зайди в комнату игры, и хост сможет запустить игру для всех."
+            else "Игроков: ${players.size}" + (if (maxPlayers > 0) " из $maxPlayers" else " (без лимита)") + (if (isHost) " · ты хост" else " · хост: " + (players.minByOrNull { it.actor }?.nick ?: "?")),
+            13f, GameUi.MUTED, bold = false))
+        // лимит игроков для создаваемых комнат
+        into.addView(ui.label("Лимит игроков в новой комнате", 14f), ui.matchWrap().apply { topMargin = dp(12) })
+        into.addView(ui.row("Игроков", ui.textInput(room.getString("max", "") ?: "", 120, "пусто = как в игре") { v ->
+            val digits = v.filter(Char::isDigit).take(3)
+            room.edit().putString("max", digits).apply()
+            val f = File(dir, "_maxplayers")
+            try { if (digits.isEmpty()) f.delete() else f.writeText(digits) } catch (_: Throwable) {}
+        }), ui.matchWrap().apply { topMargin = dp(4) })
+        into.addView(ui.label("Применяется, когда ты создаёшь комнату. 0 — без ограничения (максимум 255).", 12f, GameUi.MUTED, bold = false))
+        // игры
+        into.addView(ui.label("Мини-игры", 14f), ui.matchWrap().apply { topMargin = dp(14) })
+        val canStart = roomName.isNotEmpty() && isHost && phase == "idle"
+        for ((g, title, sub) in listOf(
+            Triple("parkour", "Паркур-гонка", "Добеги по платформам до финиша быстрее всех"),
+            Triple("hill", "Царь горы", "60 секунд: очки за время на вершине, соперников можно сбрасывать"),
+            Triple("tag", "Догонялки", "60 секунд: один водящий ловит остальных, очки за свободное время"),
+        )) {
+            into.addView(ui.pill("$title\n$sub", primary = canStart, sizeSp = 13f) { if (canStart) hostStart(g) else { message = if (roomName.isEmpty()) "Сначала зайди в комнату." else if (!isHost) "Запускает хост комнаты." else "Игра уже идёт."; render(into) } },
+                ui.matchWrap().apply { topMargin = dp(6) })
         }
-        l.addView(ui.pill("Выйти из комнаты", danger = true) { leave() }, ui.matchWrap().apply { topMargin = ui.dp(12) })
+        if (phase != "idle" && isHost) into.addView(ui.pill("Остановить игру", danger = true) { hostStop() }, ui.matchWrap().apply { topMargin = dp(10) })
+        if (message.isNotEmpty()) into.addView(ui.label(message, 13f, GameUi.RUST, bold = false))
     }
 
-    private fun drawStart(l: LinearLayout) {
-        l.addView(ui.label("Мини-игры для игроков с лаунчером Bearite", 16f), ui.matchWrap().apply { topMargin = ui.dp(8) })
-        l.addView(ui.label("Создай комнату и скажи друзьям код — или впиши код друга.", 13f, GameUi.MUTED, bold = false))
-        l.addView(ui.row("Ник", ui.textInput(name, 200, "как тебя звать") { name = it }), ui.matchWrap().apply { topMargin = ui.dp(8) })
-        l.addView(ui.row("Лимит", ui.textInput(maxInput, 120, "0 = без лимита") { maxInput = it.filter(Char::isDigit) }), ui.matchWrap().apply { topMargin = ui.dp(6) })
-        l.addView(ui.pill("Создать комнату", primary = true) {
-            val mx = maxInput.toIntOrNull() ?: 0
-            create(if (mx in 1..1) 2 else mx)
-        }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-        l.addView(ui.row("Код", ui.textInput(codeInput, 120, "4 цифры") { codeInput = it.filter(Char::isDigit).take(4) }), ui.matchWrap().apply { topMargin = ui.dp(14) })
-        l.addView(ui.pill("Подключиться") { if (codeInput.length == 4) join(codeInput) else { notice = "Код состоит из 4 цифр."; draw() } }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-        if (notice.isNotEmpty()) l.addView(ui.label(notice, 13f, GameUi.RUST, bold = false))
+    // ------------------------------------------------------------------ файлы мода
+
+    private fun readPlayers() {
+        try { roomName = File(dir, "_room").readText().trim() } catch (_: Throwable) { roomName = "" }
+        val lines = try { File(dir, "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
+        if (lines.isEmpty()) { players = emptyList(); return }
+        maxPlayers = lines[0].split('\t').getOrNull(1)?.toIntOrNull() ?: 0
+        players = lines.drop(1).mapNotNull { l ->
+            val p = l.split('\t'); val a = p.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+            P(a, p.getOrElse(1) { "" }, p.getOrElse(2) { "0" } == "1")
+        }
     }
 
-    private fun drawLobby(l: LinearLayout, st: JSONObject) {
-        if (!isHost) { l.addView(ui.label("Ждём, пока хост выберет игру…", 14f, GameUi.MUTED, bold = false)); return }
-        l.addView(ui.label("Выбери игру:", 14f))
-        l.addView(ui.pill("Крестики-нолики (2 игрока)") { hostStart("ttt") }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-        l.addView(ui.pill("Гонка тапов (10 секунд)") { hostStart("tap") }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-        l.addView(ui.pill("Викторина (8 вопросов)") { hostStart("quiz") }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-    }
-
-    private fun backToLobby(l: LinearLayout) {
-        if (isHost) l.addView(ui.pill("В лобби", primary = true) { hostSet { it.put("game", "").put("phase", "lobby").put("d", JSONObject()) } }, ui.matchWrap().apply { topMargin = ui.dp(10) })
-    }
-
-    // ---------------- крестики-нолики
-    private fun drawTtt(l: LinearLayout, st: JSONObject) {
-        val d = st.getJSONObject("d")
-        val b = d.getString("b"); val p = d.getJSONArray("p"); val t = d.getInt("t"); val w = d.optString("w")
-        val names = (0 until st.getJSONArray("players").length()).associate { val o = st.getJSONArray("players").getJSONObject(it); o.getString("c") to o.getString("n") }
-        l.addView(ui.label("Х: ${names[p.getString(0)] ?: "?"}   О: ${names[p.optString(1)] ?: "ждём игрока"}", 14f))
-        val status = when {
-            w == "=" -> "Ничья"
-            w.isNotEmpty() -> "Победил ${if (w == "X") names[p.getString(0)] else names[p.getString(1)]}"
-            p.length() < 2 -> "Нужен второй игрок"
-            p.getString(t) == me -> "Твой ход"
-            else -> "Ходит ${names[p.getString(t)]}" }
-        l.addView(ui.label(status, 15f, GameUi.CREAM), ui.matchWrap().apply { topMargin = ui.dp(4) })
-        for (r in 0 until 3) {
-            val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-            for (c in 0 until 3) {
-                val i = r * 3 + c
-                val ch = b[i]
-                row.addView(ui.label(if (ch == '.') " " else ch.toString(), 30f, if (ch == 'X') 0xFFF2C58E.toInt() else 0xFFB9D58A.toInt()).apply {
-                    gravity = Gravity.CENTER; background = ui.round(GameUi.SURFACE3, 12)
-                    setOnClickListener { if (w.isEmpty() && ch == '.') doAct("move", i) }
-                }, LinearLayout.LayoutParams(ui.dp(72), ui.dp(72)).apply { setMargins(ui.dp(3), ui.dp(3), ui.dp(3), ui.dp(3)) })
+    private fun readPositions(): Map<Int, Pos> {
+        val out = HashMap<Int, Pos>()
+        try {
+            for (l in File(dir, "_pos").readText().lines()) {
+                val p = l.split('\t'); if (p.size < 6) continue
+                val a = p[0].toIntOrNull() ?: continue
+                out[a] = Pos(p[3].toFloatOrNull() ?: continue, (p[4].toFloatOrNull() ?: continue) - OY, p[5].toFloatOrNull() ?: continue)
             }
-            l.addView(row)
-        }
-        if (w.isNotEmpty()) backToLobby(l)
+        } catch (_: Throwable) {}
+        return out
     }
 
-    // ---------------- гонка тапов
-    private fun drawTap(l: LinearLayout, st: JSONObject) {
-        val d = st.getJSONObject("d")
-        val rid = d.getString("rid")
-        if (st.getString("phase") == "over") {
-            l.addView(ui.label("Итог гонки:", 15f))
-            val res = d.getJSONObject("res")
-            val names = nameMap(st)
-            val sorted = res.keys().asSequence().sortedByDescending { res.getInt(it) }.toList()
-            sorted.forEachIndexed { i, c -> l.addView(ui.label("${i + 1}. ${names[c] ?: c} — ${res.getInt(c)} тапов", 14f, GameUi.CREAM, bold = false)) }
-            backToLobby(l); return
-        }
-        if (tapRid != rid) { tapRid = rid; tapCount = 0; tapSent = false; tapLeft = d.getInt("dur"); runTapTimer() }
-        tapTimeView = ui.label("Осталось: $tapLeft", 15f)
-        l.addView(tapTimeView)
-        tapView = ui.label(if (tapSent) "Результат отправлен: $tapCount. Ждём остальных…" else "ЖМИ!\n$tapCount", 26f, GameUi.ON_CREAM).apply {
-            gravity = Gravity.CENTER; background = ui.round(GameUi.CREAM, 28)
-            setOnClickListener { if (!tapSent && tapLeft > 0) { tapCount++; text = "ЖМИ!\n$tapCount" } }
-        }
-        l.addView(tapView, ui.matchWrap().apply { topMargin = ui.dp(8); height = ui.dp(180) })
+    private fun cmd(text: String) { try { val t = File(dir, "_cmd.tmp"); t.writeText(text + "\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {} }
+
+    private fun installArena(g: String) {
+        try {
+            dir.mkdirs()
+            act.assets.open("minigames/mg_$g.map").use { i -> File(dir, "mg_$g.map").outputStream().use { o -> i.copyTo(o) } }
+        } catch (t: Throwable) { BLog.e("арена $g не скопирована", t) }
     }
 
-    private fun runTapTimer() {
-        timer?.let { main.removeCallbacks(it) }
-        val r = object : Runnable {
-            override fun run() {
-                if (tapLeft > 0) { tapLeft--; tapTimeView?.text = "Осталось: $tapLeft"; main.postDelayed(this, 1000) }
-                if (tapLeft <= 0 && !tapSent) { tapSent = true; doAct("taps", tapCount); tapView?.text = "Результат отправлен: $tapCount. Ждём остальных…" }
-            }
-        }
-        timer = r; main.postDelayed(r, 1000)
-    }
+    // ------------------------------------------------------------------ рассылка (ntfy)
 
-    // ---------------- викторина
-    private fun drawQuiz(l: LinearLayout, st: JSONObject) {
-        val d = st.getJSONObject("d")
-        if (st.getString("phase") == "over") {
-            l.addView(ui.label("Викторина окончена. Очки видны в списке игроков.", 15f)); backToLobby(l); return
-        }
-        val qi = d.getInt("i")
-        if (answeredQ != qi) { answeredQ = qi; answered = -1 }
-        l.addView(ui.label("Вопрос ${qi + 1} из ${d.getInt("n")}", 13f, GameUi.MUTED, bold = false))
-        l.addView(ui.label(d.getString("q"), 17f), ui.matchWrap().apply { topMargin = ui.dp(4) })
-        val o = d.getJSONArray("o"); val r = d.optInt("r", -1)
-        for (i in 0 until o.length()) {
-            val col = when { r >= 0 && i == r -> GameUi.GREEN; r >= 0 && i == answered -> GameUi.RUST; i == answered -> GameUi.CREAM; else -> GameUi.SURFACE3 }
-            l.addView(ui.label(o.getString(i), 15f, if (col == GameUi.SURFACE3) GameUi.CREAM else GameUi.ON_CREAM).apply {
-                background = ui.round(col, 14); setPadding(ui.dp(14), ui.dp(10), ui.dp(14), ui.dp(10))
-                setOnClickListener { if (r < 0 && answered < 0) { answered = i; doAct("ans", i); draw() } }
-            }, ui.matchWrap().apply { topMargin = ui.dp(6) })
-        }
-        if (r >= 0) l.addView(ui.label(if (answered == r) "Верно!" else "Правильный ответ подсвечен.", 13f, GameUi.MUTED, bold = false))
-    }
-
-    private fun nameMap(st: JSONObject): Map<String, String> {
-        val a = st.getJSONArray("players"); return (0 until a.length()).associate { a.getJSONObject(it).getString("c") to a.getJSONObject(it).getString("n") }
-    }
-
-    // ------------------------------------------------------------------ сеть
-
-    private fun topic() = "bearite-mg-" + MessageDigest.getInstance("SHA-256").digest(("mg" + code).toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
+    private fun topic(r: String) = "bearite-mg-" + MessageDigest.getInstance("SHA-256").digest(("mgame" + r).toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
 
     private fun post(o: JSONObject) {
-        val c = code; if (c.isEmpty()) return
-        o.put("c", me)
+        val r = roomName; if (r.isEmpty()) return
+        o.put("c", cid)
         Thread {
             try {
-                val h = URL("$base/${topic()}").openConnection() as HttpURLConnection
+                val h = URL("$base/${topic(r)}").openConnection() as HttpURLConnection
                 h.connectTimeout = 8000; h.readTimeout = 8000; h.requestMethod = "POST"; h.doOutput = true
                 h.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
                 h.outputStream.use { it.write(o.toString().toByteArray()) }
                 h.responseCode; h.disconnect()
-            } catch (_: Throwable) { main.post { notice = "Нет связи с сервером."; draw() } }
+            } catch (_: Throwable) {}
         }.start()
     }
 
-    private fun listen() {
-        val g = ++gen
+    private fun ensureRelay() {
+        if (roomName == relayRoom) return
+        relayRoom = roomName; val g = ++relayGen
+        if (roomName.isEmpty()) return
+        val r = roomName
         Thread {
-            var since = "30s"
-            while (gen == g) {
+            var since = "10s"
+            while (relayGen == g) {
                 try {
-                    val h = URL("$base/${topic()}/json?since=$since").openConnection() as HttpURLConnection
+                    val h = URL("$base/${topic(r)}/json?since=$since").openConnection() as HttpURLConnection
                     h.connectTimeout = 8000; h.readTimeout = 95000
                     if (h.responseCode != 200) throw RuntimeException()
                     h.inputStream.bufferedReader().use { rd ->
-                        while (gen == g) {
+                        while (relayGen == g) {
                             val ln = rd.readLine() ?: break
                             val j = try { JSONObject(ln) } catch (_: Throwable) { continue }
                             if (j.optString("event") != "message") continue
                             if (j.optString("id").isNotEmpty()) since = j.getString("id")
                             val m = try { JSONObject(j.getString("message")) } catch (_: Throwable) { continue }
-                            if (m.optString("c") == me) continue
-                            main.post { if (gen == g) onMessage(m) }
+                            if (m.optString("c") == cid) continue
+                            main.post { if (relayGen == g) onMessage(m) }
                         }
                     }
                     h.disconnect()
@@ -232,184 +195,143 @@ class MiniGames(private val act: Activity, private val ui: GameUi) {
 
     private fun onMessage(m: JSONObject) {
         when (m.optString("k")) {
-            "state" -> if (!isHost) { state = m.getJSONObject("s"); notice = ""; draw() }
-            "full" -> if (m.optString("to") == me) { notice = "Комната заполнена."; leaveLocal() }
-            "closed" -> if (!isHost) { notice = "Хост закрыл комнату."; leaveLocal() }
-            "join" -> if (isHost) hostJoin(m.getString("c"), m.optString("n", "игрок"))
-            "leave" -> if (isHost) hostLeave(m.getString("c"))
-            "act" -> if (isHost) hostAct(m.getString("c"), m.getString("a"), m.optInt("v"))
+            "start" -> if (phase == "idle") begin(m.optString("g"))
+            "stop" -> finish("Хост остановил игру", false)
+            "score" -> if (!isHost && phase != "idle") {
+                scores.clear(); val s = m.optJSONObject("s")
+                if (s != null) for (k in s.keys()) scores[k.toInt()] = s.getInt(k)
+                itActor = m.optInt("it", 0)
+            }
+            "end" -> if (phase != "idle") finish(m.optString("t"), false)
         }
     }
 
-    // ------------------------------------------------------------------ комната
+    // ------------------------------------------------------------------ ход игры
 
-    private fun create(max: Int) {
-        code = (1000 + java.util.Random().nextInt(9000)).toString()
-        isHost = true
-        val st = JSONObject().put("max", max).put("game", "").put("phase", "lobby").put("d", JSONObject())
-            .put("players", JSONArray().put(JSONObject().put("c", me).put("n", name).put("s", 0)))
-        hostState = st; state = st
-        listen(); notice = ""; draw()
+    private fun hostStart(g: String) {
+        message = ""
+        post(JSONObject().put("k", "start").put("g", g))
+        begin(g)
+        onStarted?.invoke()
     }
 
-    private fun join(c: String) {
-        code = c; isHost = false; state = null
-        notice = "Подключаюсь…"
-        listen()
-        post(JSONObject().put("k", "join").put("n", name))
-        main.postDelayed({ if (state == null && code == c) { notice = "Комната не отвечает. Проверь код."; leaveLocal() } }, 8000)
-        draw()
+    private fun hostStop() { post(JSONObject().put("k", "stop")); finish("Игра остановлена", false) }
+
+    private fun begin(g: String) {
+        readPlayers()
+        game = g; phase = "prep"; scores.clear(); finished.clear(); itActor = 0; cpIdx = 0
+        durMs = when (g) { "parkour" -> 150000L; else -> 60000L }
+        installArena(g)
+        try { File(dir, "_mg").writeText("1") } catch (_: Throwable) {}
+        main.postDelayed({ cmd("enter\tmg_$g") }, 700)   // карту мод успевает прочитать
+        prepUntil = System.currentTimeMillis() + 8000
+        hud.visibility = View.VISIBLE
+        message = ""
     }
 
-    private fun leaveLocal() {
-        gen++; timer?.let { main.removeCallbacks(it) }
-        code = ""; state = null; hostState = null; isHost = false; tapRid = ""
-        draw()
+    private fun spawnFor(g: String): Triple<Float, Float, Float> {
+        val idx = players.sortedBy { it.actor }.indexOfFirst { it.local }.coerceAtLeast(0)
+        val n = maxOf(players.size, 1)
+        return when (g) {
+            "parkour" -> Triple((idx % 5 - 2) * 1.6f, 1.5f, (idx / 5) * 1.6f - 2f)
+            "hill" -> { val a = idx * 2 * Math.PI / n; Triple((Math.cos(a) * 24).toFloat(), 2f, (Math.sin(a) * 24).toFloat()) }
+            else -> { val a = idx * 2 * Math.PI / n; Triple((Math.cos(a) * 12).toFloat(), 2f, (Math.sin(a) * 12).toFloat()) }
+        }
     }
 
-    private fun leave() {
-        if (isHost) post(JSONObject().put("k", "closed")) else post(JSONObject().put("k", "leave"))
-        notice = ""; leaveLocal()
+    private fun tp(t: Triple<Float, Float, Float>) { cmd("tp\t${t.first}\t${t.second}\t${t.third}"); lastTp = System.currentTimeMillis() }
+
+    private fun tick() {
+        readPlayers(); ensureRelay()
+        if (phase == "idle") { if (hud.visibility == View.VISIBLE && message.isEmpty()) hud.visibility = View.GONE; return }
+        val now = System.currentTimeMillis()
+        if (phase == "prep") {
+            val left = ((prepUntil - now) / 1000).coerceAtLeast(0)
+            hud.text = "${title()}\nАрена загружается… старт через $left"
+            if (now >= prepUntil) { phase = "play"; startedAt = now; lastSecond = now; lastScoreSend = now; tp(spawnFor(game))
+                if (isHost && game == "tag" && players.isNotEmpty()) { itActor = players.random().actor }
+                immuneUntil = now + 3000 }
+            return
+        }
+        val pos = readPositions(); val mine = me?.let { pos[it.actor] }
+        val elapsed = now - startedAt
+        // падение с арены: возвращаемся на последнюю контрольную точку или на старт
+        if (mine != null && now - lastTp > 1500) {
+            val kill = if (game == "parkour") -12f else -6f
+            if (mine.y < kill) {
+                if (game == "parkour") { val c = MgArenas.PARKOUR_CPS[cpIdx]; tp(Triple(c.first, c.second + 2f, c.third)) } else tp(spawnFor(game))
+            }
+            if (game == "parkour") for (i in cpIdx + 1 until MgArenas.PARKOUR_CPS.size) {
+                val c = MgArenas.PARKOUR_CPS[i]
+                if (Math.hypot((mine.x - c.first).toDouble(), (mine.z - c.third).toDouble()) < 4.0 && mine.y >= c.second - 1f) cpIdx = i
+            }
+        }
+        if (isHost) hostLogic(pos, elapsed, now)
+        val left = ((durMs - elapsed) / 1000).coerceAtLeast(0)
+        val sb = StringBuilder(title()).append("  ·  ").append(left).append(" с")
+        if (game == "tag") sb.append(if (itActor == me?.actor) "\nТЫ ВОДЯЩИЙ — лови!" else "\nВодящий: ${nick(itActor)}")
+        if (game == "parkour" && mine != null) sb.append("\nДо финиша: ${Math.max(0, (MgArenas.PARKOUR_LEN - mine.z).toInt())} м")
+        for ((a, s) in scores.entries.sortedByDescending { it.value }.take(5)) sb.append("\n${nick(a)} — $s")
+        hud.text = sb.toString()
+        if (!isHost && elapsed > durMs + 15000) finish("Время вышло", false)
     }
 
-    private fun doAct(a: String, v: Int) {
-        if (isHost) hostAct(me, a, v) else post(JSONObject().put("k", "act").put("a", a).put("v", v))
-    }
+    private fun title() = when (game) { "parkour" -> "Паркур-гонка"; "hill" -> "Царь горы"; else -> "Догонялки" }
 
-    // ------------------------------------------------------------------ логика хоста
-
-    private fun hostSet(f: (JSONObject) -> Unit) {
-        val st = hostState ?: return
-        f(st); state = st
-        post(JSONObject().put("k", "state").put("s", st))
-        draw()
-    }
-
-    private fun hostJoin(c: String, n: String) {
-        val st = hostState ?: return
-        val ps = st.getJSONArray("players")
-        for (i in 0 until ps.length()) if (ps.getJSONObject(i).getString("c") == c) { hostSet { }; return }
-        val max = st.optInt("max", 0)
-        if (max > 0 && ps.length() >= max) { post(JSONObject().put("k", "full").put("to", c)); return }
-        hostSet { ps.put(JSONObject().put("c", c).put("n", n).put("s", 0)) }
-    }
-
-    private fun hostLeave(c: String) {
-        val st = hostState ?: return
-        val ps = st.getJSONArray("players"); val keep = JSONArray()
-        for (i in 0 until ps.length()) if (ps.getJSONObject(i).getString("c") != c) keep.put(ps.getJSONObject(i))
-        hostSet { it.put("players", keep) }
-    }
-
-    private fun hostStart(game: String) {
-        val st = hostState ?: return
-        timer?.let { main.removeCallbacks(it) }
-        val ps = st.getJSONArray("players")
-        for (i in 0 until ps.length()) ps.getJSONObject(i).put("s", 0)
+    private fun hostLogic(pos: Map<Int, Pos>, elapsed: Long, now: Long) {
+        var over = elapsed >= durMs
         when (game) {
-            "ttt" -> {
-                val p = JSONArray(); for (i in 0 until minOf(2, ps.length())) p.put(ps.getJSONObject(i).getString("c"))
-                hostSet { it.put("game", "ttt").put("phase", "play").put("d", JSONObject().put("b", ".........").put("t", 0).put("p", p).put("w", "")) }
-            }
-            "tap" -> {
-                val rid = System.currentTimeMillis().toString()
-                hostSet { it.put("game", "tap").put("phase", "play").put("d", JSONObject().put("rid", rid).put("dur", 10).put("res", JSONObject())) }
-                tapTimeoutHost(rid)
-            }
-            "quiz" -> {
-                quizOrder = QUESTIONS.indices.shuffled().take(8)
-                hostQuizQuestion(0)
-            }
-        }
-    }
-
-    private fun hostAct(c: String, a: String, v: Int) {
-        val st = hostState ?: return
-        val d = st.getJSONObject("d")
-        when (st.optString("game")) {
-            "ttt" -> if (a == "move" && d.getString("w").isEmpty()) {
-                val p = d.getJSONArray("p"); val t = d.getInt("t")
-                if (p.length() < 2 || p.getString(t) != c) return
-                val b = d.getString("b").toCharArray()
-                if (v !in 0..8 || b[v] != '.') return
-                b[v] = if (t == 0) 'X' else 'O'
-                val s = String(b)
-                val lines = listOf(0,1,2, 3,4,5, 6,7,8, 0,3,6, 1,4,7, 2,5,8, 0,4,8, 2,4,6)
-                var w = ""
-                for (k in lines.indices step 3) if (s[lines[k]] != '.' && s[lines[k]] == s[lines[k+1]] && s[lines[k]] == s[lines[k+2]]) w = s[lines[k]].toString()
-                if (w.isEmpty() && !s.contains('.')) w = "="
-                hostSet {
-                    d.put("b", s).put("t", 1 - t).put("w", w)
-                    if (w == "X" || w == "O") { val ps = it.getJSONArray("players"); for (i in 0 until ps.length()) if (ps.getJSONObject(i).getString("c") == p.getString(if (w == "X") 0 else 1)) ps.getJSONObject(i).put("s", ps.getJSONObject(i).optInt("s") + 1) }
-                    it.put("phase", if (w.isEmpty()) "play" else "over")
+            "parkour" -> {
+                val f = MgArenas.PARKOUR_FINISH
+                for (p in players) {
+                    val q = pos[p.actor] ?: continue
+                    if (!finished.containsKey(p.actor) && Math.abs(q.x - f.first) < 7f && Math.abs(q.z - f.third) < 7f && q.y > f.second - 1f) {
+                        finished[p.actor] = elapsed
+                        scores[p.actor] = maxOf(1, 10 - (finished.size - 1) * 2)
+                    }
                 }
+                if (players.isNotEmpty() && finished.size >= players.size) over = true
             }
-            "tap" -> if (a == "taps" && st.getString("phase") == "play") {
-                val res = d.getJSONObject("res"); res.put(c, v.coerceIn(0, 400))
-                if (res.length() >= st.getJSONArray("players").length()) hostSet { it.put("phase", "over") }
-                else hostSet { }
+            "hill" -> if (now - lastSecond >= 1000) {
+                lastSecond = now
+                for (p in players) { val q = pos[p.actor] ?: continue
+                    if (Math.hypot(q.x.toDouble(), q.z.toDouble()) <= MgArenas.HILL_RADIUS && q.y >= MgArenas.HILL_TOP - 1f) scores[p.actor] = (scores[p.actor] ?: 0) + 1 }
             }
-            "quiz" -> if (a == "ans" && d.optInt("r", -1) < 0) {
-                val ans = quizAnswers; if (ans.containsKey(c)) return
-                ans[c] = v
-                if (ans.size >= st.getJSONArray("players").length()) hostQuizReveal()
+            "tag" -> {
+                val it0 = pos[itActor]
+                if (it0 != null && now > immuneUntil) for (p in players) {
+                    if (p.actor == itActor) continue
+                    val q = pos[p.actor] ?: continue
+                    if (Math.hypot((q.x - it0.x).toDouble(), (q.z - it0.z).toDouble()) < 2.0 && Math.abs(q.y - it0.y) < 1.5f) { itActor = p.actor; immuneUntil = now + 2500; lastScoreSend = 0; break }
+                }
+                if (now - lastSecond >= 1000) { lastSecond = now; for (p in players) if (p.actor != itActor) scores[p.actor] = (scores[p.actor] ?: 0) + 1 }
             }
+        }
+        if (over) {
+            val sorted = players.sortedByDescending { scores[it.actor] ?: 0 }
+            val text = if (sorted.isEmpty()) "Игра окончена" else "Победитель: ${sorted[0].nick.ifBlank { "игрок ${sorted[0].actor}" }} (${scores[sorted[0].actor] ?: 0})"
+            val s = JSONObject(); for ((a, v) in scores) s.put(a.toString(), v)
+            post(JSONObject().put("k", "score").put("s", s).put("it", itActor))
+            post(JSONObject().put("k", "end").put("t", text))
+            finish(text, true); return
+        }
+        if (now - lastScoreSend >= 5000) {
+            lastScoreSend = now
+            val s = JSONObject(); for ((a, v) in scores) s.put(a.toString(), v)
+            post(JSONObject().put("k", "score").put("s", s).put("it", itActor))
         }
     }
 
-    private fun tapTimeoutHost(rid: String) {
-        main.postDelayed({
-            val st = hostState ?: return@postDelayed
-            if (st.optString("game") == "tap" && st.getJSONObject("d").optString("rid") == rid && st.getString("phase") == "play") hostSet { it.put("phase", "over") }
-        }, 16000)
+    private fun finish(text: String, host: Boolean) {
+        if (phase == "idle") return
+        phase = "idle"; message = text
+        val result = StringBuilder(text)
+        for ((a, s) in scores.entries.sortedByDescending { it.value }.take(6)) result.append("\n${nick(a)} — $s")
+        hud.text = result.toString(); hud.visibility = View.VISIBLE
+        cmd("exit")
+        try { File(dir, "_mg").delete() } catch (_: Throwable) {}
+        main.postDelayed({ if (phase == "idle") { hud.visibility = View.GONE; message = "" } }, 9000)
     }
 
-    private var quizOrder: List<Int> = emptyList()
-    private var quizIdx = 0
-    private val quizAnswers = HashMap<String, Int>()
-
-    private fun hostQuizQuestion(i: Int) {
-        quizIdx = i; quizAnswers.clear()
-        if (i >= quizOrder.size) { hostSet { it.put("phase", "over") }; return }
-        val q = QUESTIONS[quizOrder[i]]
-        hostSet { it.put("game", "quiz").put("phase", "play").put("d", JSONObject().put("i", i).put("n", quizOrder.size).put("q", q.text).put("o", JSONArray(q.options))) }
-        val mine = i
-        main.postDelayed({ if (hostState?.optString("game") == "quiz" && quizIdx == mine && hostState!!.getJSONObject("d").optInt("r", -1) < 0) hostQuizReveal() }, 14000)
-    }
-
-    private fun hostQuizReveal() {
-        val q = QUESTIONS[quizOrder[quizIdx]]
-        hostSet {
-            it.getJSONObject("d").put("r", q.correct)
-            val ps = it.getJSONArray("players")
-            for (k in 0 until ps.length()) { val p = ps.getJSONObject(k); if (quizAnswers[p.getString("c")] == q.correct) p.put("s", p.optInt("s") + 100) }
-        }
-        val mine = quizIdx
-        main.postDelayed({ if (hostState?.optString("game") == "quiz" && quizIdx == mine) hostQuizQuestion(mine + 1) }, 2800)
-    }
-
-    private class Q(val text: String, val options: List<String>, val correct: Int)
-
-    companion object {
-        private val QUESTIONS = listOf(
-            Q("Сколько планет в Солнечной системе?", listOf("7", "8", "9", "10"), 1),
-            Q("Столица Франции?", listOf("Лион", "Марсель", "Париж", "Ницца"), 2),
-            Q("Какой газ мы вдыхаем для жизни?", listOf("Кислород", "Азот", "Гелий", "Водород"), 0),
-            Q("Сколько сторон у шестиугольника?", listOf("5", "6", "7", "8"), 1),
-            Q("Самое большое животное на Земле?", listOf("Слон", "Жираф", "Синий кит", "Белая акула"), 2),
-            Q("Сколько будет 12 × 12?", listOf("124", "132", "144", "164"), 2),
-            Q("Какой океан самый большой?", listOf("Атлантический", "Тихий", "Индийский", "Северный Ледовитый"), 1),
-            Q("Из какого материала делают стекло в основном?", listOf("Песок", "Глина", "Известь", "Железо"), 0),
-            Q("Сколько цветов у радуги?", listOf("5", "6", "7", "8"), 2),
-            Q("Какое животное известно как «король джунглей»?", listOf("Тигр", "Лев", "Медведь", "Волк"), 1),
-            Q("Какая планета ближе всех к Солнцу?", listOf("Венера", "Марс", "Меркурий", "Земля"), 2),
-            Q("Сколько минут в часе?", listOf("50", "60", "90", "100"), 1),
-            Q("Что любят есть медведи в мультфильмах?", listOf("Мёд", "Сыр", "Морковь", "Орехи"), 0),
-            Q("Какой язык программирования назван в честь змеи?", listOf("Java", "Ruby", "Python", "Swift"), 2),
-            Q("Сколько континентов на Земле?", listOf("5", "6", "7", "8"), 2),
-            Q("Какая птица не умеет летать?", listOf("Пингвин", "Ласточка", "Сова", "Голубь"), 0),
-            Q("Чему равен корень из 81?", listOf("7", "8", "9", "11"), 2),
-            Q("Какой металл жидкий при комнатной температуре?", listOf("Свинец", "Ртуть", "Олово", "Цинк"), 1),
-        )
-    }
+    companion object { const val OY = 1000f }
 }

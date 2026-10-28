@@ -29,7 +29,7 @@ import java.util.Locale
  * Вкладки «Установлено», «Все моды» (поиск и фильтр) и «Карты» (редактор карт). Рисуется обычными View
  * поверх Unity, открывается и закрывается с анимацией.
  */
-class GameModMenu(private val act: Activity, private val mods: ModManager) {
+class GameModMenu(private val act: Activity, private val mods: ModManager, private val games: MiniGames) {
     private val ui = GameUi(act)
     private fun dp(v: Int) = ui.dp(v)
 
@@ -48,7 +48,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     private lateinit var scroll: ScrollView
 
     private val maps = MapsTab(act, ui, MapStore(act))
-    private val games = MiniGames(act, ui)
     private val expanded = HashSet<String>()
     private var tab = TAB_INSTALLED
     private var filter = 0
@@ -61,6 +60,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     var onClosed: (() -> Unit)? = null
 
     init {
+        games.onStarted = { hide() }
         root.visibility = View.GONE
         root.setBackgroundColor(0xC0100B08.toInt())
         root.isClickable = true  // касания не уходят в Unity, пока меню открыто
