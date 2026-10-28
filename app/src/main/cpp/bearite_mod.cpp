@@ -177,7 +177,7 @@ void scan_classes() {
     static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
                                   "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
                                   "worldmap", "stage", "player", "pause", "ingamemenu", "gamemenu", "mainmenu"};
-    static const char* deep[] = {"PauseMenu", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
+    static const char* deep[] = {"PauseMenuManager", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
@@ -2178,6 +2178,20 @@ void bind_unity() {
     F.type_collider = type_of("UnityEngine", "Collider");
 }
 
+void (*o_pause_menu)(void*, uint8_t, const void*) = nullptr;
+/** Меню паузы игры открыто/закрыто (в мультиплеере время при этом не останавливается): пишем maps/_menu для кнопки «Моды». */
+void h_pause_menu(void* self, uint8_t en, const void* mi) {
+    static int lastV = -1;
+    int v = en ? 1 : 0;
+    if (v != lastV) {
+        lastV = v;
+        std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";
+        if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(v ? "1" : "0", f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+        logf_("меню паузы игры: %s", v ? "открыто" : "закрыто");
+    }
+    if (o_pause_menu) o_pause_menu(self, en, mi);
+}
+
 void (*o_load_level)(void*, const void*) = nullptr;
 /** Родная платформа запускает уровень. Если это наша копия — запоминаем мир: игра сама загрузит level_1 (с родным окном и переходом),
  *  а движок откроет в нём мир, как только сцена сменится. */
@@ -2268,6 +2282,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     {
         int rc = bearite_hook_method(A, ID, "", "LevelEntrance", "LoadLevel", 0, (void*)h_load_level, (void**)&o_load_level);
         if (rc != 0) logf_("перехват запуска уровня платформой: не вышло (%d)", rc);
+    }
+    {
+        int rc = bearite_hook_method(A, ID, "", "PauseMenuManager", "EnablePauseMenu", 1, (void*)h_pause_menu, (void**)&o_pause_menu);
+        if (rc != 0) logf_("перехват меню паузы: не вышло (%d)", rc);
     }
     logf_("движок карт: хуков кадра %d, карты читаются из %s", hooks, g_mapsDir.c_str());
     if (hooks == 0) {

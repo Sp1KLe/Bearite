@@ -160,6 +160,7 @@ class GameActivity : Activity() {
         levelPrompt = LevelPrompt(this).also { it.start() }
         chat = ChatOverlay(this, root).also { it.onRoomChanged = { updateModButton() }; it.start() }
         updateModButton()
+        menuPoll.run()
         view.requestFocus()
         BLog.i("UnityPlayer создан: ${p.javaClass.name}")
     }
@@ -263,13 +264,28 @@ class GameActivity : Activity() {
         -1
     }
 
+    private fun gameMenuOpen(): Boolean = try {
+        File(File(filesDir, "maps"), "_menu").readText().trim() == "1"
+    } catch (_: Throwable) { false }
+
+    private var lastMenu = false
+    private val menuPoll = object : Runnable {
+        override fun run() {
+            val m = gameMenuOpen()
+            if (m != lastMenu) { lastMenu = m; updateModButton() }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 300)
+        }
+    }
+
     private fun updateModButton() {
         val btn = modButton ?: return
         val st = pauseState()
         // в мультиплеере пауза не останавливает время (st == 0), поэтому кнопка там видна всегда
+        // в комнате пауза не останавливает время: там смотрим, открыто ли меню паузы игры (мод пишет maps/_menu)
         val inRoom = chat?.inRoom == true
-        btn.visibility = if (st == 0 && !inRoom) View.GONE else View.VISIBLE
-        if (st == 0 && !inRoom && modMenu?.isOpen == true) modMenu?.hide()
+        val paused = if (inRoom) gameMenuOpen() else st != 0
+        btn.visibility = if (paused) View.VISIBLE else View.GONE
+        if (!paused && modMenu?.isOpen == true) modMenu?.hide()
         // кнопки модов видны, пока игра идёт (и пока паузу не удаётся определить), и скрыты на паузе и в меню
         val showHud = st != 1 && modMenu?.isOpen != true
         hud?.root?.visibility = if (showHud) View.VISIBLE else View.GONE
