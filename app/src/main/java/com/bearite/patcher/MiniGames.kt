@@ -107,9 +107,9 @@ class MiniGames(private val act: Activity) {
     }
 
     /** Вкладка «Мультиплеер»: сколько игроков сейчас в комнате и лимит для новых комнат. */
-    fun renderMulti(into: LinearLayout) {
+    fun renderMulti(into: LinearLayout, clear: Boolean = true) {
         readPlayers()
-        into.removeAllViews()
+        if (clear) into.removeAllViews()
         into.addView(ui.label(if (roomName.isEmpty()) "Ты не в игровой комнате" else "Комната: $roomName", 16f), ui.matchWrap().apply { topMargin = dp(8) })
         into.addView(ui.label(
             if (roomName.isEmpty()) "Зайди в мультиплеер, чтобы увидеть игроков."

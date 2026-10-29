@@ -32,6 +32,7 @@ import java.util.Locale
 class GameModMenu(private val act: Activity, private val mods: ModManager, private val games: MiniGames) {
     private val ui = GameUi(act)
     private fun dp(v: Int) = ui.dp(v)
+    private val bear = BearUi(act, BearNet.of(act), games)
 
     /** Полноэкранная подложка; добавляется в корневой FrameLayout GameActivity. */
     val root = FrameLayout(act)
@@ -231,9 +232,10 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun renderList() {
+        bear.active = false
         if (tab == TAB_MULTI) {
             list.removeAllViews()
-            try { games.renderMulti(list) } catch (t: Throwable) { BLog.e("вкладка «Мультиплеер»", t) }
+            try { bear.render(list) { if (tab == TAB_MULTI && isOpen) renderList() } } catch (t: Throwable) { BLog.e("вкладка «Мультиплеер»", t) }
             return
         }
         if (tab == TAB_GAMES) {
