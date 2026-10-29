@@ -69,11 +69,25 @@ class MiniGames(private val act: Activity) {
     @Volatile private var relayGen = 0
     private var relayRoom = ""
 
+    private val net = BearNet.of(act)
+    private class Rp(val pos: Pos, val at: Long)
+    private val remote = HashMap<Int, Rp>()      // позиции игроков комнаты Bearite (приходят с сервера)
+    private var lastPosSend = 0L
+
     private val me: P? get() = players.firstOrNull { it.local }
-    private val isHost: Boolean get() = players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
+    private val isHost: Boolean get() = if (net.connected) net.isHost else players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
     private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
 
-    init { main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } }) }
+    init {
+        net.onData = { kind, from, data ->
+            if (data != null) {
+                if (kind == "mg") onMessage(data)
+                else if (kind == "pos" && from != null) remote[from.actor] = Rp(Pos(data.optDouble("x").toFloat(), data.optDouble("y").toFloat(), data.optDouble("z").toFloat()), System.currentTimeMillis())
+            }
+            Unit
+        }
+        main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } })
+    }
 
     fun stopAll() { relayGen++ }
 
@@ -130,6 +144,11 @@ class MiniGames(private val act: Activity) {
     // ------------------------------------------------------------------ файлы мода
 
     private fun readPlayers() {
+        if (net.connected) {
+            roomName = "bear:" + net.room; maxPlayers = net.max
+            players = net.players.map { P(it.actor, it.nick, it.cid == net.cid) }
+            return
+        }
         try { roomName = File(dir, "_room").readText().trim() } catch (_: Throwable) { roomName = "" }
         val lines = try { File(dir, "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
         if (lines.isEmpty()) { players = emptyList(); return }
@@ -142,6 +161,19 @@ class MiniGames(private val act: Activity) {
 
     private fun readPositions(): Map<Int, Pos> {
         val out = HashMap<Int, Pos>()
+        if (net.connected) {
+            // свои координаты — из мода (локальный игрок), чужие — с сервера
+            try {
+                for (l in File(dir, "_pos").readText().lines()) {
+                    val p = l.split('\t'); if (p.size < 6 || p[2] != "1") continue
+                    out[net.myActor] = Pos(p[3].toFloatOrNull() ?: continue, (p[4].toFloatOrNull() ?: continue) - OY, p[5].toFloatOrNull() ?: continue)
+                    break
+                }
+            } catch (_: Throwable) {}
+            val now = System.currentTimeMillis()
+            for ((a, r) in remote) if (a != net.myActor && now - r.at < 3000) out[a] = r.pos
+            return out
+        }
         try {
             for (l in File(dir, "_pos").readText().lines()) {
                 val p = l.split('\t'); if (p.size < 6) continue
@@ -166,6 +198,7 @@ class MiniGames(private val act: Activity) {
     private fun topic(r: String) = "bearite-mg-" + MessageDigest.getInstance("SHA-256").digest(("mgame" + r).toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
 
     private fun post(o: JSONObject) {
+        if (net.connected) { net.sendData("mg", o); return }
         val r = roomName; if (r.isEmpty()) return
         o.put("c", cid)
         Thread {
@@ -180,6 +213,7 @@ class MiniGames(private val act: Activity) {
     }
 
     private fun ensureRelay() {
+        if (net.connected) { if (relayRoom.isNotEmpty()) { relayRoom = ""; relayGen++ }; return }
         if (roomName == relayRoom) return
         relayRoom = roomName; val g = ++relayGen
         if (roomName.isEmpty()) return
@@ -271,6 +305,10 @@ class MiniGames(private val act: Activity) {
             return
         }
         val pos = readPositions(); val mine = me?.let { pos[it.actor] }
+        if (net.connected && mine != null && now - lastPosSend >= 250) {
+            lastPosSend = now
+            net.sendData("pos", JSONObject().put("x", mine.x.toDouble()).put("y", mine.y.toDouble()).put("z", mine.z.toDouble()))
+        }
         val elapsed = now - startedAt
         // падение с арены: возвращаемся на последнюю контрольную точку или на старт
         if (mine != null && now - lastTp > 1500) {
