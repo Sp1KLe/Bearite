@@ -155,7 +155,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         inputRow = row
         panel.addView(row)
         setTab(false)
-        main.post(object : Runnable { override fun run() { if (running) { if (win.visibility == View.VISIBLE && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
+        main.post(object : Runnable { override fun run() { if (running) { updateCount(); if (win.visibility == View.VISIBLE && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
         win = ResizableFrame(act).apply { visibility = View.GONE }
         win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(GameUi.DIM); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
@@ -228,6 +228,17 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
             }
             return true
         }
+    }
+
+    /** Число игроков комнаты в заголовке чата и на вкладке. */
+    private fun updateCount() {
+        val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
+        if (lines.isEmpty()) { tabPlayers.text = "Игроки"; return }
+        val h = lines[0].split('\t')
+        val n = h.getOrNull(0)?.toIntOrNull() ?: 0
+        val mx = h.getOrNull(1)?.toIntOrNull() ?: 0
+        tabPlayers.text = "Игроки ($n" + (if (mx > 0) "/$mx" else "") + ")"
+        title.text = "Чат · $n " + (if (mx > 0) "из $mx" else "онлайн")
     }
 
     private fun setTab(players: Boolean) {

@@ -44,6 +44,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private lateinit var tabAll: TextView
     private lateinit var tabMaps: TextView
     private lateinit var tabGames: TextView
+    private lateinit var tabMulti: TextView
     private lateinit var footer: TextView
     private lateinit var scroll: ScrollView
 
@@ -97,7 +98,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         tabAll = tab("Все моды", TAB_ALL)
         tabMaps = tab("Карты", TAB_MAPS)
         tabGames = tab("Мини-игры", TAB_GAMES)
-        for (t in listOf(tabInstalled, tabAll, tabMaps, tabGames)) {
+        tabMulti = tab("Мультиплеер", TAB_MULTI)
+        for (t in listOf(tabInstalled, tabAll, tabMaps, tabGames, tabMulti)) {
             head.addView(t, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
         }
         head.addView(
@@ -216,7 +218,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun refresh() {
-        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS, tabGames to TAB_GAMES)) {
+        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS, tabGames to TAB_GAMES, tabMulti to TAB_MULTI)) {
             val on = tab == id
             t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
             t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 21, if (on) 0 else GameUi.LINE)
@@ -229,6 +231,11 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun renderList() {
+        if (tab == TAB_MULTI) {
+            list.removeAllViews()
+            try { games.renderMulti(list) } catch (t: Throwable) { BLog.e("вкладка «Мультиплеер»", t) }
+            return
+        }
         if (tab == TAB_GAMES) {
             list.removeAllViews()
             try { games.render(list) } catch (t: Throwable) { BLog.e("вкладка «Мини-игры»", t) }
@@ -475,6 +482,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         const val TAB_ALL = 1
         const val TAB_MAPS = 2
         const val TAB_GAMES = 3
+        const val TAB_MULTI = 4
         val FILTER_NAMES = arrayOf("Все моды", "Только включённые", "Только выключенные", "С настройками", "С нативным кодом")
     }
 }
