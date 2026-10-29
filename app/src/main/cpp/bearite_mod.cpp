@@ -2112,6 +2112,40 @@ bool set_room_max(void* opts) {
     logf_("лимит комнаты: поля MaxPlayers у RoomOptions нет");
     return false;
 }
+int read_room_limit() {
+    std::string v;
+    if (FILE* f = fopen((g_mapsDir + "/_maxplayers").c_str(), "r")) { char b[32] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); v = b; }
+    if (v.empty()) return -1;
+    int mx = atoi(v.c_str());
+    return mx < 0 ? -1 : (mx > 255 ? 255 : mx);
+}
+void (*o_ro_max_b)(void*, uint32_t, const void*) = nullptr;
+void h_ro_max_b(void* self, uint32_t v, const void* mi) {
+    int mx = read_room_limit();
+    if (mx >= 0 && (v & 0xFF) != (uint32_t)mx) { logf_("лимит игроков: игра ставила %u, ставлю %d", v & 0xFF, mx); v = (uint32_t)mx; }
+    if (o_ro_max_b) o_ro_max_b(self, v, mi);
+}
+void (*o_ro_max_i)(void*, int32_t, const void*) = nullptr;
+void h_ro_max_i(void* self, int32_t v, const void* mi) {
+    int mx = read_room_limit();
+    if (mx >= 0 && v != mx) { logf_("лимит игроков: игра ставила %d, ставлю %d", v, mx); v = mx; }
+    if (o_ro_max_i) o_ro_max_i(self, v, mi);
+}
+bool hook_max_setter(const char* cls) {
+    void* k = bearite_find_class("Photon.Realtime", cls);
+    void* m = k ? bearite_il2.class_get_method_from_name(k, "set_MaxPlayers", 1) : nullptr;
+    if (!m) { logf_("лимит: у %s нет set_MaxPlayers (поле или другой класс)", cls); return false; }
+    auto type_name = sym<const char* (*)(void*)>("il2cpp_type_get_name");
+    void* pt = method_param ? method_param(m, 0) : nullptr;
+    std::string tn = pt && type_name ? type_name(pt) : "";
+    void* code = bearite_method_code(m);
+    if (!code) return false;
+    bool isByte = tn == "System.Byte" || tn == "System.SByte";
+    int rc = isByte ? A->hook(code, (void*)h_ro_max_b, (void**)&o_ro_max_b) : A->hook(code, (void*)h_ro_max_i, (void**)&o_ro_max_i);
+    logf_("лимит: перехват %s.set_MaxPlayers(%s): %s", cls, tn.c_str(), rc == 0 ? "готово" : "не удался");
+    return rc == 0;
+}
+
 uint8_t (*o_create_room)(void*, void*, void*, void*, const void*) = nullptr;
 uint8_t h_create_room(void* name, void* opts, void* lobby, void* friends, const void* mi) {
     try { set_room_max(opts); } catch (...) {}
@@ -2480,6 +2514,9 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         int r2 = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "JoinOrCreateRoom", 4, (void*)h_join_create_room, (void**)&o_join_create_room);
         if (r1 != 0 && r2 != 0) logf_("перехват создания комнаты: не вышло (%d, %d)", r1, r2);
     }
+    dump_class("Photon.Realtime", "RoomOptions");
+    dump_class("Photon.Realtime", "Room");
+    hook_max_setter("RoomOptions");
     logf_("движок карт: хуков кадра %d, карты читаются из %s", hooks, g_mapsDir.c_str());
     if (hooks == 0) {
         g_status = "error";
