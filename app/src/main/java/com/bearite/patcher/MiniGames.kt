@@ -70,7 +70,7 @@ class MiniGames(private val act: Activity) {
     private var relayRoom = ""
 
     private val me: P? get() = players.firstOrNull { it.local }
-    private val isHost: Boolean get() = players.isEmpty() || (me != null && me!!.actor == players.minOf { it.actor })
+    private val isHost: Boolean get() = players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
     private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
 
     init { main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } }) }
@@ -91,6 +91,9 @@ class MiniGames(private val act: Activity) {
         // игры
         into.addView(ui.label("Мини-игры", 14f), ui.matchWrap().apply { topMargin = dp(14) })
         val canStart = roomName.isNotEmpty() && isHost && phase == "idle"
+        val why = "комната=«$roomName» игроков=${players.size} я=${me?.actor} хост=$isHost фаза=$phase"
+        BLog.i("мини-игры: вкладка: $why")
+        into.addView(ui.label(why, 11f, GameUi.MUTED, bold = false))
         for ((g, title, sub) in listOf(
             Triple("parkour", "Паркур-гонка", "Добеги по платформам до финиша быстрее всех"),
             Triple("hill", "Царь горы", "60 секунд: очки за время на вершине, соперников можно сбрасывать"),
