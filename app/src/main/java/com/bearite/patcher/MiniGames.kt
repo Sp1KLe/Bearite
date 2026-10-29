@@ -149,7 +149,7 @@ class MiniGames(private val act: Activity) {
         return out
     }
 
-    private fun cmd(text: String) { try { val t = File(dir, "_cmd.tmp"); t.writeText(text + "\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {} }
+    private fun cmd(text: String) { BLog.i("мини-игры: команда моду «${text.replace('\t', ' ')}»"); try { val t = File(dir, "_cmd.tmp"); t.writeText(text + "\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {} }
 
     private fun installArena(g: String) {
         try {
@@ -221,6 +221,7 @@ class MiniGames(private val act: Activity) {
     // ------------------------------------------------------------------ ход игры
 
     private fun hostStart(g: String) {
+        BLog.i("мини-игры: хост запускает «$g», комната «$roomName», игроков ${players.size}")
         message = ""
         post(JSONObject().put("k", "start").put("g", g))
         begin(g)
@@ -231,6 +232,7 @@ class MiniGames(private val act: Activity) {
 
     private fun begin(g: String) {
         readPlayers()
+        BLog.i("мини-игры: begin «$g», игроков ${players.size}, я=${me?.actor}, хост=$isHost")
         game = g; phase = "prep"; scores.clear(); finished.clear(); itActor = 0; cpIdx = 0
         durMs = when (g) { "parkour" -> 150000L; else -> 60000L }
         installArena(g)
@@ -260,7 +262,7 @@ class MiniGames(private val act: Activity) {
         if (phase == "prep") {
             val left = ((prepUntil - now) / 1000).coerceAtLeast(0)
             hud.text = "${title()}\nАрена загружается… старт через $left"
-            if (now >= prepUntil) { phase = "play"; startedAt = now; lastSecond = now; lastScoreSend = now; tp(spawnFor(game))
+            if (now >= prepUntil) { BLog.i("мини-игры: старт, позиций игроков: ${readPositions().size}"); phase = "play"; startedAt = now; lastSecond = now; lastScoreSend = now; tp(spawnFor(game))
                 if (isHost && game == "tag" && players.isNotEmpty()) { itActor = players.random().actor }
                 immuneUntil = now + 3000 }
             return
