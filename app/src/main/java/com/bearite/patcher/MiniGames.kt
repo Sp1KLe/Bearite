@@ -305,6 +305,7 @@ class MiniGames(private val act: Activity) {
             return
         }
         val pos = readPositions(); val mine = me?.let { pos[it.actor] }
+        if (net.connected) writeAvatars(now)
         if (net.connected && mine != null && now - lastPosSend >= 250) {
             lastPosSend = now
             net.sendData("pos", JSONObject().put("x", mine.x.toDouble()).put("y", mine.y.toDouble()).put("z", mine.z.toDouble()))
@@ -329,6 +330,16 @@ class MiniGames(private val act: Activity) {
         for ((a, s) in scores.entries.sortedByDescending { it.value }.take(5)) sb.append("\n${nick(a)} — $s")
         hud.text = sb.toString()
         if (!isHost && elapsed > durMs + 15000) finish("Время вышло", false)
+    }
+
+    /** Позиции остальных игроков комнаты для мода: он рисует им аватары (maps/_avatars, мировые координаты). */
+    private fun writeAvatars(now: Long) {
+        val sb = StringBuilder()
+        for ((a, r) in remote) {
+            if (a == net.myActor || now - r.at > 3000) continue
+            sb.append(a).append('\t').append(nick(a).replace('\t', ' ')).append('\t').append(r.pos.x).append('\t').append(r.pos.y + OY).append('\t').append(r.pos.z).append('\n')
+        }
+        try { val t = File(dir, "_avatars.tmp"); t.writeText(sb.toString()); t.renameTo(File(dir, "_avatars")) } catch (_: Throwable) {}
     }
 
     private fun title() = when (game) { "parkour" -> "Паркур-гонка"; "hill" -> "Царь горы"; else -> "Догонялки" }
@@ -385,6 +396,8 @@ class MiniGames(private val act: Activity) {
         hud.text = result.toString(); hud.visibility = View.VISIBLE
         cmd("exit")
         try { File(dir, "_mg").delete() } catch (_: Throwable) {}
+        try { File(dir, "_avatars").delete() } catch (_: Throwable) {}
+        remote.clear()
         main.postDelayed({ if (phase == "idle") { hud.visibility = View.GONE; message = "" } }, 9000)
     }
 
