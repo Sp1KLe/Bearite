@@ -2003,13 +2003,13 @@ void publish_positions(long long now) {
     static long long lastT = 0;
     if (now - lastT < 250) return;
     lastT = now;
-    if (access((g_mapsDir + "/_mg").c_str(), F_OK) != 0) return;
+    if (access((g_mapsDir + "/_mg").c_str(), F_OK) != 0 && access((g_mapsDir + "/_bn").c_str(), F_OK) != 0) return;
     static void *npcT = nullptr, *pvT = nullptr, *pvK = nullptr, *getOwner = nullptr;
     if (!npcT) { npcT = type_of("", "NetworkPlayerController"); pvT = type_of("Photon.Pun", "PhotonView"); pvK = bearite_find_class("Photon.Pun", "PhotonView"); getOwner = pvK ? bearite_il2.class_get_method_from_name(pvK, "get_Owner", 0) : nullptr; }
     if (!npcT) return;
     void* arr = find_objects(npcT);
     uintptr_t n = arr ? arr_len(arr) : 0;
-    std::string out;
+    std::string out = "#\t" + g_scene + "\n";   // первая строка: текущая сцена
     for (uintptr_t i = 0; i < n && i < 64; ++i) {
         void* c = *(void**)arr_elem(arr, sizeof(void*), i);
         if (!c) continue;
@@ -2161,7 +2161,7 @@ uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, c
 
 /** Аватары других игроков комнаты Bearite (мини-игры): лаунчер пишет maps/_avatars = «актёр\tник\tx\ty\tz» в мировых координатах.
  *  Каждому актёру делаем капсулу-«медведя» без коллайдера и плавно двигаем к последней позиции. Пока нет maps/_mg — всех убираем. */
-struct Avatar { uintptr_t h = 0; float p[3] = {0, 0, 0}; float t[3] = {0, 0, 0}; int miss = 0; bool init = false; };
+struct Avatar { uintptr_t h = 0; float p[3] = {0, 0, 0}; float t[3] = {0, 0, 0}; int miss = 0; bool init = false; bool show = true; };
 std::map<int, Avatar> g_avatars;
 
 void avatar_kill(Avatar& a) {
@@ -2175,7 +2175,8 @@ void avatars_tick(long long now) {
     static long long lastT = 0;
     if (now - lastT < 50) return;
     lastT = now;
-    bool want = access((g_mapsDir + "/_mg").c_str(), F_OK) == 0;
+    bool inMg = access((g_mapsDir + "/_mg").c_str(), F_OK) == 0;
+    bool want = inMg || access((g_mapsDir + "/_bn").c_str(), F_OK) == 0;
     if (!want || !F.create_primitive || !F.go_transform || !F.set_position) {
         if (!g_avatars.empty()) { for (auto& e : g_avatars) avatar_kill(e.second); g_avatars.clear(); logf_("аватары: убраны"); }
         return;
@@ -2196,6 +2197,8 @@ void avatars_tick(long long now) {
             int actor = atoi(parts[0].c_str());
             Avatar& a = g_avatars[actor];
             a.t[0] = num(parts[2], 0); a.t[1] = num(parts[3], 0); a.t[2] = num(parts[4], 0);
+            std::string sc = parts.size() > 5 ? parts[5] : "";
+            a.show = inMg || sc.empty() || sc == g_scene;   // в арене мини-игры показываем всех, иначе только из той же сцены
             a.miss = 0; seen.insert(actor);
         }
         for (auto it = g_avatars.begin(); it != g_avatars.end();) {
@@ -2204,6 +2207,7 @@ void avatars_tick(long long now) {
     }
     for (auto& e : g_avatars) {
         Avatar& a = e.second;
+        if (!a.show) { avatar_kill(a); continue; }
         void* go = a.h ? target(a.h) : nullptr;
         if (!go) {
             int t = 1;  // капсула
