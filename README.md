@@ -442,3 +442,7 @@ Bearite не запускает сборки игры с защитой Google P
 1. **Render (проще всего).** render.com → New → Blueprint → выбери репозиторий Bearite (файл `render.yaml` в корне) → Apply. Получишь адрес вида `https://bearite-server.onrender.com`; впиши его в лаунчере: Меню → Мультиплеер → «Добавить сервер». Бесплатный тариф засыпает после 15 минут без запросов (первое подключение тогда занимает до минуты), и комнаты при перезапуске пропадают. Чтобы не засыпал, добавь монитор на https://uptimerobot.com (бесплатно) с запросом на твой адрес каждые 5 минут.
 2. **Всегда включённый вариант.** Oracle Cloud Always Free (виртуалка) или любой VPS: `cd server && node bearite-server.js` (или `docker build -t bearite server && docker run -p 8080:8080 bearite`), адрес `http://IP:8080`.
 3. Закрытый сервер: переменная `KEY`, тот же ключ вводится в ⚙ рядом с сервером.
+
+### Сервер, который работает вечно
+
+Oracle Cloud Always Free (бесплатная виртуалка навсегда): создай VM (Ubuntu), в её сети (Security List) открой входящий TCP 8080, зайди по SSH под root и выполни одну команду: `curl -fsSL https://raw.githubusercontent.com/Sp1KLe/Bearite/main/server/install.sh | bash`. Скрипт поставит Node.js и запустит сервер как службу (сам поднимется после сбоя и перезагрузки). Адрес для лаунчера: `http://IP:8080`.
