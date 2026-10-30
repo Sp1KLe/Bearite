@@ -25,7 +25,10 @@ const EMPTY_TTL = 60e3;     // пустая комната удаляется
 const CHAT_GAP = 500;       // мс между чат-сообщениями одного игрока
 
 const rooms = new Map();    // id -> room
-let nextId = 1;
+function newCode() {            // шестизначный код комнаты, как в оригинале (например 788006)
+  for (let i = 0; i < 50; i++) { const c = String(100000 + Math.floor(Math.random() * 900000)); if (!rooms.has(c)) return c; }
+  return String(Date.now()).slice(-8);
+}
 
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
 const json = (res, code, obj) => {
@@ -106,7 +109,7 @@ http.createServer(async (req, res) => {
     if (rooms.size >= MAX_ROOMS) return json(res, 429, { error: 'слишком много комнат' });
     const cid = clean(b.cid, 40); if (!cid) return json(res, 400, { error: 'cid' });
     let max = Math.floor(+b.max || 0); if (max < 0) max = 0; if (max > HARD_MAX) max = HARD_MAX;
-    const id = String(nextId++);
+    const id = newCode();
     const r = { id, name: clean(b.name, 32) || `Комната ${id}`, max, scene: clean(b.scene, 40), game: '', host: '', players: new Map(), events: [], seq: 0, actors: 0, waiters: new Set(), empty: Date.now() };
     rooms.set(id, r);
     const { p: pl } = addPlayer(r, cid, clean(b.nick, 24));

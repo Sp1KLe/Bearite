@@ -77,7 +77,7 @@ class BearNet private constructor(ctx: Context) {
     // ------------------------------------------------------------------ http
     private fun call(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
         val c = URL(base + path).openConnection() as HttpURLConnection
-        c.connectTimeout = 6000; c.readTimeout = timeoutMs
+        c.connectTimeout = 25000; c.readTimeout = maxOf(timeoutMs, 25000)  // бесплатный хостинг «просыпается» до минуты
         c.setRequestProperty("Accept", "application/json")
         val key = net.getString("key:$base", "") ?: ""
         if (key.isNotEmpty()) c.setRequestProperty("X-Key", key)

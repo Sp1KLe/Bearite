@@ -46,7 +46,7 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
     // ------------------------------------------------------------------ в комнате
 
     private fun renderRoom(into: LinearLayout) {
-        into.addView(ui.label("Комната «${net.roomName}»", 15f, GameUi.GREEN), ui.matchWrap().apply { topMargin = dp(4) })
+        into.addView(ui.label("Комната «${net.roomName}» · код ${net.room}", 15f, GameUi.GREEN), ui.matchWrap().apply { topMargin = dp(4) })
         into.addView(ui.label("Сервер: ${net.url}", 12f, GameUi.MUTED, bold = false))
         into.addView(ui.label("Игроков: ${net.players.size}" + (if (net.max > 0) " из ${net.max}" else " (без ограничения)") + (if (net.isHost) " · ты хост" else ""), 14f, GameUi.CREAM, bold = false))
         for (p in net.players.sortedBy { it.actor }) {
@@ -95,7 +95,7 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
                 background = ui.round(GameUi.ROW, 10); setPadding(dp(12), dp(6), dp(8), dp(6))
             }
             val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-            col.addView(ui.label(r.name, 14f))
+            col.addView(ui.label("${r.name} · #${r.id}", 14f))
             col.addView(ui.label("${r.players}" + (if (r.max > 0) "/${r.max}" else "") + " игроков" + (if (r.host.isNotEmpty()) " · хост ${r.host}" else "") + (if (r.game.isNotEmpty()) " · идёт игра" else ""), 12f, GameUi.MUTED, bold = false))
             row.addView(col, LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(ui.pill(if (full) "Полная" else "Войти", primary = !full, sizeSp = 13f) { if (!full) joinRoom(s.url, r.id) }, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)))
@@ -105,6 +105,7 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
         btns.addView(ui.pill("Создать комнату", primary = true, sizeSp = 13f) { createDialog(s.url) }, LinearLayout.LayoutParams(0, dp(40), 1f))
         btns.addView(ui.pill("Обновить", sizeSp = 13f) { refreshRooms(); again() }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(8) })
         box.addView(btns, ui.matchWrap().apply { topMargin = dp(8) })
+        box.addView(ui.pill("Войти по коду комнаты", sizeSp = 13f) { codeDialog(s.url) }, ui.matchWrap().apply { topMargin = dp(8) })
         into.addView(box, ui.matchWrap())
     }
 
@@ -130,6 +131,13 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
         if (net.nick.isBlank()) { status = "Сначала впиши ник сверху."; again(); return }
         busy = true; status = "Захожу…"; again()
         net.join(url, id) { err -> busy = false; status = if (err.isEmpty()) "" else "Не вошёл: $err"; again() }
+    }
+
+    private fun codeDialog(url: String) {
+        var code = ""
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(ui.row("Код", ui.textInput("", 140, "например 788006") { code = it.filter(Char::isDigit).take(8) }))
+        ui.dialog("Вход по коду", col, listOf(GameUi.Btn("Отмена"), GameUi.Btn("Войти", primary = true) { if (code.isNotEmpty()) joinRoom(url, code) })).show()
     }
 
     private fun createDialog(url: String) {
