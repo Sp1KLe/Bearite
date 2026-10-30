@@ -61,7 +61,7 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
 
     private fun renderServers(into: LinearLayout) {
         val list = net.servers()
-        if (list.isEmpty()) into.addView(ui.label("Серверов пока нет. Добавь адрес сервера Bearite — его даёт тот, кто его запустил (node server/bearite-server.js).", 13f, GameUi.MUTED, bold = false), ui.matchWrap().apply { topMargin = dp(4) })
+        if (selected.isEmpty()) { selected = BearNet.SERVER_URL; refreshServer(selected); refreshRooms() }
         for (s in list) {
             val on = s.url == selected
             val line = LinearLayout(act).apply {
@@ -72,7 +72,6 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
             }
             val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             head.addView(ui.label(s.name.ifBlank { s.url }, 15f), LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            head.addView(ui.label("⚙", 18f, GameUi.MUTED).apply { setPadding(dp(10), 0, dp(6), 0); setOnClickListener { editServer(s) } })
             line.addView(head)
             val st = info[s.url]
             if (st == null) { info[s.url] = "проверяю…"; refreshServer(s.url) }
@@ -80,7 +79,6 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
             into.addView(line, ui.matchWrap().apply { topMargin = dp(6) })
             if (on) renderRooms(into, s)
         }
-        into.addView(ui.pill("+ Добавить сервер") { addServerDialog() }, ui.matchWrap().apply { topMargin = dp(10) })
     }
 
     private fun renderRooms(into: LinearLayout, s: BearNet.Srv) {
@@ -151,32 +149,5 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
             busy = true; status = "Создаю…"; again()
             net.create(url, name.trim(), max.toIntOrNull() ?: 0) { err -> busy = false; status = if (err.isEmpty()) "" else "Не создал: $err"; again() }
         })).show()
-    }
-
-    private fun addServerDialog() {
-        var url = ""; var name = ""
-        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(ui.label("Адрес сервера", 12f, GameUi.MUTED))
-        col.addView(ui.textInput("", 300, "например bearite.example.com") { url = it })
-        col.addView(ui.label("Название (необязательно)", 12f, GameUi.MUTED).apply { setPadding(0, dp(8), 0, 0) })
-        col.addView(ui.textInput("", 300, "мой сервер") { name = it })
-        ui.dialog("Добавить сервер", col, listOf(GameUi.Btn("Отмена"), GameUi.Btn("Добавить", primary = true) {
-            if (net.addServer(url, name.trim())) { val n = net.normalize(url); selected = n; info.remove(n); rooms = null; refreshRooms(); status = "" } else status = "Такой сервер уже есть или адрес пустой."
-            again()
-        })).show()
-    }
-
-    private fun editServer(s: BearNet.Srv) {
-        var name = s.name; var key = net.key(s.url)
-        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(ui.label(s.url, 12f, GameUi.MUTED, bold = false))
-        col.addView(ui.label("Название", 12f, GameUi.MUTED).apply { setPadding(0, dp(8), 0, 0) })
-        col.addView(ui.textInput(name, 300, "название") { name = it })
-        col.addView(ui.label("Ключ сервера (если он закрытый)", 12f, GameUi.MUTED).apply { setPadding(0, dp(8), 0, 0) })
-        col.addView(ui.textInput(key, 300, "необязательно") { key = it })
-        ui.dialog("Сервер", col, listOf(
-            GameUi.Btn("Удалить", danger = true) { net.removeServer(s.url); if (selected == s.url) { selected = ""; rooms = null }; again() },
-            GameUi.Btn("Сохранить", primary = true) { net.renameServer(s.url, name.trim()); net.setKey(s.url, key); info.remove(s.url); again() },
-        )).show()
     }
 }

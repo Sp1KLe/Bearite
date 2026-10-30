@@ -51,37 +51,15 @@ class BearNet private constructor(ctx: Context) {
     var onData: ((kind: String, from: Pl?, data: JSONObject?) -> Unit)? = null
 
     // ------------------------------------------------------------------ список серверов
-    fun servers(): List<Srv> {
-        val a = try { JSONArray(net.getString("servers", "[]")) } catch (_: Throwable) { JSONArray() }
-        return (0 until a.length()).map { val o = a.getJSONObject(it); Srv(o.getString("url"), o.optString("name")) }
-    }
-    private fun saveServers(l: List<Srv>) {
-        val a = JSONArray(); for (s in l) a.put(JSONObject().put("url", s.url).put("name", s.name))
-        net.edit().putString("servers", a.toString()).apply()
-    }
-    fun normalize(u: String): String {
-        var s = u.trim().trimEnd('/')
-        if (s.isEmpty()) return ""
-        if (!s.startsWith("http://") && !s.startsWith("https://")) s = (if (s.contains("localhost") || Regex("^[0-9.]+(:\\d+)?$").matches(s)) "http://" else "https://") + s
-        return s
-    }
-    fun addServer(u: String, name: String = ""): Boolean {
-        val n = normalize(u); if (n.isEmpty()) return false
-        val l = servers().toMutableList()
-        if (l.any { it.url == n }) return false
-        l.add(Srv(n, name)); saveServers(l); return true
-    }
-    fun removeServer(u: String) = saveServers(servers().filter { it.url != u })
-    fun renameServer(u: String, name: String) = saveServers(servers().map { if (it.url == u) Srv(it.url, name) else it })
+    /** Сервер зашит в лаунчер: сменить его нельзя. */
+    fun servers(): List<Srv> = listOf(Srv(SERVER_URL, "Bearite"))
 
     // ------------------------------------------------------------------ http
     private fun call(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
         val c = URL(base + path).openConnection() as HttpURLConnection
         c.connectTimeout = 25000; c.readTimeout = maxOf(timeoutMs, 25000)  // бесплатный хостинг «просыпается» до минуты
         c.setRequestProperty("Accept", "application/json")
-        val key = net.getString("key:$base", "") ?: ""
-        if (key.isNotEmpty()) c.setRequestProperty("X-Key", key)
-        if (post != null) {
+                if (post != null) {
             c.requestMethod = "POST"; c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
             c.outputStream.use { it.write(post.toString().toByteArray()) }
@@ -93,8 +71,6 @@ class BearNet private constructor(ctx: Context) {
         if (code !in 200..299) throw RuntimeException(j.optString("error", "код $code"))
         return j
     }
-    fun setKey(base: String, key: String) { net.edit().putString("key:$base", key.trim()).apply() }
-    fun key(base: String) = net.getString("key:$base", "") ?: ""
 
     private fun bg(f: () -> Unit) { Thread { try { f() } catch (_: Throwable) {} }.apply { isDaemon = true }.start() }
 
@@ -208,6 +184,7 @@ class BearNet private constructor(ctx: Context) {
     }
 
     companion object {
+        const val SERVER_URL = "https://bearite-server.onrender.com"
         @Volatile private var inst: BearNet? = null
         fun of(ctx: Context): BearNet = inst ?: synchronized(this) { inst ?: BearNet(ctx.applicationContext).also { inst = it } }
     }
