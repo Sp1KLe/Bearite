@@ -55,11 +55,15 @@ class BearNet private constructor(ctx: Context) {
     fun servers(): List<Srv> = listOf(Srv(SERVER_URL, "Bearite"))
 
     // ------------------------------------------------------------------ http
-    private fun call(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
+    /** true — обычное соединение не проходит (блокировка), ходим с дроблением TLS-handshake; запоминается между запусками. */
+    @Volatile private var frag = net.getBoolean("frag", false)
+
+    private fun callOnce(base: String, path: String, post: JSONObject?, timeoutMs: Int, useFrag: Boolean, connectMs: Int): JSONObject {
         val c = URL(base + path).openConnection() as HttpURLConnection
-        c.connectTimeout = 25000; c.readTimeout = maxOf(timeoutMs, 25000)  // бесплатный хостинг «просыпается» до минуты
+        if (useFrag) Bypass.apply(c)
+        c.connectTimeout = connectMs; c.readTimeout = maxOf(timeoutMs, 25000)
         c.setRequestProperty("Accept", "application/json")
-                if (post != null) {
+        if (post != null) {
             c.requestMethod = "POST"; c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
             c.outputStream.use { it.write(post.toString().toByteArray()) }
@@ -70,6 +74,21 @@ class BearNet private constructor(ctx: Context) {
         val j = try { JSONObject(text) } catch (_: Throwable) { JSONObject() }
         if (code !in 200..299) throw RuntimeException(j.optString("error", "код $code"))
         return j
+    }
+
+    private fun call(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
+        val https = base.startsWith("https://")
+        if (!https) return callOnce(base, path, post, timeoutMs, false, 25000)
+        val first = frag
+        try {
+            return callOnce(base, path, post, timeoutMs, first, 12000)
+        } catch (t: java.io.IOException) {
+            // нет соединения: пробуем другой режим; если он сработал — запоминаем
+            val j = callOnce(base, path, post, timeoutMs, !first, 20000)
+            frag = !first; net.edit().putBoolean("frag", frag).apply()
+            BLog.i("сеть: режим обхода блокировки теперь " + (if (frag) "включён" else "выключен"))
+            return j
+        }
     }
 
     private fun bg(f: () -> Unit) { Thread { try { f() } catch (_: Throwable) {} }.apply { isDaemon = true }.start() }
