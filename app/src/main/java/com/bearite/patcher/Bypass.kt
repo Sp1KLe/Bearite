@@ -59,4 +59,30 @@ object Bypass {
 
     /** Включает дробление ClientHello для этого соединения (только для https). */
     fun apply(c: java.net.HttpURLConnection) { if (c is HttpsURLConnection) c.sslSocketFactory = factory }
+
+    /** Пошаговая проверка связи с хостом: DNS → TCP 443 → TLS → HTTP. Для экрана «Мультиплеер» и лога. */
+    fun diagnose(url: String): String {
+        val host = try { java.net.URL(url).host } catch (_: Throwable) { return "плохой адрес" }
+        val sb = StringBuilder()
+        val ips = try { InetAddress.getAllByName(host).map { it.hostAddress ?: "?" } } catch (t: Throwable) { return "DNS не резолвит $host (${t.javaClass.simpleName})" }
+        sb.append("DNS ok: ").append(ips.take(3).joinToString(", "))
+        val ip = try { InetAddress.getByName(host) } catch (_: Throwable) { return sb.toString() }
+        val t0 = System.currentTimeMillis()
+        val raw = Socket()
+        try { raw.connect(InetSocketAddress(ip, 443), 8000); sb.append(" · TCP ok ${System.currentTimeMillis() - t0} мс") }
+        catch (t: Throwable) { try { raw.close() } catch (_: Throwable) {}; return sb.append(" · TCP 443 не открывается (${t.javaClass.simpleName})").toString() }
+        for (fr in listOf(false, true)) {
+            try {
+                val c = java.net.URL(url + "/").openConnection() as java.net.HttpURLConnection
+                if (fr) apply(c)
+                c.connectTimeout = 8000; c.readTimeout = 8000
+                val code = c.responseCode; c.disconnect()
+                sb.append(" · ").append(if (fr) "TLS+дробление" else "TLS").append(" ok (HTTP ").append(code).append(")")
+            } catch (t: Throwable) {
+                sb.append(" · ").append(if (fr) "TLS+дробление" else "TLS").append(" ✗ ").append(t.javaClass.simpleName)
+            }
+        }
+        try { raw.close() } catch (_: Throwable) {}
+        return sb.toString()
+    }
 }

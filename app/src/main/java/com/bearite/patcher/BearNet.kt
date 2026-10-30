@@ -99,7 +99,11 @@ class BearNet private constructor(ctx: Context) {
             val j = call(base, "/info", null, 6000)
             val info = ServerInfo(j.optString("name", base), j.optString("motd"), j.optInt("rooms"), j.optInt("players"), (System.currentTimeMillis() - t0).toInt())
             main.post { cb(info, "") }
-        } catch (t: Throwable) { main.post { cb(null, t.message ?: "нет связи") } }
+        } catch (t: Throwable) {
+            val why = if (t is RuntimeException && t !is java.io.IOException) (t.message ?: "ошибка") else Bypass.diagnose(base)
+            BLog.i("сеть: сервер $base не отвечает: ${t.javaClass.simpleName} — $why")
+            main.post { cb(null, why) }
+        }
     }
 
     fun rooms(base: String, cb: (List<RoomInfo>?, String) -> Unit) = bg {
