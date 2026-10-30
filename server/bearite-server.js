@@ -21,7 +21,7 @@ const MAX_ROOMS = +process.env.MAX_ROOMS || 50;
 const HARD_MAX = 255;
 const KEEP = 300;           // событий на комнату
 const PLAYER_TTL = 25e3;    // игрок без опроса дольше этого времени выпадает из комнаты
-const EMPTY_TTL = 60e3;     // пустая комната удаляется
+const EMPTY_TTL = 15e3;     // подстраховка: комната без игроков удаляется
 const CHAT_GAP = 500;       // мс между чат-сообщениями одного игрока
 
 const rooms = new Map();    // id -> room
@@ -59,6 +59,7 @@ function dropPlayer(r, cid, why) {
   }
   push(r, { k: 'sys', text: `${p.nick} ${why || 'вышел'}`, cid: '', name: '' });
   r.empty = r.players.size ? 0 : Date.now();
+  if (!r.players.size) { rooms.delete(r.id); wake(r); }   // комната одноразовая: ушёл последний игрок — комнаты нет
 }
 
 setInterval(() => {
