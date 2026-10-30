@@ -28,6 +28,7 @@ class BearUi(private val act: Activity, private val net: BearNet, private val ga
     }
 
     fun render(into: LinearLayout, redraw: () -> Unit) {
+        BLog.i("мини-игры: вкладка «Мультиплеер» открыта, сервер ${BearNet.SERVER_URL}")
         active = true; again = redraw
         into.removeAllViews()
         val wm = ui.matchWrap()

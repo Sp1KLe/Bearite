@@ -77,6 +77,18 @@ class BearNet private constructor(ctx: Context) {
     }
 
     private fun call(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
+        val t0 = System.currentTimeMillis()
+        try {
+            val j = call0(base, path, post, timeoutMs)
+            if (!path.startsWith("/poll")) BLog.i("сеть: $path ок за ${System.currentTimeMillis() - t0} мс (обход ${if (frag) "вкл" else "выкл"})")
+            return j
+        } catch (t: Throwable) {
+            BLog.i("сеть: $path ошибка за ${System.currentTimeMillis() - t0} мс: ${t.javaClass.simpleName} ${t.message}")
+            throw t
+        }
+    }
+
+    private fun call0(base: String, path: String, post: JSONObject?, timeoutMs: Int = 8000): JSONObject {
         val https = base.startsWith("https://")
         if (!https) return callOnce(base, path, post, timeoutMs, false, 25000)
         val first = frag
