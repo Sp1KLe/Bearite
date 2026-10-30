@@ -1,10 +1,12 @@
-# Render Blueprint: New → Blueprint → выбери этот репозиторий. Бесплатный тариф засыпает после 15 минут без запросов.
+# Render Blueprint: New → Blueprint → выбери этот репозиторий → Apply. Карта не нужна.
+# Сервер сам пингует свой адрес (RENDER_EXTERNAL_URL), поэтому бесплатный тариф не засыпает.
 services:
   - type: web
     name: bearite-server
-    runtime: docker
-    dockerfilePath: ./server/Dockerfile
-    dockerContext: ./server
+    runtime: node
+    rootDir: server
+    buildCommand: echo ok
+    startCommand: node bearite-server.js
     plan: free
     healthCheckPath: /
     envVars:

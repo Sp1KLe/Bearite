@@ -172,3 +172,7 @@ http.createServer(async (req, res) => {
 
   json(res, 404, { error: 'нет такого пути' });
 }).listen(PORT, () => console.log(`${NAME}: порт ${PORT}`));
+
+// Бесплатные хостинги (Render) засыпают без входящих запросов: сервер сам заходит на свой публичный адрес раз в 10 минут.
+const SELF = process.env.RENDER_EXTERNAL_URL || process.env.SELF_URL || '';
+if (SELF && typeof fetch === 'function') setInterval(() => { fetch(SELF + '/').catch(() => {}); }, 10 * 60e3).unref();
