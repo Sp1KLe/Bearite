@@ -95,11 +95,22 @@ class BearNet private constructor(ctx: Context) {
 
     fun ping(base: String, cb: (ServerInfo?, String) -> Unit) = bg {
         val t0 = System.currentTimeMillis()
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        // если ответа нет дольше 7 секунд — параллельно показываем, на каком шаге обрывается связь
+        Thread {
+            try { Thread.sleep(7000) } catch (_: InterruptedException) { return@Thread }
+            if (done.get()) return@Thread
+            val d = Bypass.diagnose(base)
+            BLog.i("сеть: $base нет ответа 7 с — $d")
+            if (!done.get()) main.post { if (!done.get()) cb(null, "нет ответа: $d") }
+        }.apply { isDaemon = true }.start()
         try {
             val j = call(base, "/info", null, 6000)
             val info = ServerInfo(j.optString("name", base), j.optString("motd"), j.optInt("rooms"), j.optInt("players"), (System.currentTimeMillis() - t0).toInt())
+            done.set(true)
             main.post { cb(info, "") }
         } catch (t: Throwable) {
+            done.set(true)
             val why = if (t is RuntimeException) (t.message ?: "ошибка") else Bypass.diagnose(base)
             BLog.i("сеть: сервер $base не отвечает: ${t.javaClass.simpleName} — $why")
             main.post { cb(null, why) }
