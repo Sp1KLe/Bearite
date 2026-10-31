@@ -55,11 +55,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     @Volatile private var running = false
     @Volatile private var room = ""
-    private val net = BearNet.of(act)
-    val inRoom: Boolean get() = room.isNotEmpty() || net.connected
+    val inRoom: Boolean get() = room.isNotEmpty()
     var onRoomChanged: (() -> Unit)? = null
     private var after = 0L
-    private var bnShown = ""
 
     private var url: String get() = prefs.getString("url", DEFAULT_URL) ?: DEFAULT_URL; set(v) { prefs.edit().putString("url", v.trim().trimEnd('/')).apply() }
     private val cid: String get() = prefs.getString("cid", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs.edit().putString("cid", it).apply() }
@@ -73,14 +71,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     fun start() {
         build()
-        net.onChat = { who, text, mine -> show(who, text.take(200), mine) }
-        net.onSys = { t -> sys(t) }
-        net.listenState {
-            onRoomChanged?.invoke()
-            updateCount(); if (showPlayers) renderPlayers()
-            if (net.connected && bnShown != net.room) { bnShown = net.room; list.removeAllViews(); sys("Ты в комнате Bearite «${net.roomName}».") }
-            if (!net.connected) bnShown = ""
-        }
         running = true
         Thread { loop() }.apply { isDaemon = true; name = "bearite-chat" }.start()
     }
@@ -242,12 +232,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     /** Число игроков комнаты в заголовке чата и на вкладке. */
     private fun updateCount() {
-        if (net.connected) {
-            val n = net.players.size
-            tabPlayers.text = "Игроки ($n" + (if (net.max > 0) "/${net.max}" else "") + ")"
-            title.text = "Чат · ${net.roomName} · $n " + (if (net.max > 0) "из ${net.max}" else "онлайн")
-            return
-        }
         val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
         if (lines.isEmpty()) { tabPlayers.text = "Игроки"; return }
         val h = lines[0].split('\t')
@@ -271,16 +255,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     /** Список игроков комнаты, как TAB в Minecraft: ник и номер, ты отмечен. Данные пишет мод в maps/_players. */
     private fun renderPlayers() {
-        if (net.connected) {
-            playersBox.removeAllViews()
-            tabPlayers.text = "Игроки (${net.players.size})"
-            playersBox.addView(ui.label("Комната Bearite · онлайн: ${net.players.size}" + (if (net.max > 0) " из ${net.max}" else ""), 13f, GameUi.MUTED, bold = false))
-            for (p in net.players.sortedBy { it.actor }) {
-                val mine = p.cid == net.cid
-                playersBox.addView(ui.label("• ${p.nick}" + (if (p.host) "  ★" else "") + (if (mine) "  (ты)" else ""), 14f, if (mine) 0xFFB9D58A.toInt() else GameUi.CREAM, bold = mine).apply { setPadding(0, dp(3), 0, dp(3)) })
-            }
-            return
-        }
         val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
         playersBox.removeAllViews()
         if (lines.isEmpty()) { playersBox.addView(ui.label("Ты не в игровой комнате.", 13f, GameUi.MUTED, bold = false)); tabPlayers.text = "Игроки"; return }
@@ -349,7 +323,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private fun send() {
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
-        if (net.connected) { input.setText(""); net.sendChat(text.take(200)) { err -> if (err.isNotEmpty()) sys("Сообщение не ушло: $err") }; return }
         val r = room; val u = url
         if (u.isEmpty()) { sys("Сначала укажи сервер (⚙)."); return }
         if (r.isEmpty()) { sys("Ты не в комнате игры — чат пока недоступен."); return }
@@ -397,7 +370,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val seen = HashSet<String>()
         while (running) {
             try {
-                if (net.connected) { Thread.sleep(500); continue }
                 val r = try { roomFile.readText().trim() } catch (_: Throwable) { "" }
                 room = r
                 if (r != shownRoom) {

@@ -69,25 +69,11 @@ class MiniGames(private val act: Activity) {
     @Volatile private var relayGen = 0
     private var relayRoom = ""
 
-    private val net = BearNet.of(act)
-    private class Rp(val pos: Pos, val at: Long, val scene: String)
-    private val remote = HashMap<Int, Rp>()      // позиции игроков комнаты Bearite (приходят с сервера)
-    private var lastPosSend = 0L
-
     private val me: P? get() = players.firstOrNull { it.local }
-    private val isHost: Boolean get() = if (net.connected) net.isHost else players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
+    private val isHost: Boolean get() = players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
     private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
 
-    init {
-        net.onData = { kind, from, data ->
-            if (data != null) {
-                if (kind == "mg") onMessage(data)
-                else if (kind == "pos" && from != null) remote[from.actor] = Rp(Pos(data.optDouble("x").toFloat(), data.optDouble("y").toFloat(), data.optDouble("z").toFloat()), System.currentTimeMillis(), data.optString("s"))
-            }
-            Unit
-        }
-        main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } })
-    }
+    init { main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } }) }
 
     fun stopAll() { relayGen++ }
 
@@ -121,9 +107,9 @@ class MiniGames(private val act: Activity) {
     }
 
     /** Вкладка «Мультиплеер»: сколько игроков сейчас в комнате и лимит для новых комнат. */
-    fun renderMulti(into: LinearLayout, clear: Boolean = true) {
+    fun renderMulti(into: LinearLayout) {
         readPlayers()
-        if (clear) into.removeAllViews()
+        into.removeAllViews()
         into.addView(ui.label(if (roomName.isEmpty()) "Ты не в игровой комнате" else "Комната: $roomName", 16f), ui.matchWrap().apply { topMargin = dp(8) })
         into.addView(ui.label(
             if (roomName.isEmpty()) "Зайди в мультиплеер, чтобы увидеть игроков."
@@ -144,11 +130,6 @@ class MiniGames(private val act: Activity) {
     // ------------------------------------------------------------------ файлы мода
 
     private fun readPlayers() {
-        if (net.connected) {
-            roomName = "bear:" + net.room; maxPlayers = net.max
-            players = net.players.map { P(it.actor, it.nick, it.cid == net.cid) }
-            return
-        }
         try { roomName = File(dir, "_room").readText().trim() } catch (_: Throwable) { roomName = "" }
         val lines = try { File(dir, "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
         if (lines.isEmpty()) { players = emptyList(); return }
@@ -159,34 +140,8 @@ class MiniGames(private val act: Activity) {
         }
     }
 
-    private var curScene = ""
-    /** Свои координаты из мода (maps/_pos): локальный игрок, либо единственный найденный. Заодно запоминает текущую сцену. */
-    private fun ownRaw(): Pos? {
-        try {
-            var only: Pos? = null; var n = 0
-            for (l in File(dir, "_pos").readText().lines()) {
-                val p = l.split('\t')
-                if (p.size == 2 && p[0] == "#") { curScene = p[1]; continue }
-                if (p.size < 6) continue
-                val q = Pos(p[3].toFloatOrNull() ?: continue, p[4].toFloatOrNull() ?: continue, p[5].toFloatOrNull() ?: continue)
-                n++; only = q
-                if (p[2] == "1") return q
-            }
-            if (n == 1) return only
-        } catch (_: Throwable) {}
-        return null
-    }
-
     private fun readPositions(): Map<Int, Pos> {
         val out = HashMap<Int, Pos>()
-        if (net.connected) {
-            // для логики игр: свои координаты — из мода, чужие — с сервера; в арене у всех y сдвинут на OY
-            val own = ownRaw()
-            if (own != null) out[net.myActor] = Pos(own.x, own.y - OY, own.z)
-            val now = System.currentTimeMillis()
-            for ((a, r) in remote) if (a != net.myActor && now - r.at < 3000) out[a] = Pos(r.pos.x, r.pos.y - OY, r.pos.z)
-            return out
-        }
         try {
             for (l in File(dir, "_pos").readText().lines()) {
                 val p = l.split('\t'); if (p.size < 6) continue
@@ -211,7 +166,6 @@ class MiniGames(private val act: Activity) {
     private fun topic(r: String) = "bearite-mg-" + MessageDigest.getInstance("SHA-256").digest(("mgame" + r).toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
 
     private fun post(o: JSONObject) {
-        if (net.connected) { net.sendData("mg", o); return }
         val r = roomName; if (r.isEmpty()) return
         o.put("c", cid)
         Thread {
@@ -226,7 +180,6 @@ class MiniGames(private val act: Activity) {
     }
 
     private fun ensureRelay() {
-        if (net.connected) { if (relayRoom.isNotEmpty()) { relayRoom = ""; relayGen++ }; return }
         if (roomName == relayRoom) return
         relayRoom = roomName; val g = ++relayGen
         if (roomName.isEmpty()) return
@@ -305,24 +258,8 @@ class MiniGames(private val act: Activity) {
 
     private fun tp(t: Triple<Float, Float, Float>) { cmd("tp\t${t.first}\t${t.second}\t${t.third}"); lastTp = System.currentTimeMillis() }
 
-    /** Пока ты в комнате Bearite: шлём свою позицию, рисуем чужих (аватары) — и вне мини-игр тоже. */
-    private fun netPresence(now: Long) {
-        val bn = File(dir, "_bn")
-        if (!net.connected) {
-            if (bn.exists()) { try { bn.delete(); File(dir, "_avatars").delete() } catch (_: Throwable) {}; remote.clear() }
-            return
-        }
-        if (!bn.exists()) try { dir.mkdirs(); bn.writeText("1") } catch (_: Throwable) {}
-        val own = ownRaw()
-        if (own != null && now - lastPosSend >= 250) {
-            lastPosSend = now
-            net.sendData("pos", JSONObject().put("x", own.x.toDouble()).put("y", own.y.toDouble()).put("z", own.z.toDouble()).put("s", curScene))
-        }
-        writeAvatars(now)
-    }
-
     private fun tick() {
-        readPlayers(); ensureRelay(); netPresence(System.currentTimeMillis())
+        readPlayers(); ensureRelay()
         if (phase == "idle") { if (hud.visibility == View.VISIBLE && message.isEmpty()) hud.visibility = View.GONE; return }
         val now = System.currentTimeMillis()
         if (phase == "prep") {
@@ -354,16 +291,6 @@ class MiniGames(private val act: Activity) {
         for ((a, s) in scores.entries.sortedByDescending { it.value }.take(5)) sb.append("\n${nick(a)} — $s")
         hud.text = sb.toString()
         if (!isHost && elapsed > durMs + 15000) finish("Время вышло", false)
-    }
-
-    /** Позиции остальных игроков комнаты для мода: он рисует им аватары (maps/_avatars, мировые координаты). */
-    private fun writeAvatars(now: Long) {
-        val sb = StringBuilder()
-        for ((a, r) in remote) {
-            if (a == net.myActor || now - r.at > 3000) continue
-            sb.append(a).append('\t').append(nick(a).replace('\t', ' ')).append('\t').append(r.pos.x).append('\t').append(r.pos.y).append('\t').append(r.pos.z).append('\t').append(r.scene).append('\n')
-        }
-        try { val t = File(dir, "_avatars.tmp"); t.writeText(sb.toString()); t.renameTo(File(dir, "_avatars")) } catch (_: Throwable) {}
     }
 
     private fun title() = when (game) { "parkour" -> "Паркур-гонка"; "hill" -> "Царь горы"; else -> "Догонялки" }
@@ -420,8 +347,6 @@ class MiniGames(private val act: Activity) {
         hud.text = result.toString(); hud.visibility = View.VISIBLE
         cmd("exit")
         try { File(dir, "_mg").delete() } catch (_: Throwable) {}
-        try { File(dir, "_avatars").delete() } catch (_: Throwable) {}
-        remote.clear()
         main.postDelayed({ if (phase == "idle") { hud.visibility = View.GONE; message = "" } }, 9000)
     }
 

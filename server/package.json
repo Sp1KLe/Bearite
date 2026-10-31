@@ -1,8 +1,0 @@
-{
-  "name": "bearite-server",
-  "version": "1.0.0",
-  "private": true,
-  "main": "bearite-server.js",
-  "scripts": { "start": "node bearite-server.js" },
-  "engines": { "node": ">=18" }
-}

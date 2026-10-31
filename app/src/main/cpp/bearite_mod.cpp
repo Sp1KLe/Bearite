@@ -29,7 +29,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
-#include <set>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -2003,13 +2002,13 @@ void publish_positions(long long now) {
     static long long lastT = 0;
     if (now - lastT < 250) return;
     lastT = now;
-    if (access((g_mapsDir + "/_mg").c_str(), F_OK) != 0 && access((g_mapsDir + "/_bn").c_str(), F_OK) != 0) return;
+    if (access((g_mapsDir + "/_mg").c_str(), F_OK) != 0) return;
     static void *npcT = nullptr, *pvT = nullptr, *pvK = nullptr, *getOwner = nullptr;
     if (!npcT) { npcT = type_of("", "NetworkPlayerController"); pvT = type_of("Photon.Pun", "PhotonView"); pvK = bearite_find_class("Photon.Pun", "PhotonView"); getOwner = pvK ? bearite_il2.class_get_method_from_name(pvK, "get_Owner", 0) : nullptr; }
     if (!npcT) return;
     void* arr = find_objects(npcT);
     uintptr_t n = arr ? arr_len(arr) : 0;
-    std::string out = "#\t" + g_scene + "\n";   // первая строка: текущая сцена
+    std::string out;
     for (uintptr_t i = 0; i < n && i < 64; ++i) {
         void* c = *(void**)arr_elem(arr, sizeof(void*), i);
         if (!c) continue;
@@ -2158,176 +2157,6 @@ uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, c
     return o_join_create_room ? o_join_create_room(name, opts, lobby, friends, mi) : 0;
 }
 
-
-/** Аватары других игроков комнаты Bearite (мини-игры): лаунчер пишет maps/_avatars = «актёр\tник\tx\ty\tz» в мировых координатах.
- *  Каждому актёру делаем капсулу-«медведя» без коллайдера и плавно двигаем к последней позиции. Пока нет maps/_mg — всех убираем. */
-
-/** Игровой объект своего медведя (NetworkPlayerController локального игрока) — шаблон для аватаров. */
-void* find_local_player_go() {
-    static void *npcT = nullptr, *pvT = nullptr, *pvK = nullptr, *getOwner = nullptr;
-    if (!npcT) { npcT = type_of("", "NetworkPlayerController"); pvT = type_of("Photon.Pun", "PhotonView"); pvK = bearite_find_class("Photon.Pun", "PhotonView"); getOwner = pvK ? bearite_il2.class_get_method_from_name(pvK, "get_Owner", 0) : nullptr; }
-    if (!npcT || !F.get_gameobject) return nullptr;
-    void* arr = find_objects(npcT);
-    uintptr_t n = arr ? arr_len(arr) : 0;
-    void* first = nullptr;
-    for (uintptr_t i = 0; i < n && i < 64; ++i) {
-        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
-        if (!c) continue;
-        void* go = inv(F.get_gameobject, c);
-        if (!go) continue;
-        if (!first) first = go;
-        if (pvT && getOwner && F.get_component) {
-            void* a[1] = {pvT};
-            if (void* view = inv(F.get_component, go, a)) if (void* owner = inv(getOwner, view)) {
-                void* pk = obj_class(owner);
-                void* gL = pk ? bearite_il2.class_get_method_from_name(pk, "get_IsLocal", 0) : nullptr;
-                if (gL) if (void* r = inv(gL, owner)) if (*(const uint8_t*)obj_unbox(r)) return go;
-            }
-        }
-    }
-    return first;
-}
-
-/** Копия медведя для аватара: без скриптов, физики, камер и звука (создаётся под выключенным родителем, чтобы ничего не успело запуститься). */
-void* clone_bear() {
-    void* src = find_local_player_go();
-    if (!src) return nullptr;
-    if (!(F.instantiate_parent && F.go_ctor_str && F.set_active && F.set_parent && F.destroy_imm && F.get_comps_children && F.type_mono && goClass_())) return nullptr;
-    void* holder = obj_new(goClass_());
-    bool ok = false;
-    void* na[1] = {bearite_il2.string_new("Bearite/avatar_holder")};
-    inv(F.go_ctor_str, holder, na, &ok);
-    if (!ok) return nullptr;
-    uint8_t off = 0;
-    void* sa[1] = {&off};
-    inv(F.set_active, holder, sa);
-    void* htr = inv(F.go_transform, holder);
-    void* ia[2] = {src, htr};
-    void* cgo = inv(F.instantiate_parent, nullptr, ia);
-    if (!cgo) { void* da[1] = {holder}; inv(F.destroy, nullptr, da); return nullptr; }
-    void* types[6] = {F.type_mono, type_of("UnityEngine", "Rigidbody"), F.type_collider, type_of("UnityEngine", "Camera"), type_of("UnityEngine", "AudioListener"), type_of("UnityEngine", "AudioSource")};
-    int removed = 0;
-    for (void* type : types) {
-        if (!type) continue;
-        uint8_t inc = 1;
-        void* a[2] = {type, &inc};
-        void* comps = inv(F.get_comps_children, cgo, a);
-        if (!comps) continue;
-        uintptr_t cn = arr_len(comps);
-        for (uintptr_t i = 0; i < cn && i < 300; ++i) {
-            void* c = *(void**)arr_elem(comps, sizeof(void*), i);
-            if (!c) continue;
-            void* da[1] = {c};
-            bool dok = false;
-            inv(F.destroy_imm, nullptr, da, &dok);
-            if (dok) ++removed;
-        }
-    }
-    void* ctr = inv(F.go_transform, cgo);
-    void* pa[1] = {nullptr};
-    if (ctr) inv(F.set_parent, ctr, pa);   // отцепляем от выключенного родителя — копия становится активной
-    void* da[1] = {holder};
-    inv(F.destroy, nullptr, da);
-    uint8_t on = 1;
-    void* oa[1] = {&on};
-    inv(F.set_active, cgo, oa);
-    logf_("аватар-медведь: копия игрока создана, убрано компонентов %d", removed);
-    return cgo;
-}
-
-struct Avatar { uintptr_t h = 0; float p[3] = {0, 0, 0}; float t[3] = {0, 0, 0}; int miss = 0; bool init = false; bool show = true; bool bear = false; float yaw = 0; };
-std::map<int, Avatar> g_avatars;
-
-void avatar_kill(Avatar& a) {
-    if (a.h) {
-        if (void* go = target(a.h)) if (F.destroy) { void* x[1] = {go}; inv(F.destroy, nullptr, x); }
-        gch_free(a.h); a.h = 0;
-    }
-}
-
-void avatars_tick(long long now) {
-    static long long lastT = 0;
-    if (now - lastT < 50) return;
-    lastT = now;
-    bool inMg = access((g_mapsDir + "/_mg").c_str(), F_OK) == 0;
-    bool want = inMg || access((g_mapsDir + "/_bn").c_str(), F_OK) == 0;
-    if (!want || !F.create_primitive || !F.go_transform || !F.set_position) {
-        if (!g_avatars.empty()) { for (auto& e : g_avatars) avatar_kill(e.second); g_avatars.clear(); logf_("аватары: убраны"); }
-        return;
-    }
-    static long long lastRead = 0;
-    if (now - lastRead >= 120) {
-        lastRead = now;
-        std::string text;
-        if (FILE* f = fopen((g_mapsDir + "/_avatars").c_str(), "r")) { char b[512]; size_t n; while ((n = fread(b, 1, sizeof b, f)) > 0) text.append(b, n); fclose(f); }
-        std::set<int> seen;
-        size_t st = 0;
-        while (st < text.size()) {
-            size_t e = text.find('\n', st);
-            if (e == std::string::npos) e = text.size();
-            auto parts = split_tab(text.substr(st, e - st));
-            st = e + 1;
-            if (parts.size() < 5) continue;
-            int actor = atoi(parts[0].c_str());
-            Avatar& a = g_avatars[actor];
-            a.t[0] = num(parts[2], 0); a.t[1] = num(parts[3], 0); a.t[2] = num(parts[4], 0);
-            std::string sc = parts.size() > 5 ? parts[5] : "";
-            a.show = inMg || sc.empty() || sc == g_scene;   // в арене мини-игры показываем всех, иначе только из той же сцены
-            a.miss = 0; seen.insert(actor);
-        }
-        for (auto it = g_avatars.begin(); it != g_avatars.end();) {
-            if (!seen.count(it->first) && ++it->second.miss > 25) { avatar_kill(it->second); it = g_avatars.erase(it); } else ++it;
-        }
-    }
-    for (auto& e : g_avatars) {
-        Avatar& a = e.second;
-        if (!a.show) { avatar_kill(a); continue; }
-        void* go = a.h ? target(a.h) : nullptr;
-        if (!go) {
-            a.bear = false;
-            go = clone_bear();
-            if (go) a.bear = true;
-            else {
-                int t = 1;  // запасной вариант — капсула
-                void* x[1] = {&t};
-                go = inv(F.create_primitive, nullptr, x);
-            }
-            if (!go) continue;
-            if (a.h) gch_free(a.h);
-            a.h = gch_new(go, 0);
-            a.init = false;
-            if (F.set_name) { std::string nm = "bearite_avatar_" + std::to_string(e.first); void* b[1] = {bearite_il2.string_new(nm.c_str())}; inv(F.set_name, go, b); }
-            if (!a.bear) {
-                if (F.type_collider && F.get_component && F.collider_enabled) {
-                    void* b[1] = {F.type_collider};
-                    if (void* col = inv(F.get_component, go, b)) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
-                }
-                if (F.set_scale) { V3 sz{0.9f, 0.7f, 0.9f}; void* b[1] = {&sz}; if (void* tr = inv(F.go_transform, go)) inv(F.set_scale, tr, b); }
-                if (F.type_renderer && F.get_component && F.get_material && F.set_color) {
-                    static const unsigned pal[] = {0xB5651D, 0xD98E4A, 0x8C5A2B, 0xC97B84, 0x6FA8DC, 0x93C47D, 0xE6B800, 0x9B72CF};
-                    unsigned c = pal[(unsigned)e.first % 8];
-                    void* b[1] = {F.type_renderer};
-                    void* rend = inv(F.get_component, go, b);
-                    void* mat = rend ? inv(F.get_material, rend) : nullptr;
-                    if (mat) { Col col{((c >> 16) & 255) / 255.f, ((c >> 8) & 255) / 255.f, (c & 255) / 255.f, 1.f}; void* d[1] = {&col}; inv(F.set_color, mat, d); }
-                }
-            }
-            logf_("аватар игрока %d создан", e.first);
-        }
-        float dx = a.t[0] - a.p[0], dy = a.t[1] - a.p[1], dz = a.t[2] - a.p[2];
-        if (!a.init || dx * dx + dy * dy + dz * dz > 36.f) { memcpy(a.p, a.t, sizeof a.p); a.init = true; }
-        else {
-            a.p[0] += dx * 0.35f; a.p[1] += dy * 0.35f; a.p[2] += dz * 0.35f;
-            if (dx * dx + dz * dz > 0.0025f) a.yaw = atan2f(dx, dz) * 57.29578f;   // смотрит в сторону движения
-        }
-        V3 pos{a.p[0], a.p[1] + (a.bear ? 0.f : 0.7f), a.p[2]};
-        void* b[1] = {&pos};
-        void* tr = inv(F.go_transform, go);
-        if (tr) inv(F.set_position, tr, b);
-        if (tr && a.bear && F.set_euler) { V3 r{0.f, a.yaw, 0.f}; void* rb[1] = {&r}; inv(F.set_euler, tr, rb); }
-    }
-}
-
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
@@ -2336,7 +2165,6 @@ void update() {
     reload_maps();
     cmd_poll();
     publish_positions(now);
-    avatars_tick(now);
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
