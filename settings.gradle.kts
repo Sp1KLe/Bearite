@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Bearite"
 include(":app")
+include(":uploader")

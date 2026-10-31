@@ -51,7 +51,7 @@ jobs:
       - name: Build debug APK
         run: |
           set +e
-          gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_build.log
+          gradle :app:assembleDebug :uploader:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             # ошибки компиляции и ресурсов дублируем в аннотации
@@ -78,7 +78,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Bearite-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            uploader/build/outputs/apk/debug/*.apk
 
       # постоянная ссылка: релиз «latest» пересоздаётся при каждой сборке на main, APK всегда один и самый свежий
       - name: Publish latest APK
@@ -87,8 +89,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/*.apk Bearite-debug.apk
+          cp uploader/build/outputs/apk/debug/*.apk Bearite-Mods.apk
           gh release delete latest --cleanup-tag -y || true
-          gh release create latest Bearite-debug.apk --target "$GITHUB_SHA" \
+          gh release create latest Bearite-debug.apk Bearite-Mods.apk --target "$GITHUB_SHA" \
             --title "Bearite: последняя сборка" \
             --notes "Коммит ${GITHUB_SHA::7}. Этот релиз заменяется при каждой сборке. Прямая ссылка: https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/Bearite-debug.apk"
 
