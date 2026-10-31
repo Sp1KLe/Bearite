@@ -13,7 +13,7 @@ import java.util.Locale
 /**
  * Загрузка сохранения .sba с телефона: файл выбирается в проводнике и кладётся в папку сохранений игры.
  * Игра работает внутри лаунчера, поэтому её данные лежат в папках лаунчера (внутренней и в Android/data/.../files).
- * Папку сохранений лаунчер определяет по уже существующим файлам .sba; если сохранений ещё нет, предлагает положить файл в папку данных игры.
+ * Файл копируется в com.bearite.patcher/files под своим именем; прежний файл с таким именем сохраняется рядом как .bak.
  */
 class SaveImport(private val act: AppCompatActivity) {
 
@@ -62,26 +62,10 @@ class SaveImport(private val act: AppCompatActivity) {
         } else choose(name, data)
     }
 
+    /** Сохранение кладётся в папку данных игры: com.bearite.patcher/files (там игра ищет свои .sba). */
     private fun choose(name: String, data: ByteArray) {
-        val have = existing()
-        val fmt = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
-        if (have.isEmpty()) {
-            val target = File(roots().first(), name)
-            AlertDialog.Builder(act).setTitle("Сохранений игры пока нет")
-                .setMessage("Лаунчер ещё не видит папку сохранений. Лучше сначала запусти игру, создай новое сохранение, выйди в меню и повтори загрузку: тогда файл заменит настоящий слот.\\n\\nМожно положить файл сразу в папку данных игры:\\n${target.parent}")
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Положить сюда") { _, _ -> write(target, data) }.show()
-            return
-        }
-        val items = ArrayList<String>(); val targets = ArrayList<File>()
-        for (f in have) {
-            val rel = roots().firstOrNull { f.absolutePath.startsWith(it.absolutePath) }?.let { f.relativeTo(it).path } ?: f.name
-            items.add("Заменить: $rel (${f.length() / 1024} КБ, ${fmt.format(Date(f.lastModified()))})"); targets.add(f)
-        }
-        items.add("Добавить как новый файл «$name»"); targets.add(File(have.first().parentFile, name))
-        AlertDialog.Builder(act).setTitle("Куда загрузить сохранение?")
-            .setItems(items.toTypedArray()) { _, i -> write(targets[i], data) }
-            .setNegativeButton("Отмена", null).show()
+        val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "save.sba" }
+        write(File(act.filesDir, safe), data)
     }
 
     private fun write(target: File, data: ByteArray) {

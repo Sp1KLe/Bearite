@@ -50,6 +50,10 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
 
     private val maps = MapsTab(act, ui, MapStore(act))
     private val expanded = HashSet<String>()
+    private var catalog: List<ModCatalog.Item>? = null
+    private var catalogErr = ""
+    private var catalogBusy = false
+    private val installing = HashSet<String>()
     private var tab = TAB_INSTALLED
     private var filter = 0
     private var query = ""
@@ -132,7 +136,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             }
         })
         searchRow.addView(search, LinearLayout.LayoutParams(0, dp(42), 1f))
-        filterBtn = ui.pill("Фильтр") { pickFilter() }
+        filterBtn = ui.pill("Обновить") { loadCatalog() }
         searchRow.addView(filterBtn, LinearLayout.LayoutParams(dp(112), dp(42)).apply { leftMargin = dp(8) })
         col.addView(searchRow, ui.matchWrap().apply { topMargin = dp(10) })
 
@@ -210,6 +214,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private fun selectTab(t: Int) {
         if (tab == t) return
         tab = t
+        if (t == TAB_ALL && catalog == null && !catalogBusy) loadCatalog()
         refresh()
         list.alpha = 0f
         list.translationY = dp(10).toFloat()
@@ -224,7 +229,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 21, if (on) 0 else GameUi.LINE)
         }
         searchRow.visibility = if (tab == TAB_ALL) View.VISIBLE else View.GONE
-        filterBtn.text = if (filter == 0) "Фильтр" else "Фильтр •"
         footer.text = if (tab == TAB_MAPS) "Карты применяются в игре сразу, как только Bearite их увидит"
         else "Включение модов и нативный код применяются после перезапуска игры"
         renderList()
@@ -254,16 +258,12 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             }
             return
         }
+        if (tab == TAB_ALL) { renderCatalog(); return }
         list.removeAllViews()
         val all = mods.scan()
-        val shown = if (tab == TAB_INSTALLED) all.filter { it.enabled }
-        else all.filter { matchesFilter(it) && matchesQuery(it) }
+        val shown = all   // выключенный мод не пропадает из списка: его карточка просто полупрозрачная
         if (shown.isEmpty()) {
-            val text = when {
-                tab == TAB_INSTALLED -> "Нет включённых модов. Включи их на вкладке «Все моды»."
-                all.isEmpty() -> "Модов пока нет. Установи их в приложении Bearite, вкладка «Моды»."
-                else -> "Ничего не найдено по поиску или фильтру."
-            }
+            val text = "Модов пока нет. Открой вкладку «Все моды» и установи их с сервера."
             list.addView(
                 ui.label(text, 15f, GameUi.MUTED, bold = false).apply {
                     gravity = Gravity.CENTER
@@ -273,6 +273,84 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             return
         }
         for (m in shown) list.addView(card(m), cardLp())
+    }
+
+    // ----------------------------------------------------------------- каталог модов на сервере
+
+    private fun loadCatalog() {
+        if (catalogBusy) return
+        catalogBusy = true; catalogErr = ""
+        if (tab == TAB_ALL) renderList()
+        ModCatalog.fetch { items, err ->
+            catalogBusy = false
+            if (items == null) { catalogErr = err; catalog = null } else catalog = items
+            if (tab == TAB_ALL) renderList()
+        }
+    }
+
+    private fun renderCatalog() {
+        list.removeAllViews()
+        val c = catalog
+        if (c == null) {
+            val text = when {
+                catalogBusy -> "Загружаю каталог модов…"
+                catalogErr.isNotEmpty() -> catalogErr
+                else -> "Каталог ещё не загружен."
+            }
+            list.addView(ui.label(text, 15f, if (catalogErr.isNotEmpty()) GameUi.RUST else GameUi.MUTED, bold = false).apply {
+                gravity = Gravity.CENTER; setPadding(dp(12), dp(40), dp(12), dp(16))
+            })
+            if (!catalogBusy) list.addView(ui.pill("Повторить", primary = true) { loadCatalog() }, ui.matchWrap())
+            return
+        }
+        val inst = mods.scan().associateBy { it.id }
+        val q = query.lowercase(Locale.ROOT)
+        val shown = c.filter { q.isEmpty() || listOf(it.name, it.id, it.author, it.description).any { s -> s.lowercase(Locale.ROOT).contains(q) } }
+        if (shown.isEmpty()) {
+            list.addView(ui.label(if (c.isEmpty()) "На сервере пока нет модов." else "Ничего не найдено.", 15f, GameUi.MUTED, bold = false).apply {
+                gravity = Gravity.CENTER; setPadding(dp(12), dp(40), dp(12), dp(40))
+            })
+            return
+        }
+        for (it in shown) list.addView(catalogCard(it, inst[it.id]), cardLp())
+    }
+
+    private fun catalogCard(it: ModCatalog.Item, have: Mod?): View {
+        val box = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ui.round(GameUi.SURFACE2, 18, GameUi.LINE)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(ui.label(it.name.take(1).uppercase(Locale.ROOT), 22f, 0xFFFFFFFF.toInt()).apply {
+            gravity = Gravity.CENTER; background = ui.round(GameUi.tileColor(it.id), 14)
+        }, LinearLayout.LayoutParams(dp(52), dp(52)))
+        val texts = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(ui.label(it.name, 18f))
+        texts.addView(ui.label("v${it.version}" + (if (it.author.isNotEmpty()) " · ${it.author}" else "") + (if (it.size > 0) " · ${it.size / 1024} КБ" else ""), 12f, GameUi.MUTED, bold = false))
+        head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(10) })
+        val busy = it.id in installing
+        val label = when {
+            busy -> "Ставлю…"
+            have == null -> "Установить"
+            have.version != it.version -> "Обновить"
+            else -> "Установлен"
+        }
+        val actionable = !busy && (have == null || have.version != it.version)
+        head.addView(ui.pill(label, primary = actionable, sizeSp = 13f) { if (actionable) installFromCatalog(it) }, LinearLayout.LayoutParams(dp(112), dp(40)))
+        box.addView(head)
+        if (it.description.isNotBlank()) box.addView(ui.label(it.description, 13f, GameUi.MUTED, bold = false).apply { setPadding(dp(4), dp(8), dp(4), 0) })
+        return box
+    }
+
+    private fun installFromCatalog(it: ModCatalog.Item) {
+        if (!installing.add(it.id)) return
+        renderList()
+        ModCatalog.install(act, mods, it) { err ->
+            installing.remove(it.id)
+            android.widget.Toast.makeText(act, if (err.isEmpty()) "Мод «${it.name}» установлен: включи его на вкладке «Установлено»" else "Не установился: $err", android.widget.Toast.LENGTH_LONG).show()
+            renderList()
+        }
     }
 
     private fun matchesFilter(m: Mod): Boolean = when (filter) {
@@ -300,6 +378,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             orientation = LinearLayout.VERTICAL
             background = ui.round(GameUi.SURFACE2, 18, GameUi.LINE)
             setPadding(dp(10), dp(10), dp(10), dp(10))
+            alpha = if (m.enabled) 1f else 0.45f
         }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(avatar(m), LinearLayout.LayoutParams(dp(52), dp(52)))
