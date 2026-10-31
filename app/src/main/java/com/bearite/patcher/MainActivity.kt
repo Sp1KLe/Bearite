@@ -37,6 +37,11 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) installMod(uri)
     }
 
+    private val saves = SaveImport(this)
+    private val pickSave = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) saves.handle(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BLog.init(this)
@@ -53,6 +58,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
         findViewById<MaterialButton>(R.id.btn_play).setOnClickListener { play() }
+        findViewById<MaterialButton>(R.id.btn_load_save).setOnClickListener { pickSave.launch(arrayOf("*/*")) }
         findViewById<ExtendedFloatingActionButton>(R.id.fab_install).setOnClickListener {
             pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         }
