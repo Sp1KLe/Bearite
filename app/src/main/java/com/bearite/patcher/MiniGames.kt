@@ -74,17 +74,8 @@ class MiniGames(private val act: Activity) {
     private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
 
     init {
-        // Photon Cloud: AppId по умолчанию (можно поменять в поле на вкладке «Мультиплеер»)
-        try {
-            if (!File(dir, "_appid").exists()) { dir.mkdirs(); File(dir, "_appid").writeText(room.getString("appid", DEFAULT_APPID) ?: DEFAULT_APPID) }
-        } catch (_: Throwable) {}
         main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 250) } })
     }
-
-    /** Ник для комнат Photon: тот же, что в чате. */
-    private var nick: String
-        get() = prefs.getString("nick", "") ?: ""
-        set(v) { prefs.edit().putString("nick", v.trim().take(24)).apply() }
 
     fun stopAll() { relayGen++ }
 
@@ -115,66 +106,6 @@ class MiniGames(private val act: Activity) {
         }
         if (phase != "idle" && isHost) into.addView(ui.pill("Остановить игру", danger = true) { hostStop() }, ui.matchWrap().apply { topMargin = dp(10) })
         if (message.isNotEmpty()) into.addView(ui.label(message, 13f, GameUi.RUST, bold = false))
-    }
-
-    /** Вкладка «Мультиплеер»: сколько игроков сейчас в комнате и лимит для новых комнат. */
-    fun renderMulti(into: LinearLayout) {
-        readPlayers()
-        into.removeAllViews()
-        into.addView(ui.label(if (roomName.isEmpty()) "Ты не в игровой комнате" else "Комната: $roomName", 16f), ui.matchWrap().apply { topMargin = dp(8) })
-        into.addView(ui.label(
-            if (roomName.isEmpty()) "Зайди в мультиплеер, чтобы увидеть игроков."
-            else "Подключено: ${players.size}" + (if (maxPlayers > 0) " из $maxPlayers" else " (без лимита)"),
-            14f, GameUi.CREAM, bold = false))
-        for (p in players.sortedBy { it.actor }) into.addView(ui.label("• " + p.nick.ifBlank { "игрок ${p.actor}" } + (if (p.local) "  (ты)" else ""), 14f, if (p.local) GameUi.GREEN else GameUi.CREAM, bold = p.local))
-        // лимит игроков для создаваемых комнат
-        into.addView(ui.label("Лимит игроков в новой комнате", 14f), ui.matchWrap().apply { topMargin = dp(12) })
-        into.addView(ui.row("Игроков", ui.textInput(room.getString("max", "") ?: "", 120, "пусто = 4 как в игре") { v ->
-            val digits = v.filter(Char::isDigit).take(3)
-            room.edit().putString("max", digits).apply()
-            val f = File(dir, "_maxplayers")
-            try { if (digits.isEmpty()) f.delete() else f.writeText(digits) } catch (_: Throwable) {}
-        }), ui.matchWrap().apply { topMargin = dp(4) })
-        // ник: им подписываемся в комнатах Photon (тот же ник, что в чате)
-        into.addView(ui.label("Твой ник", 14f), ui.matchWrap().apply { topMargin = dp(12) })
-        into.addView(ui.textInput(nick, 300, "как тебя звать в игре") { v ->
-            nick = v
-            if (v.isNotBlank()) cmd("nick\t" + v.trim().replace('\t', ' ').take(24))
-        }, ui.matchWrap().apply { topMargin = dp(4) })
-        // две кнопки, как в игре: создать новую комнату и присоединиться по коду
-        into.addView(ui.pill("Создать новую комнату", primary = true, sizeSp = 15f) {
-            if (nick.isBlank()) { message = "Сначала впиши ник."; renderMulti(into); return@pill }
-            val c = (100000..999999).random().toString()
-            room.edit().putString("code", c).apply()
-            val max = room.getString("max", "")?.toIntOrNull() ?: 0
-            cmd("nick\t" + nick.trim().replace('\t', ' ').take(24))
-            cmd("create\t$c\t$max")
-            message = "Комната создаётся. Код для друзей: $c"
-            renderMulti(into)
-        }, ui.matchWrap().apply { topMargin = dp(10) })
-        into.addView(ui.label("Создаёт комнату, код покажем здесь. Друзья входят по этому коду.", 12f, GameUi.MUTED, bold = false))
-        into.addView(ui.textInput(room.getString("code", "") ?: "", 300, "код комнаты (6 цифр)") { v -> room.edit().putString("code", v.filter(Char::isDigit).take(12)).apply() }, ui.matchWrap().apply { topMargin = dp(10) })
-        into.addView(ui.pill("Присоединиться к комнате") {
-            val c = (room.getString("code", "") ?: "").trim()
-            if (nick.isBlank()) { message = "Сначала впиши ник."; renderMulti(into); return@pill }
-            if (c.isEmpty()) { message = "Впиши код комнаты."; renderMulti(into); return@pill }
-            cmd("nick\t" + nick.trim().replace('\t', ' ').take(24))
-            cmd("join\t$c")
-            message = "Вхожу в комнату $c…"
-            renderMulti(into)
-        }, ui.matchWrap().apply { topMargin = dp(6) })
-        if (message.isNotEmpty()) into.addView(ui.label(message, 13f, GameUi.RUST, bold = false))
-
-        // свой AppId Photon Cloud: мод подставит его при подключении (после перезапуска игры)
-        into.addView(ui.label("AppId Photon Cloud (свой)", 14f), ui.matchWrap().apply { topMargin = dp(12) })
-        into.addView(ui.textInput(room.getString("appid", DEFAULT_APPID) ?: DEFAULT_APPID, 300, "вставь App ID из dashboard.photonengine.com") { v ->
-            val t = v.trim()
-            room.edit().putString("appid", t).apply()
-            val f = File(dir, "_appid")
-            try { if (t.isEmpty()) f.delete() else f.writeText(t) } catch (_: Throwable) {}
-        }, ui.matchWrap().apply { topMargin = dp(4) })
-        into.addView(ui.label("Применяется после перезапуска игры. Пусто — игра подключается к своему серверу, как раньше.", 12f, GameUi.MUTED, bold = false))
-        into.addView(ui.label("Сервер Photon игры не разрешает больше 4 игроков в комнате, это ограничение не обойти. Здесь можно только уменьшить лимит (1–3); пусто или 4 и больше — как в игре.", 12f, GameUi.MUTED, bold = false))
     }
 
     // ------------------------------------------------------------------ файлы мода
@@ -400,8 +331,5 @@ class MiniGames(private val act: Activity) {
         main.postDelayed({ if (phase == "idle") { hud.visibility = View.GONE; message = "" } }, 9000)
     }
 
-    companion object {
-        const val OY = 1000f
-        const val DEFAULT_APPID = "ae18accd-8a43-479c-8000-c2eab1aeb36e"
-    }
+    companion object { const val OY = 1000f }
 }

@@ -2041,7 +2041,6 @@ void publish_positions(long long now) {
 
 /** Команды лаунчера (maps/_cmd): «enter\tid» — войти в мир-арену в текущей сцене, «exit», «tp\tx\ty\tz» — в координатах активного мира. */
 
-char* photon_field_ptr(void* obj, const char* name, std::string* typeOut = nullptr);
 /** Команды из лаунчера: «nick\tник», «create\tкод\tлимит», «join\tкод». Выполняются в потоке Unity (как и остальной мод). */
 void photon_nick(const std::string& nick) {
     void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
@@ -2050,39 +2049,6 @@ void photon_nick(const std::string& nick) {
     void* a[1] = {bearite_il2.string_new(nick.c_str())};
     inv(m, nullptr, a);
     logf_("команда: ник в Photon «%s»", nick.c_str());
-}
-
-void photon_create_or_join(const std::string& code, int maxPlayers) {
-    void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
-    void* roK = bearite_find_class("Photon.Realtime", "RoomOptions");
-    if (!pnK || !roK) { logf_("команда: нет PhotonNetwork или RoomOptions"); return; }
-    void* opts = obj_new(roK);
-    if (!opts) { logf_("команда: RoomOptions не создался"); return; }
-    std::string tn;
-    if (char* p = photon_field_ptr(opts, "IsVisible", &tn)) *(uint8_t*)p = 1;
-    if (char* p = photon_field_ptr(opts, "IsOpen", &tn))    *(uint8_t*)p = 1;
-    if (maxPlayers > 0) {
-        if (char* p = photon_field_ptr(opts, "MaxPlayers", &tn)) {
-            if (tn == "System.Byte" || tn == "System.SByte") *(uint8_t*)p = (uint8_t)maxPlayers;
-            else if (tn == "System.Int32") *(int32_t*)p = maxPlayers;
-        }
-    }
-    void* m = bearite_il2.class_get_method_from_name(pnK, "JoinOrCreateRoom", 4);
-    if (!m) { logf_("команда: нет PhotonNetwork.JoinOrCreateRoom"); return; }
-    void* a[4] = {bearite_il2.string_new(code.c_str()), opts, nullptr, nullptr};
-    bool ok = false;
-    inv(m, nullptr, a, &ok);
-    logf_("команда: создать/войти в комнату «%s», лимит %d — %s", code.c_str(), maxPlayers, ok ? "отправлено" : "не отправлено");
-}
-
-void photon_join(const std::string& code) {
-    void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
-    void* m = pnK ? bearite_il2.class_get_method_from_name(pnK, "JoinRoom", 1) : nullptr;
-    if (!m) { logf_("команда: нет PhotonNetwork.JoinRoom"); return; }
-    void* a[1] = {bearite_il2.string_new(code.c_str())};
-    bool ok = false;
-    inv(m, nullptr, a, &ok);
-    logf_("команда: войти в комнату «%s» — %s", code.c_str(), ok ? "отправлено" : "не отправлено");
 }
 
 void cmd_poll() {
@@ -2103,8 +2069,6 @@ void cmd_poll() {
         st = e + 1;
         if (parts.empty()) continue;
         if (parts[0] == "nick" && parts.size() >= 2) { photon_nick(parts[1]); continue; }
-        if (parts[0] == "create" && parts.size() >= 2) { photon_create_or_join(parts[1], parts.size() >= 3 ? atoi(parts[2].c_str()) : 0); continue; }
-        if (parts[0] == "join" && parts.size() >= 2) { photon_join(parts[1]); continue; }
         if (parts[0] == "enter" && parts.size() >= 2) {
             if (const MapSpec* t = find_spec(parts[1])) {
                 g_inPlace = true;
@@ -2128,72 +2092,16 @@ void cmd_poll() {
 }
 
 
-// ---------------------------------------------------------------- Photon Cloud: свой AppId (maps/_appid)
-/** Поле объекта по имени (через il2cpp_class_get_field_from_name): указатель на данные поля или nullptr. */
-char* photon_field_ptr(void* obj, const char* name, std::string* typeOut) {
-    static void *fieldFn = nullptr, *offFn = nullptr, *ftypeFn = nullptr, *tnameFn = nullptr;
-    if (!fieldFn) {
-        fieldFn = A->il2cpp_symbol("il2cpp_class_get_field_from_name");
-        offFn = A->il2cpp_symbol("il2cpp_field_get_offset");
-        ftypeFn = A->il2cpp_symbol("il2cpp_field_get_type");
-        tnameFn = A->il2cpp_symbol("il2cpp_type_get_name");
-    }
-    if (!obj || !fieldFn || !offFn) return nullptr;
-    void* k = obj_class(obj);
-    if (!k) return nullptr;
-    void* fl = reinterpret_cast<void* (*)(void*, const char*)>(fieldFn)(k, name);
-    if (!fl) return nullptr;
-    int off = reinterpret_cast<int (*)(void*)>(offFn)(fl);
-    if (typeOut && ftypeFn && tnameFn) if (void* ft = reinterpret_cast<void* (*)(void*)>(ftypeFn)(fl)) { const char* c = reinterpret_cast<const char* (*)(void*)>(tnameFn)(ft); if (c) *typeOut = c; }
-    return (char*)obj + off;
-}
-
-/** Значение статического поля класса (il2cpp_field_static_get_value) или nullptr. */
-void* photon_static_field(void* klass, const char* name) {
-    static void *fieldFn = nullptr, *sget = nullptr;
-    if (!fieldFn) { fieldFn = A->il2cpp_symbol("il2cpp_class_get_field_from_name"); sget = A->il2cpp_symbol("il2cpp_field_static_get_value"); }
-    if (!klass || !fieldFn || !sget) return nullptr;
-    void* fl = reinterpret_cast<void* (*)(void*, const char*)>(fieldFn)(klass, name);
-    if (!fl) return nullptr;
-    void* out = nullptr;
-    reinterpret_cast<int (*)(void*, void*)>(sget)(fl, &out);
-    return out;
-}
-
-/** Подменяет AppIdRealtime в настройках Photon на id из maps/_appid. Возвращает true, если поле записано. */
-bool apply_photon_appid() {
-    std::string id;
-    if (FILE* f = fopen((g_mapsDir + "/_appid").c_str(), "r")) { char b[96] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); id = b; }
-    size_t a = id.find_first_not_of(" \t\r\n"), z = id.find_last_not_of(" \t\r\n");
-    if (a == std::string::npos) return false;
-    id = id.substr(a, z - a + 1);
-    if (id.size() < 8 || id.size() > 80) { logf_("Photon: в _appid странная строка, не трогаю"); return false; }
-
-    void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
-    if (!pnK) { logf_("Photon: класса PhotonNetwork нет"); return false; }
-    void* settings = nullptr;
-    if (void* getS = bearite_il2.class_get_method_from_name(pnK, "get_PhotonServerSettings", 0)) settings = inv(getS, nullptr);
-    if (!settings) settings = photon_static_field(pnK, "PhotonServerSettings");
-    if (!settings) { logf_("Photon: настройки PhotonServerSettings ещё не загружены, пропускаю подмену"); return false; }
-
-    char* appSettingsPtr = nullptr;
-    std::string tn;
-    appSettingsPtr = photon_field_ptr(settings, "AppSettings", &tn);
-    if (!appSettingsPtr) { logf_("Photon: в PhotonServerSettings нет поля AppSettings"); return false; }
-    void* appSettings = *(void**)appSettingsPtr;
-    if (!appSettings) { logf_("Photon: AppSettings пустые"); return false; }
-
-    char* idPtr = photon_field_ptr(appSettings, "AppIdRealtime", &tn);
-    if (!idPtr) { logf_("Photon: в AppSettings нет поля AppIdRealtime"); return false; }
-    void* old = *(void**)idPtr;
-    logf_("Photon: был AppIdRealtime «%s», ставлю «%s»", old ? utf8(old).c_str() : "(пусто)", id.c_str());
-    *(void**)idPtr = bearite_il2.string_new(id.c_str());
-    return true;
-}
-
+// ---------------------------------------------------------------- Photon: ник с главной страницы
 uint8_t (*o_connect_settings)(const void*) = nullptr;
 uint8_t h_connect_settings(const void* mi) {
-    try { apply_photon_appid(); } catch (...) { logf_("Photon: подмена AppId упала, играю со стандартным"); }
+    // ник, который игрок задал на главной странице лаунчера (maps/_nick); без файла игра работает как обычно
+    try {
+        std::string nick;
+        if (FILE* f = fopen((g_mapsDir + "/_nick").c_str(), "r")) { char b[64] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); nick = b; }
+        while (!nick.empty() && (nick.back() == '\n' || nick.back() == '\r' || nick.back() == ' ')) nick.pop_back();
+        if (!nick.empty()) photon_nick(nick);
+    } catch (...) {}
     return o_connect_settings ? o_connect_settings(mi) : 0;
 }
 
@@ -2204,7 +2112,7 @@ bool set_room_max(void* opts) {
     if (v.empty() || !opts) return false;
     int mx = atoi(v.c_str());
     if (mx <= 0) return false;   // 0 или пусто — лимит игры
-    if (mx > 255) mx = 255;
+    if (mx > 4) mx = 4;          // игра разрешает не больше 4 (иначе «Max Players … limit:4»)
     void* k = obj_class(opts);
     static void *fieldFn = nullptr, *offFn = nullptr, *ftypeFn = nullptr, *tnameFn = nullptr;
     if (!fieldFn) {
@@ -2238,7 +2146,7 @@ int read_room_limit() {
     int mx = atoi(v.c_str());
     // сервер Photon игры не принимает комнаты больше 4 игроков («Max Players Peer Room value is too big, limit:4»):
     // выше лимита, 0 и мусор не трогаем, переопределяем только 1..3
-    return mx <= 0 ? -1 : (mx > 255 ? 255 : mx);
+    return mx <= 0 ? -1 : (mx > 4 ? 4 : mx);
 }
 void (*o_ro_max_b)(void*, uint32_t, const void*) = nullptr;
 void h_ro_max_b(void* self, uint32_t v, const void* mi) {

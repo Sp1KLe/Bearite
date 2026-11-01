@@ -59,6 +59,17 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<MaterialButton>(R.id.btn_play).setOnClickListener { play() }
         findViewById<MaterialButton>(R.id.btn_load_save).setOnClickListener { pickSave.launch(arrayOf("*/*")) }
+        // ник для мультиплеера: тот же, что в чате (prefs «chat», ключ «nick»)
+        val nickField = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edit_nick)
+        val chatPrefs = getSharedPreferences("chat", Context.MODE_PRIVATE)
+        nickField.setText(chatPrefs.getString("nick", "") ?: "")
+        nickField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                chatPrefs.edit().putString("nick", e?.toString()?.trim()?.take(24) ?: "").apply()
+            }
+        })
         findViewById<ExtendedFloatingActionButton>(R.id.fab_install).setOnClickListener {
             pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         }
@@ -189,6 +200,12 @@ class MainActivity : AppCompatActivity() {
         val game = Game.find(packageManager) ?: return
         BLog.i("запуск из лаунчера, пакет ${game.pkg}")
         mods.writeConfig()
+        // ник с главной страницы: мод читает его из maps/_nick и ставит перед подключением к Photon
+        try {
+            val nick = getSharedPreferences("chat", Context.MODE_PRIVATE).getString("nick", "")?.trim().orEmpty()
+            val dir = File(filesDir, "maps").also { it.mkdirs() }
+            if (nick.isEmpty()) File(dir, "_nick").delete() else File(dir, "_nick").writeText(nick)
+        } catch (_: Throwable) {}
         startActivity(
             Intent(this, GameActivity::class.java).putExtra(GameActivity.EXTRA_PKG, game.pkg)
         )
