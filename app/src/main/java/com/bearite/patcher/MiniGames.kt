@@ -28,7 +28,7 @@ import java.security.MessageDigest
  */
 class MiniGames(private val act: Activity) {
     private val ui = GameUi(act)
-    private val d = act.resources.displayMetrics.density
+    private val d = UiScale.density(act)
     private fun dp(v: Int) = (v * d).toInt()
     private val main = Handler(Looper.getMainLooper())
     private val dir = File(act.filesDir, "maps")

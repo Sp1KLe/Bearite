@@ -16,7 +16,7 @@ import android.widget.TextView
  * (те же, что на вкладке «Установлено»), нативный мод читает их при каждом обращении.
  */
 class CheatOverlay(private val act: Activity, private val parent: FrameLayout) {
-    private val d = act.resources.displayMetrics.density
+    private val d = UiScale.density(act)
     private fun dp(v: Int) = (v * d).toInt()
     private val ui = GameUi(act)
     private val mods = ModManager(act)

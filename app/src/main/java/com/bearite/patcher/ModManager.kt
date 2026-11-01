@@ -79,6 +79,7 @@ class ModManager(private val ctx: Context) {
         Setting("coin_mult", "int", "Монеты за сбор ×", "Сколько монет даёт каждая собранная монета (до 10)", 1L, 1.0, 10.0, emptyList(), "slider"),
         Setting("open_gates", "bool", "Открыть все ворота уровней", "Ворота, которые открываются медведями, считаются открытыми", false, null, null, emptyList()),
         Setting("cosmetics", "bool", "Открыть все косметики", "Косметика считается открытой на максимальном уровне", false, null, null, emptyList()),
+        Setting("ui_scale", "float", "Размер интерфейса мода", "Кнопки, панели и текст поверх игры. 1 — обычный размер", 1.0, 0.7, 1.6, emptyList(), "slider"),
     )
 
     private fun builtinMod(): Mod {

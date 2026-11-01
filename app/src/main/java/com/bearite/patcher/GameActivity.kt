@@ -159,7 +159,7 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
-        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * resources.displayMetrics.density).toInt(); rightMargin = (12 * resources.displayMetrics.density).toInt() })
+        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * UiScale.density(this)).toInt(); rightMargin = (12 * UiScale.density(this)).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         cheats = CheatOverlay(this, root).also { it.start() }
         setContentView(root)
@@ -241,10 +241,10 @@ class GameActivity : Activity() {
 
     /** Кнопка «Моды» в стиле кнопок игры: видна на паузе (или пока состояние паузы неизвестно). */
     private fun menuButton(): View {
-        val d = resources.displayMetrics.density
+        val d = UiScale.density(this)
         val b = TextView(this)
         b.text = "Меню"
-        b.textSize = 20f
+        b.textSize = 20f * UiScale.factor(this)
         b.typeface = Typeface.DEFAULT_BOLD
         b.setTextColor(GameUi.ON_CREAM)
         b.gravity = Gravity.CENTER

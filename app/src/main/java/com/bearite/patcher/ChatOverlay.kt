@@ -30,7 +30,7 @@ import java.net.URLEncoder
  * имя комнаты Photon мод кладёт в maps/_room. Не в комнате — чат молчит.
  */
 class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
-    private val d = act.resources.displayMetrics.density
+    private val d = UiScale.density(act)
     private fun dp(v: Int) = (v * d).toInt()
     private val prefs = act.getSharedPreferences("chat", Context.MODE_PRIVATE)
     private val roomFile = File(File(act.filesDir, "maps"), "_room")

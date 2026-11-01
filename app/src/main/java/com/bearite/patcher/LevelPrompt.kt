@@ -68,7 +68,7 @@ class LevelPrompt(private val act: Activity) {
     }
 
     private fun show(id: String, name: String, cover: String, desc: String) {
-        val d = act.resources.displayMetrics.density
+        val d = UiScale.density(act)
         fun dp(v: Int) = (v * d).toInt()
         val purple = 0xFF6E6BB8.toInt()
 

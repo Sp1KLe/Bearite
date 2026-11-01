@@ -17,7 +17,7 @@ import java.util.Locale
  * подхватывает новое значение сразу. Кнопки есть только у включённых модов и скрыты на паузе.
  */
 class GameHud(private val act: Activity, mods: ModManager) {
-    private val d = act.resources.displayMetrics.density
+    private val d = UiScale.density(act)
     private fun dp(v: Int) = (v * d).toInt()
 
     /** Прозрачный слой на весь экран: касания мимо кнопок уходят в игру. */

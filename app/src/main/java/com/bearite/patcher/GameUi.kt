@@ -24,12 +24,12 @@ import java.util.Locale
  * Палитра та же, что в лаунчере: кофейный фон, сливочный текст, карамель и терракота.
  */
 class GameUi(val act: Activity) {
-    private val d = act.resources.displayMetrics.density
+    private val d = UiScale.density(act)
     fun dp(v: Int) = (v * d).toInt()
 
     fun label(text: String, sizeSp: Float, color: Int = CREAM, bold: Boolean = true) = TextView(act).apply {
         this.text = text
-        textSize = sizeSp
+        textSize = sizeSp * UiScale.factor(act)
         setTextColor(color)
         typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
     }
