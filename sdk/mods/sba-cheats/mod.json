@@ -1,0 +1,18 @@
+{
+  "id": "sba-cheats",
+  "name": "Читы",
+  "version": "1.0",
+  "author": "Bearite",
+  "description": "Бессмертие, прыжок в воздухе, бесконечные монеты и жетоны, открытые эмоции и режимы. Работает только в одиночной игре и не трогает покупки.",
+  "libs": ["libs/arm64-v8a/libsbacheats.so"],
+  "settings": [
+    { "id": "god", "type": "bool", "name": "Бессмертие", "description": "Урон не убивает медведя", "default": false },
+    { "id": "air_jump", "type": "bool", "name": "Прыжок в воздухе", "description": "Можно прыгать и ходить, будто стоишь на земле", "default": false },
+    { "id": "coins", "type": "bool", "name": "Бесконечные монеты", "description": "Баланс монет и жетонов не уменьшается, в магазине показывается максимум", "default": false },
+    { "id": "unlock", "type": "bool", "name": "Открыть эмоции и режимы", "description": "Эмоции, лесные и бойцовские режимы считаются открытыми", "default": false }
+  ],
+  "hud": [
+    { "label": "Бог", "setting": "god", "action": "toggle", "pos": "right" },
+    { "label": "Прыжок", "setting": "air_jump", "action": "toggle", "pos": "right" }
+  ]
+}
