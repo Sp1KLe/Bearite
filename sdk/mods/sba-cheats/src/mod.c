@@ -12,6 +12,7 @@ static const char* g_id = "sba-cheats";
 
 static void (*o_damage)(void* self, int type, float x, float y, float z, const void* mi);
 static uint8_t (*o_is_grounded)(void* self, const void* mi);
+static uint8_t (*o_has_any_ground)(void* self, const void* mi);
 static uint8_t (*o_emote_unlocked)(void* self, int emote, const void* mi);
 static uint8_t (*o_moles_unlocked)(void* self, const void* mi);
 static uint8_t (*o_fighter_unlocked)(void* self, int fighter, const void* mi);
@@ -32,6 +33,10 @@ static void h_damage(void* self, int type, float x, float y, float z, const void
 static uint8_t h_is_grounded(void* self, const void* mi) {
     if (on("air_jump")) return 1;
     return o_is_grounded(self, mi);
+}
+static uint8_t h_has_any_ground(void* self, const void* mi) {
+    if (on("air_jump")) return 1;
+    return o_has_any_ground(self, mi);
 }
 
 /* Открытые эмоции и режимы: проверки открытия возвращают «да» */
@@ -75,10 +80,10 @@ void bearite_mod_init(const BeariteApi* api, const char* mod_id) {
         api->log(g_id, "Читы: не найдены функции IL2CPP, мод не работает");
         return;
     }
-    const char* P = "PlayerControllerBase";  /* DamagePlayer есть только у PlayerBearController, см. лог */
-    const char* S = "SaveGame";
+        const char* S = "SaveGame";
     bearite_hook_method(api, g_id, "", "PlayerBearController", "DamagePlayer", 2, (void*)h_damage, (void**)&o_damage);
-    bearite_hook_method(api, g_id, "", P, "IsGrounded", 0, (void*)h_is_grounded, (void**)&o_is_grounded);
+    bearite_hook_method(api, g_id, "", "PlayerBearController", "IsGrounded", 0, (void*)h_is_grounded, (void**)&o_is_grounded);
+    bearite_hook_method(api, g_id, "", "PlayerBearController", "HasAnyGround", 0, (void*)h_has_any_ground, (void**)&o_has_any_ground);
     bearite_hook_method(api, g_id, "", S, "IsEmoteUnlocked", 1, (void*)h_emote_unlocked, (void**)&o_emote_unlocked);
     bearite_hook_method(api, g_id, "", S, "AreMolesUnlocked", 0, (void*)h_moles_unlocked, (void**)&o_moles_unlocked);
     bearite_hook_method(api, g_id, "", S, "IsFighterUnlocked", 1, (void*)h_fighter_unlocked, (void**)&o_fighter_unlocked);
