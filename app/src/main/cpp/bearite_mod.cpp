@@ -2478,6 +2478,52 @@ int hook_time(const char* name, void* repl, void** orig) {
 
 }  // namespace
 
+// ---- настройки встроенного мода (вкладка «Установлено»): размер медведя, монеты, ворота, косметика ----
+static void (*o_bs_update)(void* self, const void* mi) = nullptr;
+static uint8_t (*o_bs_gate)(void* self, void* level, const void* mi) = nullptr;
+static uint8_t (*o_bs_cos)(void* self, void* cosmetic, const void* mi) = nullptr;
+static uint8_t (*o_bs_cos_max)(void* self, void* cosmetic, const void* mi) = nullptr;
+static void (*o_bs_add_coins)(void* self, int amount, const void* mi) = nullptr;
+static bool g_bsSized = false;
+
+/** Размер медведя: масштаб корневого объекта игрока. 1 — обычный, при возврате к 1 масштаб сбрасывается. */
+static void bs_apply_size(void* self) {
+    double s = A ? A->get_float(ID, "size", 1.0) : 1.0;
+    if (s < 0.05) s = 1.0;
+    bool want = std::fabs(s - 1.0) > 1e-3;
+    if (!want && !g_bsSized) return;
+    if (!self || !F.get_transform || !F.set_scale) return;
+    void* tr = inv(F.get_transform, self);
+    if (!tr) return;
+    float v[3] = {(float)s, (float)s, (float)s};
+    void* a[1] = {v};
+    inv(F.set_scale, tr, a);
+    g_bsSized = want;
+}
+static void h_bs_update(void* self, const void* mi) {
+    o_bs_update(self, mi);
+    bs_apply_size(self);
+}
+static uint8_t h_bs_gate(void* self, void* level, const void* mi) {
+    if (A && A->get_bool(ID, "open_gates", 0)) return 1;
+    return o_bs_gate(self, level, mi);
+}
+static uint8_t h_bs_cos(void* self, void* cosmetic, const void* mi) {
+    if (A && A->get_bool(ID, "cosmetics", 0)) return 1;
+    return o_bs_cos(self, cosmetic, mi);
+}
+static uint8_t h_bs_cos_max(void* self, void* cosmetic, const void* mi) {
+    if (A && A->get_bool(ID, "cosmetics", 0)) return 1;
+    return o_bs_cos_max(self, cosmetic, mi);
+}
+static void h_bs_add_coins(void* self, int amount, const void* mi) {
+    long long m = A ? A->get_int(ID, "coin_mult", 1) : 1;
+    if (m < 1) m = 1;
+    if (m > 10) m = 10;
+    if (amount > 0 && m > 1) amount = (int)(amount * m);
+    o_bs_add_coins(self, amount, mi);
+}
+
 extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const BeariteApi* api, const char* mod_id) {
     A = api;
     ID = mod_id;
@@ -2558,6 +2604,14 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     dump_class("Photon.Realtime", "AppSettings");
     dump_class("Photon.Realtime", "RoomOptions");
     dump_class("Photon.Realtime", "Room");
+    {
+        int r1 = bearite_hook_method(A, ID, "", "PlayerBearController", "Update", 0, (void*)h_bs_update, (void**)&o_bs_update);
+        int r2 = bearite_hook_method(A, ID, "", "SaveGame", "IsBearGateOpened", 1, (void*)h_bs_gate, (void**)&o_bs_gate);
+        int r3 = bearite_hook_method(A, ID, "", "SaveGame", "IsCosmeticUnlocked", 1, (void*)h_bs_cos, (void**)&o_bs_cos);
+        int r4 = bearite_hook_method(A, ID, "", "SaveGame", "IsCosmeticMaxLevelUnlocked", 1, (void*)h_bs_cos_max, (void**)&o_bs_cos_max);
+        int r5 = bearite_hook_method(A, ID, "", "SaveGame", "AddTotalCoinCount", 1, (void*)h_bs_add_coins, (void**)&o_bs_add_coins);
+        logf_("настройки мода: размер=%d ворота=%d косметика=%d монеты=%d", r1 == 0, r2 == 0, r3 == 0 && r4 == 0, r5 == 0);
+    }
     hook_max_setter("RoomOptions");
     logf_("движок карт: хуков кадра %d, карты читаются из %s", hooks, g_mapsDir.c_str());
     if (hooks == 0) {

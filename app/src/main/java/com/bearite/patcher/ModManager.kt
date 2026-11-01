@@ -73,6 +73,14 @@ class ModManager(private val ctx: Context) {
      * Встроенный мод Bearite: его библиотека libbearite_mod.so собирается вместе с лаунчером,
      * поэтому он есть сразу после установки (как встроенный мод в Geode) и включён по умолчанию.
      */
+    /** Настройки встроенного мода: пишутся в settings.txt и читаются нативной частью через API. */
+    private val builtinSettings: List<Setting> = listOf(
+        Setting("size", "float", "Размер медведя", "1 — обычный размер. Меняется у твоего медведя на любой карте и в мини-играх", 1.0, 0.3, 3.0, emptyList(), "slider"),
+        Setting("coin_mult", "int", "Монеты за сбор ×", "Сколько монет даёт каждая собранная монета (до 10)", 1L, 1.0, 10.0, emptyList(), "slider"),
+        Setting("open_gates", "bool", "Открыть все ворота уровней", "Ворота, которые открываются медведями, считаются открытыми", false, null, null, emptyList()),
+        Setting("cosmetics", "bool", "Открыть все косметики", "Косметика считается открытой на максимальном уровне", false, null, null, emptyList()),
+    )
+
     private fun builtinMod(): Mod {
         val dir = File(ctx.filesDir, "builtin/$BUILTIN_ID").also { it.mkdirs() }
         val icon = File(dir, "icon.png")
@@ -99,7 +107,7 @@ class ModManager(private val ctx: Context) {
             dir = dir,
             bundles = emptyList(),
             libs = if (lib.isFile) listOf(lib) else emptyList(),
-            settings = emptyList(),
+            settings = builtinSettings,
             enabled = prefs.getBoolean("enabled_$BUILTIN_ID", true),
             icon = icon.takeIf { it.isFile },
             builtin = true,
