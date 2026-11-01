@@ -183,7 +183,8 @@ void scan_classes() {
     static const char* deep[] = {"PauseMenuManager", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger",
                                   "PlayerHealth", "Health", "PlayerMovement", "PlayerController", "CharacterStats", "PlayerStats", "EmoteManager", "EmotesUI", "EmoteButton",
                                   "GameModes", "ModesUI", "GameModeManager", "SaveManager", "SaveData", "PlayerData", "ProgressManager", "UnlockManager", "UnlocksUI", "ShopUI", "CameraController", "ThirdPersonCamera", "KinematicCharacterMotor",
-                                  "PlayerBearController", "EmoteManager", "BearEmoteController", "EmoteBehaviour", "PlayerShickaController", "PlayerSoundController", "CameraManager", "HubUnlockCinematic", "EmoteChest", "PhotoModeManager"};
+                                  "PlayerBearController", "EmoteManager", "BearEmoteController", "EmoteBehaviour", "PlayerShickaController", "PlayerSoundController", "CameraManager", "HubUnlockCinematic", "EmoteChest", "PhotoModeManager",
+                                  "SaveGame", "SaveFile", "PlayerControllerBase", "CoinsManagerModule", "HiveSavedState", "GameManager"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
