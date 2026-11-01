@@ -182,7 +182,8 @@ void scan_classes() {
                                   "jump", "move", "motor", "kinematic", "character", "control", "input", "gravity", "physics", "camera", "mode", "gameplay", "cheat"};
     static const char* deep[] = {"PauseMenuManager", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger",
                                   "PlayerHealth", "Health", "PlayerMovement", "PlayerController", "CharacterStats", "PlayerStats", "EmoteManager", "EmotesUI", "EmoteButton",
-                                  "GameModes", "ModesUI", "GameModeManager", "SaveManager", "SaveData", "PlayerData", "ProgressManager", "UnlockManager", "UnlocksUI", "ShopUI", "CameraController", "ThirdPersonCamera", "KinematicCharacterMotor"};
+                                  "GameModes", "ModesUI", "GameModeManager", "SaveManager", "SaveData", "PlayerData", "ProgressManager", "UnlockManager", "UnlocksUI", "ShopUI", "CameraController", "ThirdPersonCamera", "KinematicCharacterMotor",
+                                  "PlayerBearController", "EmoteManager", "BearEmoteController", "EmoteBehaviour", "PlayerShickaController", "PlayerSoundController", "CameraManager", "HubUnlockCinematic", "EmoteChest", "PhotoModeManager"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
@@ -203,7 +204,7 @@ void scan_classes() {
         if (!iname || strstr(iname, "Assembly-CSharp") == nullptr) continue;
         size_t n = img_count(img);
         logf_("разведка классов: сборка %s, классов %zu", iname, n);
-        for (size_t c = 0; c < n && shown < 300; ++c) {
+        for (size_t c = 0; c < n && shown < 600; ++c) {
             void* k = img_class(img, c);
             if (!k) continue;
             const char* nm = class_name(k);
