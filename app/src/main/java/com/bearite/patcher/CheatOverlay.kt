@@ -87,10 +87,23 @@ class CheatOverlay(private val act: Activity, private val parent: FrameLayout) {
             val values = ModSettings.load(mod)
             val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
             for (s in mod.settings) {
-                if (s.type != "bool") continue
-                val cur = (values[s.id] as? Boolean) ?: false
-                val pill = ui.togglePill(cur, 84) { v -> ModSettings.set(mod, s.id, v) }
-                val row = ui.row(s.name, pill)
+                val control: View = when (s.type) {
+                    "bool" -> {
+                        val cur = (values[s.id] as? Boolean) ?: false
+                        ui.togglePill(cur, 84) { v -> ModSettings.set(mod, s.id, v) }
+                    }
+                    "int", "float" -> {
+                        val lo = s.min ?: 0.0
+                        val hi = s.max ?: 100.0
+                        val cur = (values[s.id] as? Number)?.toDouble() ?: lo
+                        val isInt = s.type == "int"
+                        ui.slider(lo, hi, cur, if (isInt) 0 else 2, 150) { v ->
+                            ModSettings.set(mod, s.id, if (isInt) Math.round(v) else v)
+                        }
+                    }
+                    else -> continue
+                }
+                val row = ui.row(s.name, control)
                 list.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
                 if (s.description.isNotBlank()) {
                     list.addView(ui.label(s.description, 13f, GameUi.DIM, bold = false).apply {
