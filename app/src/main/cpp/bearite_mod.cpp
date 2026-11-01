@@ -176,8 +176,13 @@ void scan_classes() {
     if (!img_count || !img_class || !cls_ns || !dom_get || !dom_asms || !asm_image) { logf_("разведка классов: нет функций il2cpp"); return; }
     static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
                                   "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
-                                  "worldmap", "stage", "player", "pause", "ingamemenu", "gamemenu", "mainmenu"};
-    static const char* deep[] = {"PauseMenuManager", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger"};
+                                  "worldmap", "stage", "player", "pause", "ingamemenu", "gamemenu", "mainmenu",
+                                  "health", "damage", "hp", "life", "lives", "death", "die", "invinc", "immort", "emote", "emoji", "gesture", "anim",
+                                  "unlock", "lock", "save", "progress", "profile", "progression", "reward", "shop", "store", "purchase", "iap", "billing",
+                                  "jump", "move", "motor", "kinematic", "character", "control", "input", "gravity", "physics", "camera", "mode", "gameplay", "cheat"};
+    static const char* deep[] = {"PauseMenuManager", "PauseUI", "PauseManager", "PauseWindow", "PauseController", "GameManager", "LaunchPlatform", "VoteTrigger", "LevelStartUI", "LevelLoader", "LevelEntrance", "TranslateUI", "LevelData", "LevelTransitionTrigger",
+                                  "PlayerHealth", "Health", "PlayerMovement", "PlayerController", "CharacterStats", "PlayerStats", "EmoteManager", "EmotesUI", "EmoteButton",
+                                  "GameModes", "ModesUI", "GameModeManager", "SaveManager", "SaveData", "PlayerData", "ProgressManager", "UnlockManager", "UnlocksUI", "ShopUI", "CameraController", "ThirdPersonCamera", "KinematicCharacterMotor"};
     size_t na = 0;
     void** asms = dom_asms(dom_get(), &na);
     int shown = 0;
