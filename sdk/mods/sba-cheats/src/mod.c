@@ -75,9 +75,9 @@ void bearite_mod_init(const BeariteApi* api, const char* mod_id) {
         api->log(g_id, "Читы: не найдены функции IL2CPP, мод не работает");
         return;
     }
-    const char* P = "PlayerControllerBase";
+    const char* P = "PlayerControllerBase";  /* DamagePlayer есть только у PlayerBearController, см. лог */
     const char* S = "SaveGame";
-    bearite_hook_method(api, g_id, "", P, "DamagePlayer", 2, (void*)h_damage, (void**)&o_damage);
+    bearite_hook_method(api, g_id, "", "PlayerBearController", "DamagePlayer", 2, (void*)h_damage, (void**)&o_damage);
     bearite_hook_method(api, g_id, "", P, "IsGrounded", 0, (void*)h_is_grounded, (void**)&o_is_grounded);
     bearite_hook_method(api, g_id, "", S, "IsEmoteUnlocked", 1, (void*)h_emote_unlocked, (void**)&o_emote_unlocked);
     bearite_hook_method(api, g_id, "", S, "AreMolesUnlocked", 0, (void*)h_moles_unlocked, (void**)&o_moles_unlocked);

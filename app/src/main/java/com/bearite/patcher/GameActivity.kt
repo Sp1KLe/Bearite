@@ -54,6 +54,7 @@ class GameActivity : Activity() {
 
     private var modMenu: GameModMenu? = null
     private var hud: GameHud? = null
+    private var cheats: CheatOverlay? = null
     private var modButton: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -160,6 +161,7 @@ class GameActivity : Activity() {
         root.addView(btn)
         root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * resources.displayMetrics.density).toInt(); rightMargin = (12 * resources.displayMetrics.density).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        cheats = CheatOverlay(this, root).also { it.start() }
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
         chat = ChatOverlay(this, root).also { it.onRoomChanged = { updateModButton() }; it.start() }
