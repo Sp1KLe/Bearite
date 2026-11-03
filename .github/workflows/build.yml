@@ -126,6 +126,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p dist && cp mods-prebuilt/*.zip dist/ 2>/dev/null || true
           python3 - <<'PY'
           import glob, json, os, zipfile
           repo = os.environ["GITHUB_REPOSITORY"]
