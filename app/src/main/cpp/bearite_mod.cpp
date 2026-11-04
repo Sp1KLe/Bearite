@@ -2059,6 +2059,8 @@ void photon_nick(const std::string& nick) {
     logf_("команда: ник в Photon «%s»", nick.c_str());
 }
 
+void rp_command(const std::string& what);  // реплей: определён ниже, рядом с update()
+
 /** Геометрия сцены для редактора карт: maps/_scene = «центр x y z, полуразмеры x y z» (мировые координаты) каждого включённого рендерера. */
 void dump_scene() {
     if (!F.type_renderer || !F.rend_bounds) { logf_("сцена для редактора: у игры нет Renderer.bounds"); return; }
@@ -2113,6 +2115,7 @@ void cmd_poll() {
         if (parts.empty()) continue;
         if (parts[0] == "nick" && parts.size() >= 2) { photon_nick(parts[1]); continue; }
         if (parts[0] == "scene") { dump_scene(); continue; }
+        if (parts[0] == "rp" && parts.size() >= 2) { rp_command(parts[1]); continue; }
         if (parts[0] == "enter" && parts.size() >= 2) {
             if (const MapSpec* t = find_spec(parts[1])) {
                 g_inPlace = true;
@@ -2231,12 +2234,16 @@ uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, c
 }
 
 // ---------------------------------------------------------------- реплей: запись пути медведя и повтор призраком
-// Настройки встроенного мода: replay (запись), replay_len (секунд), replay_play (показать повтор), replay_speed.
+// Управляется командами лаунчера (maps/_cmd): «rp\tstart» — начать запись (старая стирается), «rp\tstop» — остановить запись,
+// «rp\tplay» — показать повтор призраком, «rp\tstopplay» — остановить повтор. Состояние пишется в maps/_replay:
+// «запись(0/1)\tповтор(0/1)\tточек\tсекунд». Скорость повтора — настройка встроенного мода replay_speed.
 struct RpPt { long long t; float p[3]; };
 std::vector<RpPt> g_rp, g_rpPlay;
 long long g_rpLast = 0, g_rpStart = 0;
-bool g_rpPlaying = false, g_rpWasOn = false;
+bool g_rpRec = false, g_rpPlayReq = false, g_rpPlaying = false;
 uintptr_t g_rpGhost = 0;
+std::string g_rpStatus = "?";
+const size_t RP_MAX_POINTS = 36000;  // час записи при 10 точках в секунду
 
 void rp_ghost_free(bool destroy) {
     if (!g_rpGhost) return;
@@ -2245,10 +2252,25 @@ void rp_ghost_free(bool destroy) {
     g_rpGhost = 0;
 }
 
+void rp_stop_play() {
+    rp_ghost_free(true);
+    g_rpPlaying = false;
+    g_rpPlayReq = false;
+    g_rpPlay.clear();
+}
+
 /** Сцена сменилась: объекты Unity уничтожил сам, запись относилась к прошлой сцене. */
 void rp_reset() {
-    g_rp.clear(); g_rpPlay.clear(); g_rpPlaying = false;
+    g_rp.clear(); g_rpPlay.clear();
+    g_rpRec = false; g_rpPlaying = false; g_rpPlayReq = false;
     rp_ghost_free(false);
+}
+
+void rp_command(const std::string& what) {
+    if (what == "start") { g_rp.clear(); g_rpRec = true; g_rpLast = 0; logf_("реплей: запись началась"); }
+    else if (what == "stop") { g_rpRec = false; logf_("реплей: запись остановлена, точек %d", (int)g_rp.size()); }
+    else if (what == "play") g_rpPlayReq = true;
+    else if (what == "stopplay") rp_stop_play();
 }
 
 void rp_make_ghost() {
@@ -2277,54 +2299,53 @@ void rp_make_ghost() {
     }
 }
 
+void rp_write_status() {
+    long long secs = g_rp.size() >= 2 ? (g_rp.back().t - g_rp.front().t) / 1000 : 0;
+    char buf[96];
+    snprintf(buf, sizeof buf, "%d\t%d\t%d\t%lld\n", g_rpRec ? 1 : 0, g_rpPlaying ? 1 : 0, (int)g_rp.size(), secs);
+    if (g_rpStatus == buf) return;
+    g_rpStatus = buf;
+    std::string path = g_mapsDir + "/_replay", tmp = g_mapsDir + "/.replay.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(buf, f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+}
+
 void replay_tick(long long now) {
-    if (!A || !F.get_position) return;
-    bool rec = A->get_bool(ID, "replay", 0) != 0;
-    bool play = A->get_bool(ID, "replay_play", 0) != 0;
-    if (!rec && !play && !g_rpPlaying) { g_rpWasOn = false; return; }
-    if (rec && now - g_rpLast >= 100) {  // 10 точек в секунду
+    if (!F.get_position) return;
+    if (g_rpRec && now - g_rpLast >= 100) {  // 10 точек в секунду, пока идёт запись
         g_rpLast = now;
-        if (void* tr = pick_player(now)) if (void* pv = inv(F.get_position, tr)) {
+        if (g_rp.size() >= RP_MAX_POINTS) { g_rpRec = false; logf_("реплей: запись остановлена, достигнут лимит"); }
+        else if (void* tr = pick_player(now)) if (void* pv = inv(F.get_position, tr)) {
             RpPt pt;
             pt.t = now;
             memcpy(pt.p, obj_unbox(pv), sizeof pt.p);
             g_rp.push_back(pt);
-            long long len = A->get_int(ID, "replay_len", 30);
-            if (len < 5) len = 5;
-            if (len > 120) len = 120;
-            while (!g_rp.empty() && now - g_rp.front().t > len * 1000) g_rp.erase(g_rp.begin());
         }
     }
-    if (play && !g_rpWasOn && !g_rpPlaying) {
-        if (g_rp.size() < 2) logf_("реплей: записи нет, включи «Запись реплея» и побегай");
+    if (g_rpPlayReq && !g_rpPlaying) {
+        g_rpPlayReq = false;
+        if (g_rp.size() < 2) logf_("реплей: записи нет");
         else { g_rpPlay = g_rp; g_rpStart = now; g_rpPlaying = true; logf_("реплей: повтор %d точек", (int)g_rpPlay.size()); }
     }
-    g_rpWasOn = play;
-    if (!g_rpPlaying) return;
-    double sp = A->get_float(ID, "replay_speed", 1.0);
-    if (sp < 0.25) sp = 0.25;
-    if (sp > 4.0) sp = 4.0;
-    double tt = (double)g_rpPlay.front().t + (double)(now - g_rpStart) * sp;
-    if (!play || tt >= (double)g_rpPlay.back().t) {
-        rp_ghost_free(true);
-        g_rpPlaying = false;
-        g_rpPlay.clear();
-        return;
+    if (g_rpPlaying) {
+        double sp = A ? A->get_float(ID, "replay_speed", 1.0) : 1.0;
+        if (sp < 0.25) sp = 0.25;
+        if (sp > 4.0) sp = 4.0;
+        double tt = (double)g_rpPlay.front().t + (double)(now - g_rpStart) * sp;
+        if (tt >= (double)g_rpPlay.back().t) rp_stop_play();
+        else {
+            size_t i = 0;
+            while (i + 1 < g_rpPlay.size() && (double)g_rpPlay[i + 1].t <= tt) ++i;
+            const RpPt& a0 = g_rpPlay[i];
+            const RpPt& b0 = g_rpPlay[std::min(i + 1, g_rpPlay.size() - 1)];
+            double span = (double)(b0.t - a0.t);
+            float k = span > 0 ? (float)((tt - (double)a0.t) / span) : 0.f;
+            V3 pos{a0.p[0] + (b0.p[0] - a0.p[0]) * k, a0.p[1] + (b0.p[1] - a0.p[1]) * k, a0.p[2] + (b0.p[2] - a0.p[2]) * k};
+            void* go = g_rpGhost ? target(g_rpGhost) : nullptr;
+            if (!go) { rp_ghost_free(false); rp_make_ghost(); go = g_rpGhost ? target(g_rpGhost) : nullptr; }
+            if (go && F.go_transform && F.set_position) if (void* tr = inv(F.go_transform, go)) { void* a[1] = {&pos}; inv(F.set_position, tr, a); }
+        }
     }
-    size_t i = 0;
-    while (i + 1 < g_rpPlay.size() && (double)g_rpPlay[i + 1].t <= tt) ++i;
-    const RpPt& a0 = g_rpPlay[i];
-    const RpPt& b0 = g_rpPlay[std::min(i + 1, g_rpPlay.size() - 1)];
-    double span = (double)(b0.t - a0.t);
-    float k = span > 0 ? (float)((tt - (double)a0.t) / span) : 0.f;
-    V3 pos{a0.p[0] + (b0.p[0] - a0.p[0]) * k, a0.p[1] + (b0.p[1] - a0.p[1]) * k, a0.p[2] + (b0.p[2] - a0.p[2]) * k};
-    void* go = g_rpGhost ? target(g_rpGhost) : nullptr;
-    if (!go) { rp_ghost_free(false); rp_make_ghost(); go = g_rpGhost ? target(g_rpGhost) : nullptr; }
-    if (!go || !F.go_transform || !F.set_position) return;
-    void* tr = inv(F.go_transform, go);
-    if (!tr) return;
-    void* a[1] = {&pos};
-    inv(F.set_position, tr, a);
+    rp_write_status();
 }
 
 long long g_lastTick = 0, g_lastSlow = 0;

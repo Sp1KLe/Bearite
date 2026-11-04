@@ -44,10 +44,12 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private lateinit var tabAll: TextView
     private lateinit var tabMaps: TextView
     private lateinit var tabGames: TextView
+    private lateinit var tabReplay: TextView
     private lateinit var footer: TextView
     private lateinit var scroll: ScrollView
 
     private val maps = MapsTab(act, ui, MapStore(act))
+    private val replay = ReplayTab(act, ui)
     private val expanded = HashSet<String>()
     private var catalog: List<ModCatalog.Item>? = null
     private var catalogErr = ""
@@ -65,6 +67,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
 
     init {
         games.onStarted = { hide() }
+        replay.onPlay = { hide() }
         root.visibility = View.GONE
         root.setBackgroundColor(0xC0100B08.toInt())
         root.isClickable = true  // касания не уходят в Unity, пока меню открыто
@@ -101,7 +104,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         tabAll = tab("Все моды", TAB_ALL)
         tabMaps = tab("Карты", TAB_MAPS)
         tabGames = tab("Мини-игры", TAB_GAMES)
-        for (t in listOf(tabInstalled, tabAll, tabMaps, tabGames)) {
+        tabReplay = tab("Реплей", TAB_REPLAY)
+        for (t in listOf(tabInstalled, tabAll, tabMaps, tabGames, tabReplay)) {
             head.addView(t, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
         }
         head.addView(
@@ -221,7 +225,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun refresh() {
-        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS, tabGames to TAB_GAMES)) {
+        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS, tabGames to TAB_GAMES, tabReplay to TAB_REPLAY)) {
             val on = tab == id
             t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
             t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 21, if (on) 0 else GameUi.LINE)
@@ -233,6 +237,10 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun renderList() {
+        if (tab == TAB_REPLAY) {
+            try { replay.render(list) { if (tab == TAB_REPLAY && isOpen) renderList() } } catch (t: Throwable) { BLog.e("вкладка «Реплей»", t) }
+            return
+        }
         if (tab == TAB_GAMES) {
             list.removeAllViews()
             try { games.render(list) } catch (t: Throwable) { BLog.e("вкладка «Мини-игры»", t) }
@@ -554,6 +562,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         const val TAB_ALL = 1
         const val TAB_MAPS = 2
         const val TAB_GAMES = 3
+        const val TAB_REPLAY = 4
         val FILTER_NAMES = arrayOf("Все моды", "Только включённые", "Только выключенные", "С настройками", "С нативным кодом")
     }
 }
