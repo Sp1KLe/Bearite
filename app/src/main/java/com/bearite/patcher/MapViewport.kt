@@ -1,7 +1,13 @@
 package com.bearite.patcher
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.LightingColorFilter
+import android.graphics.Matrix
+import android.graphics.Shader
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
@@ -103,6 +109,11 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     var onCommit: (() -> Unit)? = null
     var texAvg: ((String) -> Int)? = null  // средний цвет текстуры для предпросмотра
     var gameCam: DoubleArray? = null  // позиция камеры игры в координатах карты (x y z fx fy fz)
+    /** Файл картинки текстуры: по нему рисуем настоящую текстуру, а не средний цвет. */
+    var texFile: ((String) -> java.io.File?)? = null
+    /** Геометрия сцены игры (мировые координаты, по 6 чисел: центр и полуразмеры): рисуется каркасом под блоками. */
+    var scene: FloatArray? = null
+    var showScene = true
 
     // камера
     private var yaw = 0.75f
@@ -121,11 +132,54 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private val line = Paint().apply { style = Paint.Style.STROKE; isAntiAlias = true; strokeCap = Paint.Cap.ROUND }
     private val text = Paint().apply { isAntiAlias = true; typeface = Typeface.DEFAULT_BOLD; textSize = 11f * d }
     private val path = Path()
+    private val texPaint = Paint().apply { style = Paint.Style.FILL; isAntiAlias = false; isFilterBitmap = true }
+    private val texMatrix = Matrix()
+    private val texSrc = FloatArray(6)
+    private val texDst = FloatArray(6)
+    private class Tex(val bmp: Bitmap, val shader: BitmapShader)
+    private val texCache = HashMap<String, Tex?>()
+
+    /** Текстура для предпросмотра: уменьшаем до 256 px по большей стороне, держим в памяти (и неудачу тоже, чтобы не читать файл на каждый треугольник). */
+    private fun tex(id: String): Tex? {
+        if (texCache.containsKey(id)) return texCache[id]
+        val t: Tex? = try {
+            val f = texFile?.invoke(id)
+            if (f == null) null else {
+                val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(f.path, b)
+                var ss = 1
+                while (max(b.outWidth, b.outHeight) / ss > 256) ss *= 2
+                val bmp = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = ss })
+                if (bmp == null) null else Tex(bmp, BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT))
+            }
+        } catch (_: Throwable) { null }
+        texCache[id] = t
+        return t
+    }
+
+    /** Координаты текстуры вершины в локальных осях фигуры: куб и плоскость — по грани, тела вращения — вокруг оси Y. */
+    private fun uv(shape: String, mesh: PrimMeshes.Mesh, i: Int, nax: Int, out: FloatArray, o: Int) {
+        val x = mesh.v[i * 3]; val y = mesh.v[i * 3 + 1]; val z = mesh.v[i * 3 + 2]
+        when (shape) {
+            "sphere", "cylinder", "capsule", "portal" -> {
+                out[o] = (Math.atan2(z.toDouble(), x.toDouble()) / (2 * Math.PI)).toFloat() + 0.5f
+                out[o + 1] = if (shape == "sphere") y + 0.5f else if (shape == "capsule") y / 2f + 0.5f else y / 2f + 0.5f
+            }
+            "plane" -> { out[o] = x / 10f + 0.5f; out[o + 1] = z / 10f + 0.5f }
+            else -> when (nax) {
+                0 -> { out[o] = z + 0.5f; out[o + 1] = y + 0.5f }
+                1 -> { out[o] = x + 0.5f; out[o + 1] = z + 0.5f }
+                else -> { out[o] = x + 0.5f; out[o + 1] = y + 0.5f }
+            }
+        }
+    }
 
     // кадр: треугольники для сортировки и выбора
     private var triScr = FloatArray(0)
     private var triObj = IntArray(0)
     private var triCol = IntArray(0)
+    private var triUv = FloatArray(0)
+    private var triTex = ByteArray(0)
     private var order = LongArray(0)
     private var triCount = 0
     private var sortedIdx = IntArray(0)
@@ -231,6 +285,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             c.drawColor(Color.rgb((0x1E + (Color.red(sk) - 0x1E) / 2), (0x19 + (Color.green(sk) - 0x19) / 2), (0x14 + (Color.blue(sk) - 0x14) / 2)))
         } else c.drawColor(0xFF1E1914.toInt())
         drawGrid(c)
+        drawScene(c)
         drawObjects(c)
         drawCameraMarker(c)
         drawSpawn(c)
@@ -256,10 +311,47 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         line.color = 0xCC7EC14A.toInt(); seg(c, 0f, 0f, 0f, 0f, 6f, 0f)
     }
 
+    private var sceneLines = FloatArray(0)
+
+    /** Каркас сцены игры (рендереры): серые рёбра ограничивающих коробок, чтобы ставить блоки не в пустоту. */
+    private fun drawScene(c: Canvas) {
+        val sc = scene ?: return
+        if (!showScene || sc.size < 6) return
+        val s = if (map.scale == 0.0) 1f else map.scale.toFloat()
+        val ox = map.ox.toFloat(); val oy = map.oy.toFloat(); val oz = map.oz.toFloat()
+        val n = sc.size / 6
+        // не больше 2500 ближайших к центру обзора коробок: рисование должно оставаться плавным
+        var idx = IntArray(n) { it }
+        if (n > 2500) {
+            val dd = FloatArray(n) { j -> val dx = (sc[j * 6] - ox) / s - tx; val dy = (sc[j * 6 + 1] - oy) / s - ty; val dz = (sc[j * 6 + 2] - oz) / s - tz; dx * dx + dy * dy + dz * dz }
+            idx = idx.sortedBy { dd[it] }.take(2500).toIntArray()
+        }
+        if (sceneLines.size < idx.size * 48) sceneLines = FloatArray(idx.size * 48)
+        var cnt = 0
+        val pa = FloatArray(3); val pb = FloatArray(3)
+        for (j in idx) {
+            val cx = (sc[j * 6] - ox) / s; val cy = (sc[j * 6 + 1] - oy) / s; val cz = (sc[j * 6 + 2] - oz) / s
+            val hx = sc[j * 6 + 3] / s; val hy = sc[j * 6 + 4] / s; val hz = sc[j * 6 + 5] / s
+            for (e in 0 until 12) {
+                // 4 ребра вдоль каждой оси
+                val ax = e / 4; val sa = (e and 1) * 2 - 1; val sb = ((e shr 1) and 1) * 2 - 1
+                val x1 = cx + hx * (if (ax == 0) -1 else sa); val x2 = cx + hx * (if (ax == 0) 1 else sa)
+                val y1 = cy + hy * (if (ax == 1) -1 else if (ax == 0) sa else sb); val y2 = cy + hy * (if (ax == 1) 1 else if (ax == 0) sa else sb)
+                val z1 = cz + hz * (if (ax == 2) -1 else sb); val z2 = cz + hz * (if (ax == 2) 1 else sb)
+                if (proj(x1, y1, z1, pa) && proj(x2, y2, z2, pb)) {
+                    sceneLines[cnt++] = pa[0]; sceneLines[cnt++] = pa[1]; sceneLines[cnt++] = pb[0]; sceneLines[cnt++] = pb[1]
+                }
+            }
+        }
+        line.strokeWidth = 1f
+        line.color = 0x66B7A58E
+        c.drawLines(sceneLines, 0, cnt, line)
+    }
+
     private fun drawObjects(c: Canvas) {
         var maxTris = 0; var maxVerts = 0
         for (o in map.objects) { val m = PrimMeshes.get(o.shape); maxTris += m.t.size / 3; maxVerts = max(maxVerts, m.v.size / 3) }
-        if (triScr.size < maxTris * 6) { triScr = FloatArray(maxTris * 6); triObj = IntArray(maxTris); triCol = IntArray(maxTris); order = LongArray(maxTris); sortedIdx = IntArray(maxTris) }
+        if (triScr.size < maxTris * 6) { triScr = FloatArray(maxTris * 6); triObj = IntArray(maxTris); triCol = IntArray(maxTris); order = LongArray(maxTris); sortedIdx = IntArray(maxTris); triUv = FloatArray(maxTris * 6); triTex = ByteArray(maxTris) }
         if (vtmp.size < maxVerts * 6) vtmp = FloatArray(maxVerts * 6)
         triCount = 0
         val lx = 0.45f; val ly = 0.8f; val lz = -0.4f
@@ -281,7 +373,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 else vtmp[i * 6 + 5] = -1f
             }
             var r = Color.red(o.color); var g = Color.green(o.color); var b = Color.blue(o.color)
-            if (o.tex.isNotEmpty()) {
+            val tx0 = if (o.tex.isNotEmpty()) tex(o.tex) else null
+            if (o.tex.isNotEmpty() && tx0 == null) {   // картинка не прочиталась: хотя бы средний цвет
                 val avg = texAvg?.invoke(o.tex) ?: 0xFF888888.toInt()
                 r = r * Color.red(avg) / 255; g = g * Color.green(avg) / 255; b = b * Color.blue(avg) / 255
             }
@@ -307,6 +400,28 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 triScr[i * 6 + 4] = vtmp[cc * 6 + 3]; triScr[i * 6 + 5] = vtmp[cc * 6 + 4]
                 triObj[i] = oi
                 triCol[i] = Color.rgb(min(255, (r * k).toInt()), min(255, (g * k).toInt()), min(255, (b * k).toInt()))
+                triTex[i] = 0
+                if (tx0 != null) {
+                    // грань куба определяем по нормали в осях фигуры (вершины заданы без поворота и размера)
+                    val lax = mesh.v[a * 3]; val lay = mesh.v[a * 3 + 1]; val laz = mesh.v[a * 3 + 2]
+                    val lux = mesh.v[bb * 3] - lax; val luy = mesh.v[bb * 3 + 1] - lay; val luz = mesh.v[bb * 3 + 2] - laz
+                    val lwx = mesh.v[cc * 3] - lax; val lwy = mesh.v[cc * 3 + 1] - lay; val lwz = mesh.v[cc * 3 + 2] - laz
+                    val lnx = abs(luy * lwz - luz * lwy); val lny = abs(luz * lwx - lux * lwz); val lnz = abs(lux * lwy - luy * lwx)
+                    val nax = if (lnx >= lny && lnx >= lnz) 0 else if (lny >= lnz) 1 else 2
+                    uv(o.shape, mesh, a, nax, triUv, i * 6); uv(o.shape, mesh, bb, nax, triUv, i * 6 + 2); uv(o.shape, mesh, cc, nax, triUv, i * 6 + 4)
+                    // шов тела вращения: тянем координаты u в одну сторону
+                    if (o.shape != "cube" && o.shape != "plane") {
+                        val u0 = triUv[i * 6]; val u1 = triUv[i * 6 + 2]; val u2 = triUv[i * 6 + 4]
+                        if (max(u0, max(u1, u2)) - min(u0, min(u1, u2)) > 0.5f) {
+                            if (u0 < 0.5f) triUv[i * 6] = u0 + 1f
+                            if (u1 < 0.5f) triUv[i * 6 + 2] = u1 + 1f
+                            if (u2 < 0.5f) triUv[i * 6 + 4] = u2 + 1f
+                        }
+                    }
+                    // цвет объекта работает как оттенок: белый = текстура как есть
+                    triCol[i] = Color.rgb(min(255, (Color.red(o.color) * k).toInt()), min(255, (Color.green(o.color) * k).toInt()), min(255, (Color.blue(o.color) * k).toInt()))
+                    triTex[i] = 1
+                }
                 val depth = (vtmp[a * 6 + 5] + vtmp[bb * 6 + 5] + vtmp[cc * 6 + 5]) / 3f
                 // ключ: глубина (положительные float сортируются как целые): ближние первыми
                 order[i] = (java.lang.Float.floatToIntBits(depth).toLong() shl 32) or i.toLong()
@@ -317,12 +432,26 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         // рисуем от дальних к ближним
         for (k in triCount - 1 downTo 0) {
             val i = sortedIdx[k]
-            fill.color = triCol[i]
             path.rewind()
             path.moveTo(triScr[i * 6], triScr[i * 6 + 1])
             path.lineTo(triScr[i * 6 + 2], triScr[i * 6 + 3])
             path.lineTo(triScr[i * 6 + 4], triScr[i * 6 + 5])
             path.close()
+            if (triTex[i].toInt() == 1) {
+                val tx = tex(map.objects[triObj[i]].tex)
+                if (tx != null) {
+                    val bw = tx.bmp.width.toFloat(); val bh = tx.bmp.height.toFloat()
+                    for (q in 0 until 3) { texSrc[q * 2] = triUv[i * 6 + q * 2] * bw; texSrc[q * 2 + 1] = (1f - triUv[i * 6 + q * 2 + 1]) * bh; texDst[q * 2] = triScr[i * 6 + q * 2]; texDst[q * 2 + 1] = triScr[i * 6 + q * 2 + 1] }
+                    if (texMatrix.setPolyToPoly(texSrc, 0, texDst, 0, 3)) {
+                        tx.shader.setLocalMatrix(texMatrix)
+                        texPaint.shader = tx.shader
+                        texPaint.colorFilter = LightingColorFilter(triCol[i], 0)
+                        c.drawPath(path, texPaint)
+                        continue
+                    }
+                }
+            }
+            fill.color = triCol[i]
             c.drawPath(path, fill)
         }
         // контур выбранного объекта

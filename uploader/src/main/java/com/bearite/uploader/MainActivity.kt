@@ -84,7 +84,7 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         if (requestCode != 7 || resultCode != RESULT_OK) return
         val token = prefs.getString("token", "") ?: ""
-        val repo = prefs.getString("repo", "") ?: ""
+        val repo = normalizeRepo(prefs.getString("repo", "") ?: "")
         if (token.isEmpty() || !repo.contains('/')) { status.text = ""; say("Сначала впиши токен GitHub и репозиторий."); return }
         pick.isEnabled = false; status.text = ""
         Thread {
@@ -97,9 +97,10 @@ class MainActivity : Activity() {
 
     private class Resp(val code: Int, val text: String)
 
-    private fun http(method: String, url: String, token: String, body: ByteArray? = null, file: File? = null, type: String = "application/json"): Resp {
+    private fun http(method: String, url: String, token: String, body: ByteArray? = null, file: File? = null, type: String = "application/json", hops: Int = 0): Resp {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = method; c.connectTimeout = 20000; c.readTimeout = 120000
+        c.instanceFollowRedirects = false   // сами переходим по адресу: HttpURLConnection не повторяет POST и DELETE после 301/307
         c.setRequestProperty("Authorization", "Bearer $token")
         c.setRequestProperty("Accept", "application/vnd.github+json")
         c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
@@ -110,12 +111,54 @@ class MainActivity : Activity() {
             else c.outputStream.use { it.write(body!!) }
         }
         val code = c.responseCode
+        if (code in listOf(301, 302, 307, 308) && hops < 4) {
+            val to = c.getHeaderField("Location"); c.disconnect()
+            if (!to.isNullOrEmpty()) return http(method, URL(URL(url), to).toString(), token, body, file, type, hops + 1)
+        }
         val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
         c.disconnect()
         return Resp(code, text)
     }
 
-    private fun check(r: Resp, what: String) { if (r.code !in 200..299) throw RuntimeException("$what: код ${r.code} ${r.text.take(160)}") }
+    /** Текст ошибки GitHub и подсказка, что делать. */
+    private fun explain(r: Resp): String {
+        val msg = try { JSONObject(r.text).optString("message") } catch (_: Throwable) { "" }
+        val hint = when (r.code) {
+            401 -> "токен не подходит или просрочен, создай новый"
+            403 -> "у токена нет права записи (нужно Contents: Read and write) или превышен лимит запросов"
+            404 -> "репозиторий не найден или токен не выдан на этот репозиторий"
+            422 -> "GitHub не принял данные (файл с таким именем уже есть или тег занят)"
+            else -> ""
+        }
+        return "код ${r.code}" + (if (msg.isNotEmpty()) " «$msg»" else "") + (if (hint.isNotEmpty()) ". $hint" else "")
+    }
+
+    private fun check(r: Resp, what: String) { if (r.code !in 200..299) throw RuntimeException("$what: ${explain(r)}") }
+
+    /** «https://github.com/Владелец/Репо.git» и подобное приводим к «Владелец/Репо». */
+    private fun normalizeRepo(s: String): String {
+        var r = s.trim().removePrefix("https://").removePrefix("http://").removePrefix("www.").removePrefix("github.com/")
+        r = r.removeSuffix(".git").trim('/')
+        return r.split('/').filter { it.isNotEmpty() }.take(2).joinToString("/")
+    }
+
+    /** Копия архива с обычными слэшами в путях (zip из Windows хранит libs\\arm64-v8a\\x.so, и мод потом не находит библиотеку). */
+    private fun cleanZip(src: File): File {
+        val out = File(cacheDir, "upload_clean.zip")
+        java.util.zip.ZipOutputStream(out.outputStream()).use { zo ->
+            ZipFile(src).use { z ->
+                val seen = HashSet<String>()
+                for (e in java.util.Collections.list(z.entries())) {
+                    val name = e.name.replace('\\', '/')
+                    if (e.isDirectory || name.endsWith("/") || name.contains("..") || !seen.add(name)) continue
+                    zo.putNextEntry(java.util.zip.ZipEntry(name))
+                    z.getInputStream(e).use { it.copyTo(zo) }
+                    zo.closeEntry()
+                }
+            }
+        }
+        return out
+    }
 
     private fun displayName(uri: Uri): String {
         try { contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) return c.getString(0) ?: "" } } catch (_: Throwable) {}
@@ -127,16 +170,23 @@ class MainActivity : Activity() {
         val tmp = File(cacheDir, "upload.zip")
         contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
         if (tmp.length() == 0L) throw RuntimeException("файл пустой")
-        val mj = try { ZipFile(tmp).use { z ->
+        val fixed = try { cleanZip(tmp) } catch (t: java.util.zip.ZipException) { throw RuntimeException("это не zip-архив") }
+        tmp.delete(); fixed.renameTo(tmp)
+        val mj = ZipFile(tmp).use { z ->
             val e = java.util.Collections.list(z.entries()).firstOrNull { it.name == "mod.json" || it.name.endsWith("/mod.json") } ?: throw RuntimeException("в архиве нет mod.json")
             JSONObject(z.getInputStream(e).bufferedReader().readText())
-        } } catch (t: java.util.zip.ZipException) { throw RuntimeException("это не zip-архив") }
+        }
         val id = mj.optString("id")
         if (!Regex("[A-Za-z0-9._-]{1,64}").matches(id)) throw RuntimeException("в mod.json нет корректного id")
         val zipName = "$id.zip"
         say("Мод «${mj.optString("name", id)}» v${mj.optString("version", "?")}, ${tmp.length() / 1024} КБ")
 
         val api = "https://api.github.com/repos/$repo"
+        say("Проверяю доступ к $repo…")
+        val info = http("GET", api, token)
+        check(info, "репозиторий $repo")
+        val perms = try { JSONObject(info.text).optJSONObject("permissions") } catch (_: Throwable) { null }
+        if (perms != null && !perms.optBoolean("push", false)) throw RuntimeException("у токена нет права записи в $repo (нужно Contents: Read and write)")
         say("Ищу релиз user-mods…")
         var rel = http("GET", "$api/releases/tags/user-mods", token)
         if (rel.code == 404) {

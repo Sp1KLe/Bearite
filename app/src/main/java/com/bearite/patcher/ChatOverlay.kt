@@ -26,8 +26,10 @@ import java.net.URLEncoder
 
 /**
  * Свободный чат поверх игры: отдельная кнопка-пузырь (как в Roblox) и окно с перепиской.
- * Сообщения идут через сервер чата (server/chat-server.js) и привязаны к комнате игры:
- * имя комнаты Photon мод кладёт в maps/_room. Не в комнате — чат молчит.
+ * Сообщения идут через сервер чата (server/chat-server.js). Чат общий и не зависит от комнаты игры:
+ * он работает и в одиночной игре (Photon там держит фиктивную комнату offlineMode), и в мультиплеере,
+ * и не переключается, когда заходишь в комнату или выходишь из неё. Имя комнаты Photon мод кладёт
+ * в maps/_room, оно нужно только для списка игроков и для проверки паузы.
  */
 class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private val d = UiScale.density(act)
@@ -124,7 +126,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
             visibility = View.GONE; isClickable = true
         }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        title = ui.label("Чат", 15f, GameUi.CREAM)
+        title = ui.label("Чат · общий", 15f, GameUi.CREAM)
         head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(ui.label("⚙", 20f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(8), 0); setOnClickListener { settings() } })
         head.addView(ui.label("✕", 18f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
@@ -238,7 +240,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val n = h.getOrNull(0)?.toIntOrNull() ?: 0
         val mx = h.getOrNull(1)?.toIntOrNull() ?: 0
         tabPlayers.text = "Игроки ($n" + (if (mx > 0) "/$mx" else "") + ")"
-        title.text = "Чат · $n " + (if (mx > 0) "из $mx" else "онлайн")
     }
 
     private fun setTab(players: Boolean) {
@@ -323,9 +324,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private fun send() {
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
-        val r = room; val u = url
+        val r = CHANNEL; val u = url
         if (u.isEmpty()) { sys("Сначала укажи сервер (⚙)."); return }
-        if (r.isEmpty()) { sys("Ты не в комнате игры — чат пока недоступен."); return }
         input.setText("")
         val who = nick.ifBlank { "игрок" }
         val payload = JSONObject().put("n", who).put("t", text.take(200)).put("c", cid).toString()
@@ -368,21 +368,17 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         var failed = 0
         var ntfySince = "5m"
         val seen = HashSet<String>()
+        val r = CHANNEL   // канал чата один на всех и не меняется при входе в комнату
         while (running) {
             try {
-                val r = try { roomFile.readText().trim() } catch (_: Throwable) { "" }
-                room = r
-                if (r != shownRoom) {
-                    shownRoom = r; after = 0; ntfySince = "5m"; seen.clear()
+                val raw = try { roomFile.readText().trim() } catch (_: Throwable) { "" }
+                room = raw
+                if (raw != shownRoom) {
+                    shownRoom = raw
                     main.post { onRoomChanged?.invoke() }
-                    main.post {
-                        title.text = if (r.isEmpty()) "Чат · нет комнаты" else "Чат · $r"
-                        list.removeAllViews()
-                        sys(if (r.isEmpty()) "Зайди в игровую комнату, чтобы писать." else "Ты в комнате «$r».")
-                    }
                 }
                 val u = url
-                if (u.isEmpty() || r.isEmpty()) { Thread.sleep(1000); continue }
+                if (u.isEmpty()) { Thread.sleep(1000); continue }
                 if (ntfyMode(u)) {
                     // публичный ntfy: поток событий по теме комнаты, с продолжением с последнего сообщения
                     val c = open("$u/${topic(r)}/json?since=$ntfySince")
@@ -392,7 +388,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                     c.inputStream.bufferedReader().use { rd ->
                         while (running) {
                             val ln = rd.readLine() ?: break
-                            if (roomFile.exists() && (try { roomFile.readText().trim() } catch (_: Throwable) { r }) != r) break
                             val j = try { JSONObject(ln) } catch (_: Throwable) { continue }
                             if (j.optString("event") != "message") continue
                             val id = j.optString("id")
@@ -431,5 +426,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     companion object {
         /** Общий бесплатный публичный сервер ntfy: свой сервер поднимать не нужно. */
         const val DEFAULT_URL = "https://ntfy.sh"
+
+        /** Общий канал чата: одна и та же тема для всех, независимо от игровой комнаты. */
+        const val CHANNEL = "bearite-global-chat"
     }
 }

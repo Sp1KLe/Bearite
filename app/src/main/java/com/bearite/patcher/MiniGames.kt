@@ -22,7 +22,8 @@ import java.security.MessageDigest
 /**
  * Мини-игры внутри самой игры: ты бегаешь своим медведем по специальной арене, а игроки комнаты Photon играют вместе.
  * Арены (assets/minigames, файлы mg_*) создаются как миры Bearite в текущей сцене, чтобы все в комнате оставались в одной сцене.
- * Игру запускает хост комнаты (игрок с наименьшим номером). Хост же считает очки по позициям игроков
+ * Игру запускает только хост комнаты (мастер-клиент Photon) и только в настоящей комнате мультиплеера,
+ * в одиночной игре (фиктивная комната offlineMode) мини-игры недоступны. Хост же считает очки по позициям игроков
  * (мод пишет их в maps/_pos) и рассылает таблицу через тот же публичный ntfy, что и чат.
  * Игры: паркур-гонка, царь горы, догонялки.
  */
@@ -45,7 +46,7 @@ class MiniGames(private val act: Activity) {
     }
     var onStarted: (() -> Unit)? = null
 
-    private class P(val actor: Int, val nick: String, val local: Boolean)
+    private class P(val actor: Int, val nick: String, val local: Boolean, val master: Boolean)
     private class Pos(val x: Float, val y: Float, val z: Float)
 
     private var players = listOf<P>()
@@ -70,7 +71,9 @@ class MiniGames(private val act: Activity) {
     private var relayRoom = ""
 
     private val me: P? get() = players.firstOrNull { it.local }
-    private val isHost: Boolean get() = players.isEmpty() || me == null || me!!.actor == players.minOf { it.actor }
+    /** Хост — только мастер-клиент Photon в настоящей комнате: без комнаты и без данных об игроках хоста нет. */
+    private val isHost: Boolean get() = roomName.isNotEmpty() && me?.master == true
+    private val masterActor: Int get() = players.firstOrNull { it.master }?.actor ?: -1
     private fun nick(a: Int) = players.firstOrNull { it.actor == a }?.nick?.ifBlank { "игрок $a" } ?: "игрок $a"
 
     init {
@@ -87,8 +90,8 @@ class MiniGames(private val act: Activity) {
         into.removeAllViews()
         into.addView(ui.label(if (roomName.isEmpty()) "Ты не в комнате" else "Комната: $roomName", 16f), ui.matchWrap().apply { topMargin = dp(8) })
         into.addView(ui.label(
-            if (roomName.isEmpty()) "Мини-игры работают в мультиплеере: зайди в комнату игры, и хост сможет запустить игру для всех."
-            else "Игроков: ${players.size}" + (if (maxPlayers > 0) " из $maxPlayers" else " (без лимита)") + (if (isHost) " · ты хост" else " · хост: " + (players.minByOrNull { it.actor }?.nick ?: "?")),
+            if (roomName.isEmpty()) "Мини-игры работают только в мультиплеере: зайди в комнату игры, игру запускает хост комнаты."
+            else "Игроков: ${players.size}" + (if (maxPlayers > 0) " из $maxPlayers" else " (без лимита)") + (if (isHost) " · ты хост" else " · хост: " + (players.firstOrNull { it.master }?.nick?.ifBlank { null } ?: "?")),
             13f, GameUi.MUTED, bold = false))
         // игры
         into.addView(ui.label("Мини-игры", 14f), ui.matchWrap().apply { topMargin = dp(14) })
@@ -111,13 +114,14 @@ class MiniGames(private val act: Activity) {
     // ------------------------------------------------------------------ файлы мода
 
     private fun readPlayers() {
-        try { roomName = File(dir, "_room").readText().trim() } catch (_: Throwable) { roomName = "" }
+        val raw = try { File(dir, "_room").readText().trim() } catch (_: Throwable) { "" }
+        roomName = if (raw == OFFLINE_ROOM) "" else raw   // одиночная игра: фиктивная комната Photon, это не комната
         val lines = try { File(dir, "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
-        if (lines.isEmpty()) { players = emptyList(); return }
+        if (lines.isEmpty() || roomName.isEmpty()) { players = emptyList(); return }
         maxPlayers = lines[0].split('\t').getOrNull(1)?.toIntOrNull() ?: 0
         players = lines.drop(1).mapNotNull { l ->
             val p = l.split('\t'); val a = p.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
-            P(a, p.getOrElse(1) { "" }, p.getOrElse(2) { "0" } == "1")
+            P(a, p.getOrElse(1) { "" }, p.getOrElse(2) { "0" } == "1", p.getOrElse(3) { "0" } == "1")
         }
     }
 
@@ -149,6 +153,7 @@ class MiniGames(private val act: Activity) {
     private fun post(o: JSONObject) {
         val r = roomName; if (r.isEmpty()) return
         o.put("c", cid)
+        me?.let { o.put("a", it.actor) }   // номер отправителя: остальные проверяют, что это хост
         Thread {
             try {
                 val h = URL("$base/${topic(r)}").openConnection() as HttpURLConnection
@@ -190,6 +195,8 @@ class MiniGames(private val act: Activity) {
     }
 
     private fun onMessage(m: JSONObject) {
+        // команды игры принимаем только в настоящей комнате и только от её хоста
+        if (roomName.isEmpty() || m.optInt("a", -1) != masterActor || masterActor < 0) return
         when (m.optString("k")) {
             "start" -> if (phase == "idle") begin(m.optString("g"))
             "stop" -> finish("Хост остановил игру", false)
@@ -205,6 +212,7 @@ class MiniGames(private val act: Activity) {
     // ------------------------------------------------------------------ ход игры
 
     private fun hostStart(g: String) {
+        if (!isHost || roomName.isEmpty() || phase != "idle") { BLog.i("мини-игры: запуск «$g» отклонён: не хост, нет комнаты или игра уже идёт"); return }
         BLog.i("мини-игры: хост запускает «$g», комната «$roomName», игроков ${players.size}")
         message = ""
         post(JSONObject().put("k", "start").put("g", g))
@@ -212,7 +220,7 @@ class MiniGames(private val act: Activity) {
         onStarted?.invoke()
     }
 
-    private fun hostStop() { post(JSONObject().put("k", "stop")); finish("Игра остановлена", false) }
+    private fun hostStop() { if (!isHost) return; post(JSONObject().put("k", "stop")); finish("Игра остановлена", false) }
 
     private fun begin(g: String) {
         readPlayers()
@@ -241,6 +249,7 @@ class MiniGames(private val act: Activity) {
 
     private fun tick() {
         readPlayers(); ensureRelay()
+        if (phase != "idle" && roomName.isEmpty()) { finish("Ты вышел из комнаты", false); return }
         if (phase == "idle") { if (hud.visibility == View.VISIBLE && message.isEmpty()) hud.visibility = View.GONE; return }
         val now = System.currentTimeMillis()
         if (phase == "prep") {
@@ -331,5 +340,9 @@ class MiniGames(private val act: Activity) {
         main.postDelayed({ if (phase == "idle") { hud.visibility = View.GONE; message = "" } }, 9000)
     }
 
-    companion object { const val OY = 1000f }
+    companion object {
+        const val OY = 1000f
+        /** Имя фиктивной комнаты Photon в одиночной игре. */
+        const val OFFLINE_ROOM = "offlineMode"
+    }
 }

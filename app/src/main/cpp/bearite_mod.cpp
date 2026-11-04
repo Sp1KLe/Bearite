@@ -1960,7 +1960,7 @@ void publish_room() {
     logf_("чат: комната «%s»", name.c_str());
 }
 
-/** Игроки комнаты Photon: maps/_players = «число\tмакс», дальше «актёр\tник\tсвой(0/1)». Для списка TAB и мини-игр. */
+/** Игроки комнаты Photon: maps/_players = «число\tмакс», дальше «актёр\tник\tсвой(0/1)\tхост(0/1)». Для списка TAB и мини-игр. */
 void publish_players() {
     static void *pnK = nullptr, *getList = nullptr, *getRoom = nullptr, *getMax = nullptr;
     static bool tried = false;
@@ -1987,14 +1987,15 @@ void publish_players() {
             void* pl = *(void**)arr_elem(arr, sizeof(void*), i);
             if (!pl) continue;
             void* pk = obj_class(pl);
-            static void *gA = nullptr, *gN = nullptr, *gL = nullptr;
-            if (!gA && pk) { gA = bearite_il2.class_get_method_from_name(pk, "get_ActorNumber", 0); gN = bearite_il2.class_get_method_from_name(pk, "get_NickName", 0); gL = bearite_il2.class_get_method_from_name(pk, "get_IsLocal", 0); }
-            int actor = 0, local = 0;
+            static void *gA = nullptr, *gN = nullptr, *gL = nullptr, *gM = nullptr;
+            if (!gA && pk) { gA = bearite_il2.class_get_method_from_name(pk, "get_ActorNumber", 0); gN = bearite_il2.class_get_method_from_name(pk, "get_NickName", 0); gL = bearite_il2.class_get_method_from_name(pk, "get_IsLocal", 0); gM = bearite_il2.class_get_method_from_name(pk, "get_IsMasterClient", 0); logf_("игроки: get_IsMasterClient=%d", gM != nullptr); }
+            int actor = 0, local = 0, master = 0;
             if (gA) if (void* r = inv(gA, pl)) actor = *(const int*)obj_unbox(r);
             if (gL) if (void* r = inv(gL, pl)) local = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
+            if (gM) if (void* r = inv(gM, pl)) master = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
             std::string nick = gN ? utf8(inv(gN, pl)) : "";
             for (auto& ch : nick) if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
-            body += std::to_string(actor) + "\t" + nick + "\t" + std::to_string(local) + "\n";
+            body += std::to_string(actor) + "\t" + nick + "\t" + std::to_string(local) + "\t" + std::to_string(master) + "\n";
         }
         out = std::to_string((int)n) + "\t" + std::to_string(mx) + "\n" + body;
     }
@@ -2058,6 +2059,41 @@ void photon_nick(const std::string& nick) {
     logf_("команда: ник в Photon «%s»", nick.c_str());
 }
 
+/** Геометрия сцены для редактора карт: maps/_scene = «центр x y z, полуразмеры x y z» (мировые координаты) каждого включённого рендерера. */
+void dump_scene() {
+    if (!F.type_renderer || !F.rend_bounds) { logf_("сцена для редактора: у игры нет Renderer.bounds"); return; }
+    void* arr = find_objects(F.type_renderer);
+    if (!arr) { logf_("сцена для редактора: рендереры не найдены"); return; }
+    uintptr_t cnt = arr_len(arr);
+    if (cnt > 200000) cnt = 200000;
+    bool oc = g_crumbs;
+    g_crumbs = false;
+    std::string out;
+    int n = 0;
+    for (uintptr_t i = 0; i < cnt && n < 6000; ++i) {
+        void* o = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!o) continue;
+        if (F.rend_get_enabled) { void* r = inv(F.rend_get_enabled, o); if (r && !*(const uint8_t*)obj_unbox(r)) continue; }
+        void* bb = inv(F.rend_bounds, o);
+        if (!bb) continue;
+        const float* f = (const float*)obj_unbox(bb);
+        if (f[3] > 150.f || f[4] > 150.f || f[5] > 150.f) continue;                 // небо, вода и прочее «на весь мир»
+        if (f[3] < 0.03f && f[4] < 0.03f && f[5] < 0.03f) continue;                 // пылинки и частицы
+        if (F.get_transform) if (void* tr = inv(F.get_transform, o)) {
+            std::string nm = name_of(tr);
+            if (nm == "Shadow" || nm.rfind("Footstep", 0) == 0 || nm.rfind("Jump VFX", 0) == 0 || nm.rfind("Bearite/", 0) == 0) continue;
+        }
+        char line[160];
+        snprintf(line, sizeof line, "%.2f %.2f %.2f %.2f %.2f %.2f\n", f[0], f[1], f[2], f[3], f[4], f[5]);
+        out += line;
+        ++n;
+    }
+    g_crumbs = oc;
+    std::string path = g_mapsDir + "/_scene", tmp = g_mapsDir + "/.scene.tmp";
+    if (FILE* fp = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), fp); fclose(fp); rename(tmp.c_str(), path.c_str()); }
+    logf_("сцена для редактора: записано рендереров %d из %d", n, (int)cnt);
+}
+
 void cmd_poll() {
     std::string path = g_mapsDir + "/_cmd";
     FILE* f = fopen(path.c_str(), "r");
@@ -2076,6 +2112,7 @@ void cmd_poll() {
         st = e + 1;
         if (parts.empty()) continue;
         if (parts[0] == "nick" && parts.size() >= 2) { photon_nick(parts[1]); continue; }
+        if (parts[0] == "scene") { dump_scene(); continue; }
         if (parts[0] == "enter" && parts.size() >= 2) {
             if (const MapSpec* t = find_spec(parts[1])) {
                 g_inPlace = true;
@@ -2193,6 +2230,103 @@ uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, c
     return o_join_create_room ? o_join_create_room(name, opts, lobby, friends, mi) : 0;
 }
 
+// ---------------------------------------------------------------- реплей: запись пути медведя и повтор призраком
+// Настройки встроенного мода: replay (запись), replay_len (секунд), replay_play (показать повтор), replay_speed.
+struct RpPt { long long t; float p[3]; };
+std::vector<RpPt> g_rp, g_rpPlay;
+long long g_rpLast = 0, g_rpStart = 0;
+bool g_rpPlaying = false, g_rpWasOn = false;
+uintptr_t g_rpGhost = 0;
+
+void rp_ghost_free(bool destroy) {
+    if (!g_rpGhost) return;
+    if (destroy) if (void* go = target(g_rpGhost)) if (F.destroy) { void* a[1] = {go}; inv(F.destroy, nullptr, a); }
+    gch_free(g_rpGhost);
+    g_rpGhost = 0;
+}
+
+/** Сцена сменилась: объекты Unity уничтожил сам, запись относилась к прошлой сцене. */
+void rp_reset() {
+    g_rp.clear(); g_rpPlay.clear(); g_rpPlaying = false;
+    rp_ghost_free(false);
+}
+
+void rp_make_ghost() {
+    if (!F.create_primitive) return;
+    int t = 1;  // PrimitiveType.Capsule
+    void* a[1] = {&t};
+    bool ok = false;
+    void* go = inv(F.create_primitive, nullptr, a, &ok);
+    if (!go) return;
+    g_rpGhost = gch_new(go, 0);
+    if (F.type_collider && F.get_component && F.collider_enabled) {  // призрак не должен ни за что цепляться
+        void* b[1] = {F.type_collider};
+        void* col = inv(F.get_component, go, b);
+        if (col) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
+    }
+    if (F.set_name) { void* b[1] = {bearite_il2.string_new("Bearite/replay")}; inv(F.set_name, go, b); }
+    if (F.type_renderer && F.get_component && F.get_material && F.set_color) {
+        void* b[1] = {F.type_renderer};
+        void* rend = inv(F.get_component, go, b);
+        void* mat = rend ? inv(F.get_material, rend) : nullptr;
+        if (mat) { Col c{0.35f, 0.8f, 1.f, 1.f}; void* d[1] = {&c}; inv(F.set_color, mat, d); }
+    }
+    if (F.go_transform && F.set_scale) {
+        void* tr = inv(F.go_transform, go);
+        if (tr) { float v[3] = {0.8f, 0.8f, 0.8f}; void* d[1] = {v}; inv(F.set_scale, tr, d); }
+    }
+}
+
+void replay_tick(long long now) {
+    if (!A || !F.get_position) return;
+    bool rec = A->get_bool(ID, "replay", 0) != 0;
+    bool play = A->get_bool(ID, "replay_play", 0) != 0;
+    if (!rec && !play && !g_rpPlaying) { g_rpWasOn = false; return; }
+    if (rec && now - g_rpLast >= 100) {  // 10 точек в секунду
+        g_rpLast = now;
+        if (void* tr = pick_player(now)) if (void* pv = inv(F.get_position, tr)) {
+            RpPt pt;
+            pt.t = now;
+            memcpy(pt.p, obj_unbox(pv), sizeof pt.p);
+            g_rp.push_back(pt);
+            long long len = A->get_int(ID, "replay_len", 30);
+            if (len < 5) len = 5;
+            if (len > 120) len = 120;
+            while (!g_rp.empty() && now - g_rp.front().t > len * 1000) g_rp.erase(g_rp.begin());
+        }
+    }
+    if (play && !g_rpWasOn && !g_rpPlaying) {
+        if (g_rp.size() < 2) logf_("реплей: записи нет, включи «Запись реплея» и побегай");
+        else { g_rpPlay = g_rp; g_rpStart = now; g_rpPlaying = true; logf_("реплей: повтор %d точек", (int)g_rpPlay.size()); }
+    }
+    g_rpWasOn = play;
+    if (!g_rpPlaying) return;
+    double sp = A->get_float(ID, "replay_speed", 1.0);
+    if (sp < 0.25) sp = 0.25;
+    if (sp > 4.0) sp = 4.0;
+    double tt = (double)g_rpPlay.front().t + (double)(now - g_rpStart) * sp;
+    if (!play || tt >= (double)g_rpPlay.back().t) {
+        rp_ghost_free(true);
+        g_rpPlaying = false;
+        g_rpPlay.clear();
+        return;
+    }
+    size_t i = 0;
+    while (i + 1 < g_rpPlay.size() && (double)g_rpPlay[i + 1].t <= tt) ++i;
+    const RpPt& a0 = g_rpPlay[i];
+    const RpPt& b0 = g_rpPlay[std::min(i + 1, g_rpPlay.size() - 1)];
+    double span = (double)(b0.t - a0.t);
+    float k = span > 0 ? (float)((tt - (double)a0.t) / span) : 0.f;
+    V3 pos{a0.p[0] + (b0.p[0] - a0.p[0]) * k, a0.p[1] + (b0.p[1] - a0.p[1]) * k, a0.p[2] + (b0.p[2] - a0.p[2]) * k};
+    void* go = g_rpGhost ? target(g_rpGhost) : nullptr;
+    if (!go) { rp_ghost_free(false); rp_make_ghost(); go = g_rpGhost ? target(g_rpGhost) : nullptr; }
+    if (!go || !F.go_transform || !F.set_position) return;
+    void* tr = inv(F.go_transform, go);
+    if (!tr) return;
+    void* a[1] = {&pos};
+    inv(F.set_position, tr, a);
+}
+
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
@@ -2201,6 +2335,7 @@ void update() {
     reload_maps();
     cmd_poll();
     publish_positions(now);
+    try { replay_tick(now); } catch (...) {}
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
@@ -2213,6 +2348,7 @@ void update() {
             world_exit(false);  // объекты прошлой сцены уже уничтожены
             drop_all_live();    // Unity сам уничтожил объекты прошлой сцены
             drop_textures();
+            rp_reset();
             drop_player();
             g_worldRt.clear();
             pick_world_file();

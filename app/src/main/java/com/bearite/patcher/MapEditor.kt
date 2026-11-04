@@ -38,6 +38,8 @@ class MapEditor(
     private lateinit var undoBtn: TextView
     private lateinit var redoBtn: TextView
     private lateinit var snapBtn: TextView
+    private lateinit var sceneBtn: TextView
+    private var sceneAskedAt = 0L
     private lateinit var titleView: TextView
 
     private val undo = ArrayList<String>()
@@ -56,6 +58,7 @@ class MapEditor(
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         vp.gameCam = camInMap()
         vp.texAvg = { store.textureAverage(it) }
+        vp.texFile = { store.textureFile(it) }
         vp.onSelect = { select(it) }
         vp.onEdited = { refreshLive() }
         vp.onCommit = { commit(); refreshTree() }
@@ -66,7 +69,8 @@ class MapEditor(
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             decorView.systemUiVisibility = act.window.decorView.systemUiVisibility
         }
-        dlg.setOnDismissListener { onClose() }
+        dlg.setOnDismissListener { sceneAskedAt = -1L; onClose() }
+        loadScene(auto = true)
         refreshTree()
         showInspector()
         dlg.show()
@@ -163,6 +167,13 @@ class MapEditor(
         }
         snapBtn = ui.pill("Сетка: вкл", sizeSp = 13f) { vp.snap = !vp.snap; paintTools() }
         tools.addView(snapBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(10) })
+        sceneBtn = ui.pill("Мир игры: вкл", sizeSp = 13f) {
+            vp.showScene = !vp.showScene
+            if (vp.showScene && vp.scene == null) loadScene()
+            paintTools(); vp.invalidate()
+        }
+        tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("Фокус", sizeSp = 13f) { vp.focusSelected() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("К камере игры", sizeSp = 13f) { toGameCamera() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         bar.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(tools) },
@@ -179,6 +190,8 @@ class MapEditor(
         }
         snapBtn.text = if (vp.snap) "Сетка: вкл" else "Сетка: выкл"
         snapBtn.alpha = if (vp.snap) 1f else 0.7f
+        sceneBtn.text = if (vp.showScene) "Мир игры: вкл" else "Мир игры: выкл"
+        sceneBtn.alpha = if (vp.showScene) 1f else 0.7f
         undoBtn.alpha = if (undo.isEmpty()) 0.35f else 1f
         redoBtn.alpha = if (redo.isEmpty()) 0.35f else 1f
     }
@@ -346,6 +359,28 @@ class MapEditor(
         commit()
         vp.focusSelected()
         select(vp.selected)
+    }
+
+    /** Просит мод записать геометрию сцены игры и, как только файл появился, показывает её в редакторе серым каркасом. */
+    private fun loadScene(auto: Boolean = false) {
+        val asked = System.currentTimeMillis()
+        sceneAskedAt = asked
+        store.requestScene()
+        var tries = 0
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        h.post(object : Runnable {
+            override fun run() {
+                if (sceneAskedAt != asked) return
+                if (store.sceneStamp() >= asked - 1000) {
+                    val sc = store.readScene()
+                    vp.scene = sc; vp.invalidate()
+                    if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 6} объектов")
+                    return
+                }
+                if (++tries < 12) h.postDelayed(this, 500)
+                else if (!auto) toast("Игра не ответила. Подожди секунду и нажми «↻ Мир»")
+            }
+        })
     }
 
     private fun r2(x: Double) = Math.round(x * 100.0) / 100.0

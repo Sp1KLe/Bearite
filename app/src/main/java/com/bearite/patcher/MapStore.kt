@@ -172,6 +172,31 @@ class MapStore(private val dir: File) {
         )
     }
 
+    /** Просит мод записать геометрию текущей сцены игры в maps/_scene (редактор рисует её под блоками). */
+    fun requestScene() {
+        try { val t = File(dir, "_cmd.tmp"); t.writeText("scene\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {}
+    }
+
+    /** Время последней записи сцены или 0. */
+    fun sceneStamp(): Long = File(dir, "_scene").let { if (it.isFile) it.lastModified() else 0L }
+
+    /** Рендереры сцены: по 6 чисел на объект (центр x y z и полуразмеры x y z, мировые координаты). */
+    fun readScene(): FloatArray? {
+        val f = File(dir, "_scene")
+        if (!f.isFile) return null
+        return try {
+            val out = ArrayList<Float>()
+            f.forEachLine { l ->
+                val p = l.trim().split(' ')
+                if (p.size == 6) { val v = p.mapNotNull { it.toFloatOrNull() }; if (v.size == 6) out.addAll(v) }
+            }
+            out.toFloatArray()
+        } catch (_: Throwable) { null }
+    }
+
+    /** Файл картинки для превью с текстурой в редакторе. */
+    fun textureFile(id: String): File? = texturePng(id).takeIf { it.isFile }
+
     companion object {
         val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal")
         val SHAPE_NAMES = mapOf("cube" to "Куб", "sphere" to "Шар", "cylinder" to "Цилиндр", "capsule" to "Капсула",

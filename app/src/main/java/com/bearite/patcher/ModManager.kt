@@ -79,6 +79,10 @@ class ModManager(private val ctx: Context) {
         Setting("coin_mult", "int", "Монеты за сбор ×", "Сколько монет даёт каждая собранная монета (до 10)", 1L, 1.0, 10.0, emptyList(), "slider"),
         Setting("open_gates", "bool", "Открыть все ворота уровней", "Ворота, которые открываются медведями, считаются открытыми", false, null, null, emptyList()),
         Setting("cosmetics", "bool", "Открыть все косметики", "Косметика считается открытой на максимальном уровне", false, null, null, emptyList()),
+        Setting("replay", "bool", "Запись реплея", "Пишет путь твоего медведя за последние секунды (10 точек в секунду). Запись сбрасывается при смене сцены", false, null, null, emptyList()),
+        Setting("replay_len", "int", "Длина записи, сек", "Сколько последних секунд хранить в реплее", 30L, 5.0, 120.0, emptyList(), "slider"),
+        Setting("replay_play", "bool", "Показать повтор", "Призрак-капсула пробегает записанный путь. Выключи и включи снова для нового повтора", false, null, null, emptyList()),
+        Setting("replay_speed", "float", "Скорость повтора", "1 — как было записано", 1.0, 0.25, 4.0, emptyList(), "slider"),
         Setting("ui_scale", "float", "Размер интерфейса мода", "Кнопки, панели и текст поверх игры. 1 — обычный размер", 1.0, 0.7, 1.6, emptyList(), "slider"),
     )
 
@@ -112,6 +116,10 @@ class ModManager(private val ctx: Context) {
             enabled = prefs.getBoolean("enabled_$BUILTIN_ID", true),
             icon = icon.takeIf { it.isFile },
             builtin = true,
+            hud = listOf(
+                HudButton("Запись", "replay", "toggle", 0.0, "right"),
+                HudButton("Повтор", "replay_play", "toggle", 0.0, "right"),
+            ),
         )
     }
 
@@ -340,11 +348,13 @@ class ModManager(private val ctx: Context) {
                 while (true) {
                     val e = zip.nextEntry ?: break
                     if (++entries > 20000) throw IllegalStateException("слишком много файлов в архиве")
-                    val target = File(tmp, e.name).canonicalFile
+                    // архивы, собранные в Windows, содержат пути вида libs\\arm64-v8a\\x.so: приводим к обычным слэшам
+                    val name = e.name.replace('\\', '/')
+                    val target = File(tmp, name).canonicalFile
                     if (!target.path.startsWith(tmpPath)) {
                         throw SecurityException("небезопасный путь в архиве: ${e.name}")
                     }
-                    if (e.isDirectory) {
+                    if (e.isDirectory || name.endsWith("/")) {
                         target.mkdirs()
                         continue
                     }
