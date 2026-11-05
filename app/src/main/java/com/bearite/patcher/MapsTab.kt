@@ -39,16 +39,10 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
             }, cardLp())
         }
 
-        val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        bar.addView(ui.pill("＋ Новая карта", primary = true) { newMapDialog(onChanged) })
-        bar.addView(ui.pill("Из буфера") { importFromClipboard() }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = ui.dp(8) })
-        list.addView(bar, cardLp())
-
         val maps = store.list()
         if (maps.isEmpty()) {
             list.addView(ui.label(
-                "Карт пока нет. Нажми «Новая карта»: блоки появятся в игре перед камерой, а двигать и красить их можно здесь же.",
+                "Карт пока нет. Нажми «Новая карта» вверху: блоки появятся в игре перед камерой, а двигать и красить их можно здесь же.",
                 15f, GameUi.MUTED, bold = false
             ).apply { gravity = Gravity.CENTER; setPadding(ui.dp(12), ui.dp(30), ui.dp(12), ui.dp(30)) })
             return
@@ -239,7 +233,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
 
     // ------------------------------------------------------------- новая карта
 
-    private fun newMapDialog(onChanged: () -> Unit) {
+    fun newMapDialog(onChanged: () -> Unit) {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var dlg: android.app.Dialog? = null
         fun option(title: String, text: String, world: Boolean) {
@@ -403,7 +397,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         }
     }
 
-    private fun importFromClipboard() {
+    fun importFromClipboard() {
         val cm = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(act)?.toString().orEmpty()
         if (!text.startsWith("BEARITE-MAP")) { toast("В буфере нет карты Bearite"); return }

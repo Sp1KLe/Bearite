@@ -25,7 +25,7 @@ import android.widget.TextView
 import java.util.Locale
 
 /**
- * Меню Bearite внутри игры в стиле лаунчера: тёмная кофейная панель, сливочный текст, карамельные акценты.
+ * Меню Bearite внутри игры в стиле игры: главный экран «Моды / Магазин / Редактор карт», яркие объёмные кнопки.
  * Вкладки «Установлено», «Все моды» (поиск и фильтр) и «Карты» (редактор карт). Рисуется обычными View
  * поверх Unity, открывается и закрывается с анимацией.
  */
@@ -41,11 +41,13 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private val search = EditText(act)
     private lateinit var filterBtn: TextView
     private lateinit var tabInstalled: TextView
-    private lateinit var tabAll: TextView
-    private lateinit var tabMaps: TextView
     private lateinit var tabGames: TextView
     private lateinit var tabReplay: TextView
     private lateinit var footer: TextView
+    private val head = LinearLayout(act)
+    private val hub = FrameLayout(act)
+    private lateinit var col: LinearLayout
+    private var screen = SCR_HUB
     private lateinit var scroll: ScrollView
 
     private val maps = MapsTab(act, ui, MapStore(act))
@@ -74,7 +76,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         root.setOnClickListener { hide() }
 
         val dm = act.resources.displayMetrics
-        panel.background = ui.round(GameUi.SURFACE, 28, GameUi.LINE_TAN)
+        panel.background = ui.round(GameUi.SURFACE, 28, GameUi.OUTLINE, 4)
         panel.clipToOutline = true
         panel.outlineProvider = ViewOutlineProvider.BACKGROUND
         panel.isClickable = true
@@ -83,40 +85,27 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             FrameLayout.LayoutParams((dm.widthPixels * 0.88f).toInt(), (dm.heightPixels * 0.88f).toInt(), Gravity.CENTER)
         )
         // мягкие пятна в углах, как на витрине концепта
-        panel.addView(blob(0x338D5338, 190), FrameLayout.LayoutParams(dp(190), dp(190), Gravity.END or Gravity.BOTTOM).apply {
+        panel.addView(blob(0x3363D32B, 190), FrameLayout.LayoutParams(dp(190), dp(190), Gravity.END or Gravity.BOTTOM).apply {
             rightMargin = -dp(55); bottomMargin = -dp(70)
         })
-        panel.addView(blob(0x26B78B68, 150), FrameLayout.LayoutParams(dp(150), dp(150), Gravity.END or Gravity.TOP).apply {
+        panel.addView(blob(0x33FFC61A, 150), FrameLayout.LayoutParams(dp(150), dp(150), Gravity.END or Gravity.TOP).apply {
             rightMargin = -dp(40); topMargin = -dp(60)
         })
 
-        val col = LinearLayout(act).apply {
+        col = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(10))
         }
         panel.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // шапка: логотип, вкладки, закрыть
-        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(logo(), LinearLayout.LayoutParams(dp(40), dp(40)))
-        head.addView(ui.label("Bearite", 20f).apply { setPadding(dp(10), 0, dp(14), 0) })
+        // шапка раздела строится в buildHead(): красная кнопка «назад», название, вкладки или кнопки раздела
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
         tabInstalled = tab("Установлено", TAB_INSTALLED)
-        tabAll = tab("Все моды", TAB_ALL)
-        tabMaps = tab("Карты", TAB_MAPS)
         tabGames = tab("Мини-игры", TAB_GAMES)
         tabReplay = tab("Реплей", TAB_REPLAY)
-        for (t in listOf(tabInstalled, tabAll, tabMaps, tabGames, tabReplay)) {
-            head.addView(t, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
-        }
-        head.addView(
-            ui.label("✕", 20f).apply {
-                gravity = Gravity.CENTER
-                background = ui.round(GameUi.RUST, 21)
-                setOnClickListener { hide() }
-            },
-            LinearLayout.LayoutParams(dp(54), dp(42)).apply { leftMargin = dp(10) }
-        )
         col.addView(head, ui.matchWrap())
+        buildHub()
 
         // поиск и фильтр: только на вкладке «Все моды»
         searchRow.orientation = LinearLayout.HORIZONTAL
@@ -127,7 +116,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         search.textSize = 15f
         search.isSingleLine = true
         search.inputType = InputType.TYPE_CLASS_TEXT
-        search.background = ui.round(GameUi.BG_DEEP, 20, GameUi.LINE)
+        search.background = ui.round(GameUi.BG_DEEP, 20, GameUi.OUTLINE, 3)
         search.setPadding(dp(16), 0, dp(16), 0)
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -138,7 +127,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             }
         })
         searchRow.addView(search, LinearLayout.LayoutParams(0, dp(42), 1f))
-        filterBtn = ui.pill("Обновить") { loadCatalog() }
+        filterBtn = ui.pill("Обновить", primary = true) { loadCatalog() }
         searchRow.addView(filterBtn, LinearLayout.LayoutParams(dp(112), dp(42)).apply { leftMargin = dp(8) })
         col.addView(searchRow, ui.matchWrap().apply { topMargin = dp(10) })
 
@@ -152,6 +141,101 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             setPadding(0, dp(6), 0, 0)
         }
         col.addView(footer)
+        applyScreen()
+    }
+
+    // ------------------------------------------------------------ главный экран и разделы
+
+    private fun buildHub() {
+        panel.addView(hub, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val pad = dp(16)
+        val top = FrameLayout(act)
+        hub.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76), Gravity.TOP).apply { setMargins(pad, pad, pad, 0) })
+        top.addView(ui.gameBtn("✕", GameUi.RUST, 22f, 14) { hide() }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START or Gravity.CENTER_VERTICAL))
+        top.addView(LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(logo(), LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(ui.label("Bearite", 28f, 0xFFFFFFFF.toInt()).apply {
+                setPadding(dp(10), 0, 0, 0)
+                setShadowLayer(dp(3).toFloat(), 0f, dp(2).toFloat(), GameUi.OUTLINE)
+            })
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+
+        val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        hub.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
+            setMargins(pad, dp(96), pad, pad)
+        })
+        body.addView(ui.gameBtn("Моды", GameUi.GREEN, 34f, 28) { openScreen(SCR_MODS) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        val right = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        right.addView(ui.gameBtn("Магазин", GameUi.YELLOW, 26f, 28) { openShopPopup() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        right.addView(ui.gameBtn("Редактор карт", GameUi.YELLOW, 26f, 28) { openScreen(SCR_MAPS) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(14) })
+        body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { leftMargin = dp(14) })
+    }
+
+    private fun openShopPopup() {
+        val colv = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        var dlg: android.app.Dialog? = null
+        colv.addView(ui.gameBtn("Магазин модов", GameUi.GREEN, 20f, 20) { dlg?.dismiss(); openScreen(SCR_SHOP) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
+        colv.addView(ui.gameBtn("Магазин карт", GameUi.YELLOW, 20f, 20) { dlg?.dismiss(); ui.soon("Магазин карт") },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)).apply { topMargin = dp(10) })
+        dlg = ui.dialog("Магазин", colv, listOf(GameUi.Btn("Закрыть")), widthDp = 360)
+        dlg.show()
+    }
+
+    private fun openScreen(s: Int) {
+        screen = s
+        tab = when (s) {
+            SCR_MODS -> if (tab == TAB_GAMES || tab == TAB_REPLAY) tab else TAB_INSTALLED
+            SCR_SHOP -> TAB_ALL
+            SCR_MAPS -> TAB_MAPS
+            else -> tab
+        }
+        if (s == SCR_SHOP && catalog == null && !catalogBusy) loadCatalog()
+        applyScreen()
+        scroll.scrollTo(0, 0)
+        panel.animate().cancel()
+        panel.alpha = 0.4f
+        panel.animate().alpha(1f).setDuration(180).start()
+    }
+
+    private fun applyScreen() {
+        hub.visibility = if (screen == SCR_HUB) View.VISIBLE else View.GONE
+        col.visibility = if (screen == SCR_HUB) View.GONE else View.VISIBLE
+        if (screen != SCR_HUB) refresh()
+    }
+
+    private fun buildHead() {
+        head.removeAllViews()
+        head.addView(ui.gameBtn("‹", GameUi.RUST, 28f, 14) { hideKeyboard(); openScreen(SCR_HUB) }, LinearLayout.LayoutParams(dp(50), dp(50)))
+        val title = when (screen) {
+            SCR_MODS -> "Моды"
+            SCR_SHOP -> "Магазин модов"
+            else -> "Редактор карт"
+        }
+        val titleView = ui.label(title, 22f, 0xFFFFFFFF.toInt()).apply {
+            setPadding(dp(12), 0, dp(8), 0)
+            setShadowLayer(dp(3).toFloat(), 0f, dp(2).toFloat(), GameUi.OUTLINE)
+        }
+        if (screen == SCR_MODS) {
+            head.addView(titleView)
+            for (t in listOf(tabInstalled, tabGames, tabReplay)) {
+                (t.parent as? ViewGroup)?.removeView(t)
+                head.addView(t, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
+            }
+        } else {
+            head.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (screen == SCR_MAPS) {
+                head.addView(ui.gameBtn("Новая карта", GameUi.YELLOW, 16f, 16) { maps.newMapDialog { renderList() } },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(46)).apply { leftMargin = dp(6) })
+                head.addView(ui.gameBtn("Загрузить карту", GameUi.GREEN, 16f, 16) { maps.importFromClipboard(); renderList() },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(46)).apply { leftMargin = dp(6) })
+            }
+        }
     }
 
     private fun blob(color: Int, sizeDp: Int) = View(act).apply {
@@ -163,8 +247,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         scaleType = ImageView.ScaleType.FIT_CENTER
     }
 
-    private fun tab(text: String, id: Int) = ui.label(text, 15f).apply {
+    private fun tab(text: String, id: Int) = ui.label(text, 15f, 0xFFFFFFFF.toInt()).apply {
         gravity = Gravity.CENTER
+        setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), GameUi.OUTLINE)
         setOnClickListener { selectTab(id) }
     }
 
@@ -174,7 +259,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         closing = false
         root.animate().cancel()
         panel.animate().cancel()
-        refresh()
+        screen = SCR_HUB
+        applyScreen()
         root.alpha = 0f
         panel.scaleX = 0.84f
         panel.scaleY = 0.84f
@@ -225,10 +311,10 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun refresh() {
-        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabAll to TAB_ALL, tabMaps to TAB_MAPS, tabGames to TAB_GAMES, tabReplay to TAB_REPLAY)) {
-            val on = tab == id
-            t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
-            t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 21, if (on) 0 else GameUi.LINE)
+        if (screen == SCR_HUB) return
+        buildHead()
+        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabGames to TAB_GAMES, tabReplay to TAB_REPLAY)) {
+            t.background = ui.chunky(if (tab == id) GameUi.YELLOW else GameUi.SURFACE3, 16)
         }
         searchRow.visibility = if (tab == TAB_ALL) View.VISIBLE else View.GONE
         footer.text = if (tab == TAB_MAPS) "Карты применяются в игре сразу, как только Bearite их увидит"
@@ -563,6 +649,10 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         const val TAB_MAPS = 2
         const val TAB_GAMES = 3
         const val TAB_REPLAY = 4
+        const val SCR_HUB = 0
+        const val SCR_MODS = 1
+        const val SCR_SHOP = 2
+        const val SCR_MAPS = 3
         val FILTER_NAMES = arrayOf("Все моды", "Только включённые", "Только выключенные", "С настройками", "С нативным кодом")
     }
 }

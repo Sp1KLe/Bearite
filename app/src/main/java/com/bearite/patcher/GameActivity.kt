@@ -22,6 +22,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import dalvik.system.PathClassLoader
@@ -241,28 +242,24 @@ class GameActivity : Activity() {
         return m.invoke(p) as View
     }
 
-    /** Кнопка «Моды» в стиле кнопок игры: видна на паузе (или пока состояние паузы неизвестно). */
+    /** Кнопки «Моды» и «Достижения» в стиле игры (жёлтые, с толстой обводкой): видны на паузе. */
     private fun menuButton(): View {
         val d = UiScale.density(this)
-        val b = TextView(this)
-        b.text = "Меню"
-        b.textSize = 20f * UiScale.factor(this)
-        b.typeface = Typeface.DEFAULT_BOLD
-        b.setTextColor(GameUi.ON_CREAM)
-        b.gravity = Gravity.CENTER
-        b.background = GradientDrawable().apply {
-            setColor(GameUi.CREAM)
-            cornerRadius = 24 * d
-            setStroke((2 * d).toInt(), GameUi.TAN)
-        }
-        b.setOnClickListener {
+        val ui = GameUi(this)
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        val mods = ui.gameBtn("Моды", GameUi.YELLOW, 18f, 16) {
             modMenu?.show()
             hud?.root?.visibility = View.GONE
         }
-        val lp = FrameLayout.LayoutParams((130 * d).toInt(), (48 * d).toInt(), Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+        val ach = ui.gameBtn("Достижения", GameUi.YELLOW, 18f, 16) { ui.soon("Достижения") }
+        row.addView(mods, LinearLayout.LayoutParams((110 * d).toInt(), (46 * d).toInt()))
+        row.addView(ach, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (46 * d).toInt()).apply { leftMargin = (8 * d).toInt() })
+        val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
         lp.topMargin = (10 * d).toInt()
-        b.layoutParams = lp
-        return b
+        row.layoutParams = lp
+        return row
     }
 
     /** -1 неизвестно, 0 игра идёт, 1 пауза. */

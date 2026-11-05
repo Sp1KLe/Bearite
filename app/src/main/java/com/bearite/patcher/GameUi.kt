@@ -42,19 +42,44 @@ class GameUi(val act: Activity) {
 
     fun matchWrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
-    /** Кнопка-пилюля. primary = светлая (главное действие), иначе тёмная с рамкой. */
+    /** Объёмная «леденцовая» кнопка игры: градиент сверху вниз, толстая тёмная обводка. */
+    fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3) = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(lighten(base), base)
+    ).apply {
+        cornerRadius = dp(radiusDp).toFloat()
+        setStroke(dp(strokeDp), OUTLINE)
+    }
+
+    /** Кнопка игры: белый текст с тёмной окантовкой на цветной плашке. */
+    fun gameBtn(text: String, base: Int, sizeSp: Float = 18f, radiusDp: Int = 16, onClick: () -> Unit): TextView =
+        label(text, sizeSp, 0xFFFFFFFF.toInt()).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(12), 0, dp(12), 0)
+            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), OUTLINE)
+            background = chunky(base, radiusDp)
+            setOnClickListener { onClick() }
+        }
+
+    /** Окно «Скоро…» для разделов, которых ещё нет. */
+    fun soon(title: String = "Скоро…") {
+        dialog(title, label("скоро...", 22f).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(6)) },
+            listOf(Btn("Понятно", primary = true)), widthDp = 320).show()
+    }
+
+    /** Кнопка-пилюля. primary = жёлтая (главное действие), danger = красная, иначе синяя. */
     fun pill(
         text: String, primary: Boolean = false, danger: Boolean = false, sizeSp: Float = 14f,
         onClick: () -> Unit
     ): TextView =
-        label(text, sizeSp, if (primary) ON_CREAM else CREAM).apply {
+        label(text, sizeSp, 0xFFFFFFFF.toInt()).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), 0, dp(14), 0)
             minHeight = dp(40)
+            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), OUTLINE)
             background = when {
-                primary -> round(CREAM, 20)
-                danger -> round(RUST, 20)
-                else -> round(SURFACE3, 20, LINE_TAN)
+                primary -> chunky(YELLOW, 18, 2)
+                danger -> chunky(RUST, 18, 2)
+                else -> chunky(SURFACE3, 18, 2)
             }
             setOnClickListener { onClick() }
         }
@@ -264,7 +289,7 @@ class GameUi(val act: Activity) {
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(SURFACE, 24, LINE_TAN, 1)
+            background = round(SURFACE, 24, OUTLINE, 3)
             setPadding(dp(20), dp(18), dp(20), dp(16))
         }
         box.addView(label(title, 19f))
@@ -312,24 +337,32 @@ class GameUi(val act: Activity) {
     }
 
     companion object {
-        const val BG = 0xFF17120F.toInt()
-        const val BG_DEEP = 0xFF1B1410.toInt()
-        const val SURFACE = 0xFF241A15.toInt()
-        const val SURFACE2 = 0xFF30221A.toInt()
-        const val SURFACE3 = 0xFF493124.toInt()
-        const val ROW = 0xFF271C16.toInt()
-        const val CREAM = 0xFFF2DFC5.toInt()
-        const val MUTED = 0xFFC3AA91.toInt()
-        const val DIM = 0xFF8F7763.toInt()
-        const val TAN = 0xFFD6B18D.toInt()
-        const val BROWN = 0xFF8D5338.toInt()
-        const val RUST = 0xFFB85F54.toInt()
-        const val GREEN = 0xFFB9D58A.toInt()
-        const val ON_CREAM = 0xFF2B1B12.toInt()
-        const val LINE = 0x22FFFFFF
-        const val LINE_TAN = 0x55D6B18D
+        // палитра в стиле Super Bear Adventure: тёмно-синий фон, жёлтые и зелёные «леденцовые» кнопки, тёмная обводка
+        const val BG = 0xFF111A29.toInt()
+        const val BG_DEEP = 0xFF0D1522.toInt()
+        const val SURFACE = 0xFF1D2A40.toInt()
+        const val SURFACE2 = 0xFF28385A.toInt()
+        const val SURFACE3 = 0xFF37507D.toInt()
+        const val ROW = 0xFF223250.toInt()
+        const val CREAM = 0xFFF6F8FF.toInt()
+        const val MUTED = 0xFFB6C4DE.toInt()
+        const val DIM = 0xFF7F90AE.toInt()
+        const val TAN = 0xFFFFD23F.toInt()
+        const val BROWN = 0xFFFFA726.toInt()
+        const val RUST = 0xFFE5483D.toInt()
+        const val GREEN = 0xFF63D32B.toInt()
+        const val YELLOW = 0xFFFFC61A.toInt()
+        const val ON_CREAM = 0xFF3A2400.toInt()
+        const val OUTLINE = 0xFF1A1206.toInt()
+        const val LINE = 0x33FFFFFF
+        const val LINE_TAN = 0xFF0B1220.toInt()
 
-        val TILES = intArrayOf(0xFF8D5338.toInt(), 0xFFB85F54.toInt(), 0xFF7A5C3E.toInt(), 0xFF9C6B4A.toInt(), 0xFF6E4636.toInt())
+        fun lighten(c: Int, k: Float = 0.28f): Int {
+            fun ch(v: Int) = (v + (255 - v) * k).toInt().coerceIn(0, 255)
+            return (c and 0xFF000000.toInt()) or (ch((c shr 16) and 255) shl 16) or (ch((c shr 8) and 255) shl 8) or ch(c and 255)
+        }
+
+        val TILES = intArrayOf(0xFFE5483D.toInt(), 0xFFFF9F1C.toInt(), 0xFF2BA84A.toInt(), 0xFF2E86DE.toInt(), 0xFF9B59B6.toInt())
         fun tileColor(id: String) = TILES[(id.hashCode() and 0x7fffffff) % TILES.size]
     }
 }
