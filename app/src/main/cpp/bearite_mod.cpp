@@ -2059,7 +2059,7 @@ void photon_nick(const std::string& nick) {
     logf_("команда: ник в Photon «%s»", nick.c_str());
 }
 
-void rp_command(const std::string& what);  // реплей: определён ниже, рядом с update()
+void rp_command(const std::vector<std::string>& p);  // реплей: определён ниже, рядом с update()
 
 /** Геометрия сцены для редактора карт: maps/_scene = «центр x y z, полуразмеры x y z» (мировые координаты) каждого включённого рендерера. */
 void dump_scene() {
@@ -2115,7 +2115,7 @@ void cmd_poll() {
         if (parts.empty()) continue;
         if (parts[0] == "nick" && parts.size() >= 2) { photon_nick(parts[1]); continue; }
         if (parts[0] == "scene") { dump_scene(); continue; }
-        if (parts[0] == "rp" && parts.size() >= 2) { rp_command(parts[1]); continue; }
+        if (parts[0] == "rp" && parts.size() >= 2) { rp_command(parts); continue; }
         if (parts[0] == "enter" && parts.size() >= 2) {
             if (const MapSpec* t = find_spec(parts[1])) {
                 g_inPlace = true;
@@ -2233,119 +2233,507 @@ uint8_t h_join_create_room(void* name, void* opts, void* lobby, void* friends, c
     return o_join_create_room ? o_join_create_room(name, opts, lobby, friends, mi) : 0;
 }
 
-// ---------------------------------------------------------------- реплей: запись пути медведя и повтор призраком
-// Управляется командами лаунчера (maps/_cmd): «rp\tstart» — начать запись (старая стирается), «rp\tstop» — остановить запись,
-// «rp\tplay» — показать повтор призраком, «rp\tstopplay» — остановить повтор. Состояние пишется в maps/_replay:
-// «запись(0/1)\tповтор(0/1)\tточек\tсекунд». Скорость повтора — настройка встроенного мода replay_speed.
-struct RpPt { long long t; float p[3]; };
-std::vector<RpPt> g_rp, g_rpPlay;
-long long g_rpLast = 0, g_rpStart = 0;
-bool g_rpRec = false, g_rpPlayReq = false, g_rpPlaying = false;
-uintptr_t g_rpGhost = 0;
-std::string g_rpStatus = "?";
-const size_t RP_MAX_POINTS = 36000;  // час записи при 10 точках в секунду
+// ---------------------------------------------------------------- реплей по мотивам Replay Mod
+// Запись: каждые 100 мс позиция и поворот всех игроков комнаты (в одиночной игре — только твоя). Просмотр: призраки-капсулы,
+// пауза, перемотка, скорость, свободная камера и путь камеры по ключевым кадрам. Записи лежат в maps/replays/<имя>.rpl,
+// ключевые кадры — рядом в <имя>.cam. Команды лаунчера (maps/_cmd): «rp\tstart|stop|save\tимя|load\tимя|play|stopplay|pause|resume|
+// seek\tмс|speed\tx|cam\t0/1/2|keys\tимя». Свободная камера читает позу из maps/_rpcam («x y z yaw pitch»), состояние
+// пишется в maps/_replay.
+struct RpEnt { int id; float p[3]; float yaw; };
+struct RpFrame { long long t; std::vector<RpEnt> e; };
+struct RpPl { int id; std::string nick; float p[3]; float yaw; };
+struct RpKey { long long t; float p[3]; float yaw, pitch; };
 
-void rp_ghost_free(bool destroy) {
-    if (!g_rpGhost) return;
-    if (destroy) if (void* go = target(g_rpGhost)) if (F.destroy) { void* a[1] = {go}; inv(F.destroy, nullptr, a); }
-    gch_free(g_rpGhost);
-    g_rpGhost = 0;
+std::vector<RpFrame> g_rpFrames;
+std::map<int, std::string> g_rpNicks;
+std::string g_rpScene, g_rpMsg, g_rpStatus = "?";
+bool g_rpRec = false, g_rpSess = false, g_rpPaused = false, g_rpCamHeld = false;
+long long g_rpRecStart = 0, g_rpLast = 0, g_rpPrevNow = 0, g_rpStatusAt = 0, g_rpStatusWrite = 0, g_rpFreeStamp = 0;
+double g_rpT = 0, g_rpSpeed = 1.0;
+int g_rpCamMode = 0;  // 0 камера игры, 1 свободная, 2 по ключевым кадрам
+std::map<int, uintptr_t> g_rpGhosts;
+std::vector<RpKey> g_rpKeys;
+std::vector<uintptr_t> g_rpCamCtl;
+float g_rpFree[5] = {0, 0, 0, 0, 0};
+void* g_rpSetEn = nullptr;
+const size_t RP_MAX_FRAMES = 36000;  // час записи
+
+long long rp_dur() { return g_rpFrames.empty() ? 0 : g_rpFrames.back().t; }
+
+/** Имя файла записи: без путей и точек, чтобы нельзя было выйти из папки replays. */
+std::string rp_path(const std::string& name, const char* ext) {
+    std::string o;
+    for (char c : name) o += (c == '/' || c == '\\' || c == '.' || c == ':' || (unsigned char)c < 32) ? '_' : c;
+    if (o.empty() || o.size() > 120) o = "replay";
+    return g_mapsDir + "/replays/" + o + ext;
 }
 
-void rp_stop_play() {
-    rp_ghost_free(true);
-    g_rpPlaying = false;
-    g_rpPlayReq = false;
-    g_rpPlay.clear();
+float rp_yaw_of(void* tr) {
+    if (!tr || !F.get_forward) return 0.f;
+    void* fv = inv(F.get_forward, tr);
+    if (!fv) return 0.f;
+    const float* f = (const float*)obj_unbox(fv);
+    return atan2f(f[0], f[2]) * 57.29578f;
 }
 
-/** Сцена сменилась: объекты Unity уничтожил сам, запись относилась к прошлой сцене. */
-void rp_reset() {
-    g_rp.clear(); g_rpPlay.clear();
-    g_rpRec = false; g_rpPlaying = false; g_rpPlayReq = false;
-    rp_ghost_free(false);
+/** Все игроки комнаты: позиция, поворот, номер и ник Photon (как в publish_positions). В одиночной игре — свой медведь. */
+void rp_collect(long long now, std::vector<RpPl>& out) {
+    static void *npcT = nullptr, *pvT = nullptr, *pvK = nullptr, *getOwner = nullptr;
+    if (!npcT) {
+        npcT = type_of("", "NetworkPlayerController");
+        pvT = type_of("Photon.Pun", "PhotonView");
+        pvK = bearite_find_class("Photon.Pun", "PhotonView");
+        getOwner = pvK ? bearite_il2.class_get_method_from_name(pvK, "get_Owner", 0) : nullptr;
+    }
+    if (npcT && F.get_transform && F.get_position) {
+        void* arr = find_objects(npcT);
+        uintptr_t n = arr ? arr_len(arr) : 0;
+        for (uintptr_t i = 0; i < n && i < 64; ++i) {
+            void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!c) continue;
+            void* tr = inv(F.get_transform, c);
+            void* pv = tr ? inv(F.get_position, tr) : nullptr;
+            if (!pv) continue;
+            RpPl p;
+            p.id = -(int)(i + 1);
+            memcpy(p.p, obj_unbox(pv), sizeof p.p);
+            p.yaw = rp_yaw_of(tr);
+            void* go = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+            if (go && pvT && getOwner && F.get_component) {
+                void* a[1] = {pvT};
+                if (void* view = inv(F.get_component, go, a)) if (void* owner = inv(getOwner, view)) {
+                    void* pk = obj_class(owner);
+                    void* gA = bearite_il2.class_get_method_from_name(pk, "get_ActorNumber", 0);
+                    void* gN = bearite_il2.class_get_method_from_name(pk, "get_NickName", 0);
+                    if (gA) if (void* r = inv(gA, owner)) p.id = *(const int*)obj_unbox(r);
+                    if (gN) p.nick = utf8(inv(gN, owner));
+                }
+            }
+            for (auto& ch : p.nick) if (ch == '\t' || ch == '\n' || ch == '\r' || ch == ',' || ch == ';') ch = ' ';
+            out.push_back(p);
+        }
+    }
+    if (out.empty() && F.get_position) if (void* tr = pick_player(now)) if (void* pv = inv(F.get_position, tr)) {
+        RpPl p;
+        p.id = 0;
+        p.nick = "Ты";
+        memcpy(p.p, obj_unbox(pv), sizeof p.p);
+        p.yaw = rp_yaw_of(tr);
+        out.push_back(p);
+    }
 }
 
-void rp_command(const std::string& what) {
-    if (what == "start") { g_rp.clear(); g_rpRec = true; g_rpLast = 0; logf_("реплей: запись началась"); }
-    else if (what == "stop") { g_rpRec = false; logf_("реплей: запись остановлена, точек %d", (int)g_rp.size()); }
-    else if (what == "play") g_rpPlayReq = true;
-    else if (what == "stopplay") rp_stop_play();
+// ---- призраки
+
+void rp_ghost_kill(uintptr_t h, bool destroy) {
+    if (!h) return;
+    if (destroy) if (void* go = target(h)) if (F.destroy) { void* a[1] = {go}; inv(F.destroy, nullptr, a); }
+    gch_free(h);
 }
 
-void rp_make_ghost() {
-    if (!F.create_primitive) return;
+void rp_ghosts_clear(bool destroy) {
+    for (auto& kv : g_rpGhosts) rp_ghost_kill(kv.second, destroy);
+    g_rpGhosts.clear();
+}
+
+uintptr_t rp_make_ghost(int id) {
+    if (!F.create_primitive) return 0;
     int t = 1;  // PrimitiveType.Capsule
     void* a[1] = {&t};
     bool ok = false;
     void* go = inv(F.create_primitive, nullptr, a, &ok);
-    if (!go) return;
-    g_rpGhost = gch_new(go, 0);
-    if (F.type_collider && F.get_component && F.collider_enabled) {  // призрак не должен ни за что цепляться
+    if (!go) return 0;
+    uintptr_t h = gch_new(go, 0);
+    if (F.type_collider && F.get_component && F.collider_enabled) {  // призрак ни за что не цепляется
         void* b[1] = {F.type_collider};
         void* col = inv(F.get_component, go, b);
         if (col) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
     }
-    if (F.set_name) { void* b[1] = {bearite_il2.string_new("Bearite/replay")}; inv(F.set_name, go, b); }
+    if (F.set_name) { std::string nm = "Bearite/replay " + std::to_string(id); void* b[1] = {bearite_il2.string_new(nm.c_str())}; inv(F.set_name, go, b); }
+    static const Col pal[] = {{0.35f, 0.8f, 1.f, 1.f}, {1.f, 0.6f, 0.3f, 1.f}, {0.6f, 1.f, 0.5f, 1.f}, {1.f, 0.5f, 0.8f, 1.f}, {0.9f, 0.85f, 0.3f, 1.f}, {0.7f, 0.6f, 1.f, 1.f}};
     if (F.type_renderer && F.get_component && F.get_material && F.set_color) {
         void* b[1] = {F.type_renderer};
         void* rend = inv(F.get_component, go, b);
         void* mat = rend ? inv(F.get_material, rend) : nullptr;
-        if (mat) { Col c{0.35f, 0.8f, 1.f, 1.f}; void* d[1] = {&c}; inv(F.set_color, mat, d); }
+        if (mat) { Col c = pal[((id % 6) + 6) % 6]; void* d[1] = {&c}; inv(F.set_color, mat, d); }
     }
     if (F.go_transform && F.set_scale) {
         void* tr = inv(F.go_transform, go);
         if (tr) { float v[3] = {0.8f, 0.8f, 0.8f}; void* d[1] = {v}; inv(F.set_scale, tr, d); }
     }
+    return h;
 }
 
-void rp_write_status() {
-    long long secs = g_rp.size() >= 2 ? (g_rp.back().t - g_rp.front().t) / 1000 : 0;
-    char buf[96];
-    snprintf(buf, sizeof buf, "%d\t%d\t%d\t%lld\n", g_rpRec ? 1 : 0, g_rpPlaying ? 1 : 0, (int)g_rp.size(), secs);
-    if (g_rpStatus == buf) return;
+/** Ставит призраков в положение момента T (линейная интерполяция между кадрами записи). */
+void rp_sample(double T) {
+    if (g_rpFrames.size() < 2) return;
+    size_t lo = 0, hi = g_rpFrames.size() - 1;
+    while (lo < hi) {  // последний кадр с t <= T
+        size_t mid = (lo + hi + 1) / 2;
+        if ((double)g_rpFrames[mid].t <= T) lo = mid; else hi = mid - 1;
+    }
+    const RpFrame& a = g_rpFrames[lo];
+    const RpFrame& b = g_rpFrames[std::min(lo + 1, g_rpFrames.size() - 1)];
+    double span = (double)(b.t - a.t);
+    float k = span > 0 ? (float)std::min(1.0, std::max(0.0, (T - (double)a.t) / span)) : 0.f;
+    std::unordered_set<int> seen;
+    for (const auto& e0 : a.e) {
+        const RpEnt* e1 = nullptr;
+        for (const auto& x : b.e) if (x.id == e0.id) { e1 = &x; break; }
+        float p[3];
+        float yaw = e0.yaw;
+        for (int j = 0; j < 3; ++j) p[j] = e1 ? e0.p[j] + (e1->p[j] - e0.p[j]) * k : e0.p[j];
+        if (e1) {
+            float d = e1->yaw - e0.yaw;
+            while (d > 180.f) d -= 360.f;
+            while (d < -180.f) d += 360.f;
+            yaw = e0.yaw + d * k;
+        }
+        seen.insert(e0.id);
+        auto it = g_rpGhosts.find(e0.id);
+        void* go = it != g_rpGhosts.end() ? target(it->second) : nullptr;
+        if (!go) {
+            if (it != g_rpGhosts.end()) { rp_ghost_kill(it->second, false); g_rpGhosts.erase(it); }
+            uintptr_t h = rp_make_ghost(e0.id);
+            if (!h) continue;
+            g_rpGhosts[e0.id] = h;
+            go = target(h);
+        }
+        void* tr = go && F.go_transform ? inv(F.go_transform, go) : nullptr;
+        if (!tr) continue;
+        V3 pos{p[0], p[1] + 0.8f, p[2]};  // капсула с центром посередине: ставим её на землю
+        void* pa[1] = {&pos};
+        inv(F.set_position, tr, pa);
+        V3 eu{0.f, yaw, 0.f};
+        void* ea[1] = {&eu};
+        inv(F.set_euler, tr, ea);
+    }
+    for (auto it = g_rpGhosts.begin(); it != g_rpGhosts.end();) {  // тех, кого нет в этом кадре, убираем
+        if (!seen.count(it->first)) { rp_ghost_kill(it->second, true); it = g_rpGhosts.erase(it); } else ++it;
+    }
+}
+
+// ---- камера
+
+void* rp_en_method() {
+    if (!g_rpSetEn) {
+        void* k = bearite_find_class("UnityEngine", "Behaviour");
+        g_rpSetEn = k ? bearite_il2.class_get_method_from_name(k, "set_enabled", 1) : nullptr;
+    }
+    return g_rpSetEn;
+}
+
+/** Отключает родной контроллер камеры игры, чтобы он не перебивал нашу позу. */
+void rp_cam_hold() {
+    if (g_rpCamHeld) return;
+    g_rpCamHeld = true;
+    void* setEn = rp_en_method();
+    void* ct = type_of("", "CameraController");
+    int n = 0;
+    if (setEn && ct) if (void* arr = find_objects(ct)) {
+        uintptr_t cnt = arr_len(arr);
+        for (uintptr_t i = 0; i < cnt && i < 8; ++i) {
+            void* o = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!o) continue;
+            uint8_t off = 0;
+            void* a[1] = {&off};
+            inv(setEn, o, a);
+            g_rpCamCtl.push_back(gch_new(o, 0));
+            ++n;
+        }
+    }
+    logf_("реплей: родная камера отключена у %d контроллеров (CameraController=%d, set_enabled=%d)", n, ct != nullptr, setEn != nullptr);
+}
+
+void rp_cam_release(bool alive) {
+    if (!g_rpCamHeld) return;
+    g_rpCamHeld = false;
+    void* setEn = rp_en_method();
+    for (uintptr_t h : g_rpCamCtl) {
+        if (alive && setEn) if (void* o = target(h)) { uint8_t on = 1; void* a[1] = {&on}; inv(setEn, o, a); }
+        gch_free(h);
+    }
+    g_rpCamCtl.clear();
+    logf_("реплей: родная камера возвращена");
+}
+
+/** Поза главной камеры: x y z, поворот вокруг Y и наклон (в градусах, вниз — плюс, как в Unity). */
+bool rp_cam_pose(float* st) {
+    void* cam = F.cam_main ? inv(F.cam_main, nullptr) : nullptr;
+    void* tr = cam && F.get_transform ? inv(F.get_transform, cam) : nullptr;
+    void* pv = tr && F.get_position ? inv(F.get_position, tr) : nullptr;
+    void* fv = tr && F.get_forward ? inv(F.get_forward, tr) : nullptr;
+    if (!pv || !fv) return false;
+    memcpy(st, obj_unbox(pv), 3 * sizeof(float));
+    const float* f = (const float*)obj_unbox(fv);
+    st[3] = atan2f(f[0], f[2]) * 57.29578f;
+    float y = std::max(-1.f, std::min(1.f, f[1]));
+    st[4] = -asinf(y) * 57.29578f;
+    return true;
+}
+
+void rp_key_pose(double T, float* st) {
+    const auto& K = g_rpKeys;
+    const RpKey* one = T <= (double)K.front().t ? &K.front() : (T >= (double)K.back().t ? &K.back() : nullptr);
+    if (one) { memcpy(st, one->p, 3 * sizeof(float)); st[3] = one->yaw; st[4] = one->pitch; return; }
+    size_t i = 0;
+    while (i + 1 < K.size() && (double)K[i + 1].t <= T) ++i;
+    const RpKey& a = K[i];
+    const RpKey& b = K[i + 1];
+    double u = (T - (double)a.t) / (double)(b.t - a.t);
+    u = u * u * (3.0 - 2.0 * u);  // плавный старт и остановка на каждом ключе
+    for (int j = 0; j < 3; ++j) st[j] = a.p[j] + (float)((b.p[j] - a.p[j]) * u);
+    float dy = b.yaw - a.yaw;
+    while (dy > 180.f) dy -= 360.f;
+    while (dy < -180.f) dy += 360.f;
+    st[3] = a.yaw + (float)(dy * u);
+    st[4] = a.pitch + (float)((b.pitch - a.pitch) * u);
+}
+
+long long rp_free_stamp() {
+    struct stat sb;
+    if (stat((g_mapsDir + "/_rpcam").c_str(), &sb) != 0) return 0;
+    return (long long)sb.st_mtim.tv_sec * 1000000000LL + sb.st_mtim.tv_nsec;
+}
+
+void rp_cam_apply() {
+    float st[5];
+    bool have = false;
+    if (g_rpCamMode == 1) {
+        long long stamp = rp_free_stamp();
+        if (stamp != g_rpFreeStamp) {  // лаунчер переписал позу свободной камеры
+            g_rpFreeStamp = stamp;
+            if (FILE* f = fopen((g_mapsDir + "/_rpcam").c_str(), "r")) {
+                float v[5];
+                if (fscanf(f, "%f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5) memcpy(g_rpFree, v, sizeof v);
+                fclose(f);
+            }
+        }
+        memcpy(st, g_rpFree, sizeof st);
+        have = true;
+    } else if (g_rpCamMode == 2 && g_rpKeys.size() >= 2) {
+        rp_key_pose(g_rpT, st);
+        have = true;
+    }
+    if (!have) { rp_cam_release(true); return; }
+    rp_cam_hold();
+    void* cam = F.cam_main ? inv(F.cam_main, nullptr) : nullptr;
+    void* tr = cam && F.get_transform ? inv(F.get_transform, cam) : nullptr;
+    if (!tr || !F.set_position || !F.set_euler) return;
+    V3 pos{st[0], st[1], st[2]};
+    void* a[1] = {&pos};
+    inv(F.set_position, tr, a);
+    V3 eu{st[4], st[3], 0.f};
+    void* b[1] = {&eu};
+    inv(F.set_euler, tr, b);
+}
+
+// ---- сеанс просмотра, файлы, команды
+
+void rp_end_session(bool alive) {
+    rp_ghosts_clear(alive);
+    rp_cam_release(alive);
+    g_rpSess = false;
+    g_rpPaused = false;
+    g_rpCamMode = 0;
+}
+
+void rp_begin_session() {
+    if (g_rpFrames.size() < 2) { g_rpMsg = "Записи нет"; return; }
+    if (!g_rpScene.empty() && g_rpScene != g_scene) { g_rpMsg = "Запись сделана в сцене «" + g_rpScene + "», сейчас «" + g_scene + "»: открой ту же карту"; return; }
+    g_rpRec = false;
+    g_rpSess = true;
+    g_rpPaused = false;
+    g_rpT = 0;
+    g_rpPrevNow = 0;
+    g_rpMsg.clear();
+}
+
+bool rp_save(const std::string& name) {
+    if (g_rpFrames.empty()) return false;
+    mkdir((g_mapsDir + "/replays").c_str(), 0775);
+    FILE* f = fopen(rp_path(name, ".rpl").c_str(), "w");
+    if (!f) return false;
+    fprintf(f, "BRP1\t%s\t%d\t%lld\n", g_rpScene.c_str(), (int)g_rpFrames.size(), rp_dur());
+    for (auto& kv : g_rpNicks) fprintf(f, "N\t%d\t%s\n", kv.first, kv.second.c_str());
+    for (auto& fr : g_rpFrames) {
+        fprintf(f, "F\t%lld", fr.t);
+        for (auto& e : fr.e) fprintf(f, "\t%d,%.2f,%.2f,%.2f,%.1f", e.id, e.p[0], e.p[1], e.p[2], e.yaw);
+        fputc('\n', f);
+    }
+    fclose(f);
+    return true;
+}
+
+bool rp_load(const std::string& name) {
+    FILE* f = fopen(rp_path(name, ".rpl").c_str(), "r");
+    if (!f) return false;
+    std::string text, chunk(65536, '\0');
+    size_t n;
+    while ((n = fread(&chunk[0], 1, chunk.size(), f)) > 0) text.append(chunk.data(), n);
+    fclose(f);
+    std::vector<RpFrame> frames;
+    std::map<int, std::string> nicks;
+    std::string scene;
+    bool head = false;
+    size_t st = 0;
+    while (st < text.size()) {
+        size_t e = text.find('\n', st);
+        if (e == std::string::npos) e = text.size();
+        std::string line = text.substr(st, e - st);
+        st = e + 1;
+        if (line.empty()) continue;
+        auto p = split_tab(line);
+        if (p.empty()) continue;
+        if (!head) {
+            if (p[0] != "BRP1") return false;
+            head = true;
+            if (p.size() > 1) scene = p[1];
+            continue;
+        }
+        if (p[0] == "N" && p.size() >= 3) nicks[atoi(p[1].c_str())] = p[2];
+        else if (p[0] == "F" && p.size() >= 2) {
+            RpFrame fr;
+            fr.t = atoll(p[1].c_str());
+            for (size_t i = 2; i < p.size(); ++i) {
+                int id;
+                float x, y, z, yw;
+                if (sscanf(p[i].c_str(), "%d,%f,%f,%f,%f", &id, &x, &y, &z, &yw) != 5) continue;
+                RpEnt en;
+                en.id = id; en.p[0] = x; en.p[1] = y; en.p[2] = z; en.yaw = yw;
+                fr.e.push_back(en);
+            }
+            frames.push_back(std::move(fr));
+        }
+    }
+    if (frames.size() < 2) return false;
+    g_rpFrames.swap(frames);
+    g_rpNicks.swap(nicks);
+    g_rpScene = scene;
+    return true;
+}
+
+void rp_load_keys(const std::string& name) {
+    g_rpKeys.clear();
+    FILE* f = fopen(rp_path(name, ".cam").c_str(), "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        long long t;
+        float x, y, z, yw, pt;
+        if (sscanf(line, "%lld %f %f %f %f %f", &t, &x, &y, &z, &yw, &pt) != 6) continue;
+        RpKey k;
+        k.t = t; k.p[0] = x; k.p[1] = y; k.p[2] = z; k.yaw = yw; k.pitch = pt;
+        g_rpKeys.push_back(k);
+    }
+    fclose(f);
+    std::sort(g_rpKeys.begin(), g_rpKeys.end(), [](const RpKey& a, const RpKey& b) { return a.t < b.t; });
+    std::vector<RpKey> u;  // два ключа в один момент не нужны
+    for (auto& k : g_rpKeys) if (u.empty() || k.t > u.back().t) u.push_back(k);
+    g_rpKeys.swap(u);
+}
+
+/** Сцена сменилась: объекты Unity уничтожил сам; запись остаётся в памяти, чтобы её можно было сохранить. */
+void rp_reset() {
+    bool was = g_rpSess || g_rpRec;
+    g_rpRec = false;
+    rp_end_session(false);
+    if (was) g_rpMsg = "Сцена сменилась: запись и просмотр остановлены";
+}
+
+void rp_command(const std::vector<std::string>& p) {
+    if (p.size() < 2) return;
+    const std::string& w = p[1];
+    std::string a2 = p.size() > 2 ? p[2] : "";
+    long long now = now_ms();
+    if (w == "start") {
+        if (g_rpSess) rp_end_session(true);
+        g_rpFrames.clear(); g_rpNicks.clear();
+        g_rpScene = g_scene; g_rpRec = true; g_rpRecStart = now; g_rpLast = 0; g_rpMsg.clear();
+        logf_("реплей: запись началась в сцене «%s»", g_scene.c_str());
+    } else if (w == "stop") {
+        g_rpRec = false;
+        logf_("реплей: запись остановлена, кадров %d", (int)g_rpFrames.size());
+    } else if (w == "save") {
+        g_rpMsg = rp_save(a2) ? "Запись сохранена" : "Не удалось сохранить запись";
+    } else if (w == "load") {
+        if (g_rpSess) rp_end_session(true);
+        g_rpRec = false;
+        if (rp_load(a2)) { g_rpMsg.clear(); rp_load_keys(a2); logf_("реплей: загружено «%s», кадров %d", a2.c_str(), (int)g_rpFrames.size()); }
+        else g_rpMsg = "Не удалось открыть запись";
+    } else if (w == "play") {
+        rp_begin_session();
+    } else if (w == "stopplay") {
+        rp_end_session(true);
+    } else if (w == "pause") {
+        g_rpPaused = true;
+    } else if (w == "resume") {
+        if (g_rpSess && g_rpT >= (double)rp_dur()) g_rpT = 0;  // повтор после конца: сначала
+        g_rpPaused = false;
+        g_rpPrevNow = 0;
+    } else if (w == "seek") {
+        g_rpT = std::max(0.0, std::min((double)rp_dur(), atof(a2.c_str())));
+    } else if (w == "speed") {
+        g_rpSpeed = std::max(0.1, std::min(8.0, atof(a2.c_str())));
+    } else if (w == "cam") {
+        int m = atoi(a2.c_str());
+        if (!g_rpSess) return;
+        if (m == 1) {  // свободная камера стартует с текущей позы
+            float st[5];
+            if (rp_cam_pose(st)) memcpy(g_rpFree, st, sizeof st);
+            g_rpFreeStamp = rp_free_stamp();
+        }
+        g_rpCamMode = (m == 1 || m == 2) ? m : 0;
+    } else if (w == "keys") {
+        rp_load_keys(a2);
+    }
+}
+
+void rp_write_status(long long now) {
+    if (now - g_rpStatusAt < (g_rpSess ? 100 : 300)) return;
+    g_rpStatusAt = now;
+    float cp[5] = {0, 0, 0, 0, 0};
+    if (g_rpSess) rp_cam_pose(cp);
+    char buf[700];
+    snprintf(buf, sizeof buf, "%d\t%d\t%d\t%d\t%lld\t%lld\t%.2f\t%d\t%d\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%s\t%s\n",
+             g_rpRec ? 1 : 0, g_rpSess ? 1 : 0, g_rpPaused ? 1 : 0, (int)g_rpFrames.size(), rp_dur(), (long long)g_rpT, g_rpSpeed,
+             g_rpCamMode, (int)g_rpKeys.size(), cp[0], cp[1], cp[2], cp[3], cp[4], g_rpScene.c_str(), g_rpMsg.c_str());
+    if (g_rpStatus == buf && now - g_rpStatusWrite < 4000) return;  // без изменений всё равно обновляем время файла: так видно, что игра жива
     g_rpStatus = buf;
+    g_rpStatusWrite = now;
     std::string path = g_mapsDir + "/_replay", tmp = g_mapsDir + "/.replay.tmp";
     if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(buf, f); fclose(f); rename(tmp.c_str(), path.c_str()); }
 }
 
 void replay_tick(long long now) {
-    if (!F.get_position) return;
-    if (g_rpRec && now - g_rpLast >= 100) {  // 10 точек в секунду, пока идёт запись
+    if (g_rpRec && now - g_rpLast >= 100) {  // 10 кадров в секунду
         g_rpLast = now;
-        if (g_rp.size() >= RP_MAX_POINTS) { g_rpRec = false; logf_("реплей: запись остановлена, достигнут лимит"); }
-        else if (void* tr = pick_player(now)) if (void* pv = inv(F.get_position, tr)) {
-            RpPt pt;
-            pt.t = now;
-            memcpy(pt.p, obj_unbox(pv), sizeof pt.p);
-            g_rp.push_back(pt);
-        }
-    }
-    if (g_rpPlayReq && !g_rpPlaying) {
-        g_rpPlayReq = false;
-        if (g_rp.size() < 2) logf_("реплей: записи нет");
-        else { g_rpPlay = g_rp; g_rpStart = now; g_rpPlaying = true; logf_("реплей: повтор %d точек", (int)g_rpPlay.size()); }
-    }
-    if (g_rpPlaying) {
-        double sp = A ? A->get_float(ID, "replay_speed", 1.0) : 1.0;
-        if (sp < 0.25) sp = 0.25;
-        if (sp > 4.0) sp = 4.0;
-        double tt = (double)g_rpPlay.front().t + (double)(now - g_rpStart) * sp;
-        if (tt >= (double)g_rpPlay.back().t) rp_stop_play();
+        if (g_rpFrames.size() >= RP_MAX_FRAMES) { g_rpRec = false; g_rpMsg = "Запись остановлена: лимит в час"; }
         else {
-            size_t i = 0;
-            while (i + 1 < g_rpPlay.size() && (double)g_rpPlay[i + 1].t <= tt) ++i;
-            const RpPt& a0 = g_rpPlay[i];
-            const RpPt& b0 = g_rpPlay[std::min(i + 1, g_rpPlay.size() - 1)];
-            double span = (double)(b0.t - a0.t);
-            float k = span > 0 ? (float)((tt - (double)a0.t) / span) : 0.f;
-            V3 pos{a0.p[0] + (b0.p[0] - a0.p[0]) * k, a0.p[1] + (b0.p[1] - a0.p[1]) * k, a0.p[2] + (b0.p[2] - a0.p[2]) * k};
-            void* go = g_rpGhost ? target(g_rpGhost) : nullptr;
-            if (!go) { rp_ghost_free(false); rp_make_ghost(); go = g_rpGhost ? target(g_rpGhost) : nullptr; }
-            if (go && F.go_transform && F.set_position) if (void* tr = inv(F.go_transform, go)) { void* a[1] = {&pos}; inv(F.set_position, tr, a); }
+            std::vector<RpPl> pl;
+            rp_collect(now, pl);
+            RpFrame fr;
+            fr.t = now - g_rpRecStart;
+            for (auto& q : pl) {
+                RpEnt e;
+                e.id = q.id; memcpy(e.p, q.p, sizeof e.p); e.yaw = q.yaw;
+                fr.e.push_back(e);
+                if (!g_rpNicks.count(q.id)) g_rpNicks[q.id] = q.nick;
+            }
+            g_rpFrames.push_back(std::move(fr));
         }
     }
-    rp_write_status();
+    if (g_rpSess) {
+        if (g_rpPrevNow == 0) g_rpPrevNow = now;
+        if (!g_rpPaused) {
+            g_rpT += (double)(now - g_rpPrevNow) * g_rpSpeed;
+            if (g_rpT >= (double)rp_dur()) { g_rpT = (double)rp_dur(); g_rpPaused = true; }
+        }
+        g_rpPrevNow = now;
+        rp_sample(g_rpT);
+        rp_cam_apply();
+    }
+    rp_write_status(now);
 }
 
 long long g_lastTick = 0, g_lastSlow = 0;

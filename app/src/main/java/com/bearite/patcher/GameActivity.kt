@@ -55,6 +55,7 @@ class GameActivity : Activity() {
     private var modMenu: GameModMenu? = null
     private var hud: GameHud? = null
     private var cheats: CheatOverlay? = null
+    private var replayUi: ReplayOverlay? = null
     private var modButton: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -162,6 +163,7 @@ class GameActivity : Activity() {
         root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * UiScale.density(this)).toInt(); rightMargin = (12 * UiScale.density(this)).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         cheats = CheatOverlay(this, root).also { it.start() }
+        replayUi = ReplayOverlay(this, root).also { it.start() }
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
         chat = ChatOverlay(this, root).also { it.onRoomChanged = { updateModButton() }; it.start() }
@@ -398,6 +400,7 @@ class GameActivity : Activity() {
         try { levelPrompt?.stop() } catch (_: Throwable) {}
         try { chat?.stop() } catch (_: Throwable) {}
         try { miniGames?.stopAll() } catch (_: Throwable) {}
+        try { replayUi?.stop() } catch (_: Throwable) {}
         try { File(filesDir, RUNNING_MARKER).delete() } catch (_: Throwable) {}
         val hasDestroy = player?.javaClass?.methods?.any { it.name == "destroy" && it.parameterTypes.isEmpty() } == true
         callPlayer(if (hasDestroy) "destroy" else "quit")

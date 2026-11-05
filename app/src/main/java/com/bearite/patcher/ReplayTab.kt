@@ -3,68 +3,124 @@ package com.bearite.patcher
 import android.app.Activity
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.LinearLayout
-import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Вкладка «Реплей» в меню паузы: запись пути медведя по кнопке (идёт, пока её не остановишь) и повтор призраком.
- * Команды уходят нативному моду через maps/_cmd («rp\tstart», «rp\tstop», «rp\tplay», «rp\tstopplay»),
- * состояние мод пишет в maps/_replay: «запись(0/1)\tповтор(0/1)\tточек\tсекунд».
+ * Вкладка «Реплей» в меню паузы (по мотивам Replay Mod): запись всех игроков комнаты по кнопке, сохранение записей в файлы,
+ * список сохранённых (смотреть, переименовать, удалить). Сам просмотр с полосой времени, свободной камерой и путём камеры
+ * показывает ReplayOverlay поверх игры. Команды и состояние: ReplayLink.
  */
 class ReplayTab(act: Activity, private val ui: GameUi) {
-    private val dir = File(act.filesDir, "maps")
+    private val act = act
+    private val link = ReplayLink(act)
     private val main = Handler(Looper.getMainLooper())
+    private var pendingName = ""
 
     /** Меню нужно закрыть, чтобы увидеть повтор. */
     var onPlay: (() -> Unit)? = null
 
-    private class State(val rec: Boolean, val playing: Boolean, val points: Int, val secs: Long)
-
-    private fun read(): State? = try {
-        val p = File(dir, "_replay").readText().trim().split('\t')
-        State(p[0] == "1", p[1] == "1", p[2].toInt(), p[3].toLong())
-    } catch (_: Throwable) { null }
-
-    private fun cmd(what: String) {
-        BLog.i("реплей: команда «$what»")
-        try { val t = File(dir, "_cmd.tmp"); t.writeText("rp\t$what\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {}
-    }
+    private fun wrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
     fun render(into: LinearLayout, refresh: () -> Unit) {
         into.removeAllViews()
-        val st = read()
+        val st = link.status()
         into.addView(ui.label("Реплей", 16f), ui.matchWrap().apply { topMargin = ui.dp(8) })
         into.addView(ui.label(
-            "Нажми «Начать запись» и играй: путь твоего медведя пишется, пока не нажмёшь «Остановить запись». Потом включи повтор: призрак пробежит записанный путь.",
+            "Запись пути всех игроков комнаты (в одиночной игре — твоего медведя). В просмотре: пауза, перемотка, скорость, свободная камера и путь камеры по ключевым кадрам. Смотреть можно на той же карте, где записано.",
             13f, GameUi.MUTED, bold = false))
+        if (st == null) {
+            into.addView(ui.label("Нет данных от мода Bearite: он должен быть включён во вкладке «Установлено», а игра перезапущена после включения.", 13f, GameUi.RUST, bold = false),
+                ui.matchWrap().apply { topMargin = ui.dp(10) })
+        }
+        val rec = st?.rec == true
         val line = when {
-            st == null -> "Нет данных от мода Bearite: он должен быть включён в «Установлено», игра должна быть перезапущена после включения."
-            st.rec -> "Идёт запись: ${st.secs} с (${st.points} точек)"
-            st.playing -> "Идёт повтор записи на ${st.secs} с"
-            st.points >= 2 -> "Записано: ${st.secs} с (${st.points} точек)"
+            st == null -> ""
+            rec -> "Идёт запись: ${ReplayLink.fmtTime(st.durMs)} (${st.frames} кадров)"
+            st.sess -> "Идёт просмотр записи на ${ReplayLink.fmtTime(st.durMs)}"
+            st.frames >= 2 -> "Текущая запись: ${ReplayLink.fmtTime(st.durMs)}"
             else -> "Записи пока нет"
         }
-        into.addView(ui.label(line, 14f, GameUi.CREAM), ui.matchWrap().apply { topMargin = ui.dp(10) })
+        if (line.isNotEmpty()) into.addView(ui.label(line, 14f, GameUi.CREAM), ui.matchWrap().apply { topMargin = ui.dp(10) })
+        if (!st?.msg.isNullOrEmpty()) into.addView(ui.label(st!!.msg, 13f, GameUi.RUST, bold = false), ui.matchWrap().apply { topMargin = ui.dp(4) })
 
-        val rec = st?.rec == true
-        val playing = st?.playing == true
-        into.addView(
-            ui.pill(if (rec) "■ Остановить запись" else "● Начать запись", primary = !rec, danger = rec) {
-                cmd(if (rec) "stop" else "start")
-                main.postDelayed({ refresh() }, 700)
+        if (st != null) {
+            into.addView(
+                ui.pill(if (rec) "■ Остановить запись" else "● Начать запись", primary = !rec, danger = rec) {
+                    if (rec) link.cmds("stop")
+                    else { link.writeKeys("_current", emptyList()); ReplayLink.keyName = "_current"; link.cmds("start") }
+                    main.postDelayed({ refresh() }, 700)
+                },
+                ui.matchWrap().apply { topMargin = ui.dp(12) })
+
+            // текущая запись в памяти: сохранить или посмотреть
+            if (!rec && st.frames >= 2) {
+                if (pendingName.isEmpty()) pendingName = "Запись " + SimpleDateFormat("dd.MM HH-mm", Locale.US).format(Date())
+                into.addView(ui.label("Название для сохранения", 12f, GameUi.MUTED), ui.matchWrap().apply { topMargin = ui.dp(12) })
+                into.addView(ui.textInput(pendingName, 300, "название записи") { pendingName = it }, ui.matchWrap())
+                val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(ui.pill("Сохранить", sizeSp = 13f) {
+                    val n = link.safeName(pendingName)
+                    link.cmds("save\t$n")
+                    val keys = link.readKeys("_current")
+                    if (keys.isNotEmpty()) link.writeKeys(n, keys)
+                    pendingName = ""
+                    main.postDelayed({ refresh() }, 800)
+                }, wrap().apply { topMargin = ui.dp(8); rightMargin = ui.dp(8) })
+                row.addView(ui.pill("▶ Смотреть", primary = true, sizeSp = 13f) {
+                    ReplayLink.keyName = "_current"
+                    link.cmds("keys\t_current", "play")
+                    onPlay?.invoke()
+                }, wrap().apply { topMargin = ui.dp(8) })
+                into.addView(row)
+            }
+        }
+
+        // сохранённые записи
+        val items = link.list()
+        into.addView(ui.label("Сохранённые записи", 14f), ui.matchWrap().apply { topMargin = ui.dp(16) })
+        if (items.isEmpty()) into.addView(ui.label("Пока нет. Запиши игру и нажми «Сохранить».", 13f, GameUi.MUTED, bold = false))
+        for (item in items) {
+            val box = LinearLayout(act).apply {
+                orientation = LinearLayout.VERTICAL
+                background = ui.round(GameUi.ROW, 16)
+                setPadding(ui.dp(12), ui.dp(8), ui.dp(12), ui.dp(10))
+            }
+            box.addView(ui.label(item.name, 14f, GameUi.CREAM))
+            box.addView(ui.label(ReplayLink.fmtTime(item.durMs) + " · " + item.frames + " кадров" + (if (item.scene.isNotEmpty()) " · " + item.scene else ""), 12f, GameUi.MUTED, bold = false))
+            val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val name = item.name
+            row.addView(ui.pill("▶ Смотреть", primary = st != null, sizeSp = 13f) {
+                ReplayLink.keyName = name
+                link.cmds("load\t$name", "play")
+                onPlay?.invoke()
+            }, wrap().apply { topMargin = ui.dp(6); rightMargin = ui.dp(6) })
+            row.addView(ui.pill("✎", sizeSp = 13f) { rename(name, refresh) }, wrap().apply { topMargin = ui.dp(6); rightMargin = ui.dp(6) })
+            row.addView(ui.pill("🗑", danger = true, sizeSp = 13f) {
+                ui.confirm("Удалить запись", "Запись «$name» и её ключи камеры будут удалены.", "Удалить", danger = true) {
+                    link.delete(name)
+                    refresh()
+                }
+            }, wrap().apply { topMargin = ui.dp(6) })
+            box.addView(row)
+            into.addView(box, ui.matchWrap().apply { topMargin = ui.dp(8) })
+        }
+        if (rec) main.postDelayed({ refresh() }, 1000)   // пока идёт запись, обновляем время
+    }
+
+    private fun rename(old: String, refresh: () -> Unit) {
+        var text = old
+        val field = ui.textInput(old, 300, "новое название") { text = it }
+        ui.dialog("Переименовать", field, listOf(
+            GameUi.Btn("Отмена"),
+            GameUi.Btn("Готово", primary = true) {
+                if (!link.rename(old, text)) android.widget.Toast.makeText(act, "Такое название уже есть", android.widget.Toast.LENGTH_SHORT).show()
+                refresh()
             },
-            ui.matchWrap().apply { topMargin = ui.dp(12) })
-        val canPlay = st != null && (st.points >= 2 || playing) && !rec
-        into.addView(
-            ui.pill(if (playing) "■ Остановить повтор" else "▶ Смотреть повтор", primary = canPlay && !playing, danger = playing) {
-                if (playing) { cmd("stopplay"); main.postDelayed({ refresh() }, 700) }
-                else if (canPlay) { cmd("play"); onPlay?.invoke() }
-                else main.postDelayed({ refresh() }, 100)
-            },
-            ui.matchWrap().apply { topMargin = ui.dp(8) })
-        into.addView(ui.label("Скорость повтора меняется в настройках мода Bearite («Установлено»). Запись сбрасывается при смене сцены.", 12f, GameUi.MUTED, bold = false),
-            ui.matchWrap().apply { topMargin = ui.dp(10) })
-        // пока вкладка открыта, подтягиваем состояние записи
-        if (rec || playing) main.postDelayed({ refresh() }, 1000)
+        )).show()
     }
 }
