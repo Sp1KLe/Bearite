@@ -9,6 +9,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -146,31 +147,62 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
 
     // ------------------------------------------------------------ главный экран и разделы
 
+    /** Картинка-кнопка с анимацией: при нажатии проседает, при отпускании пружинит обратно. */
+    private fun imgBtn(res: Int, onClick: () -> Unit): ImageView = ImageView(act).apply {
+        setImageResource(res)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        adjustViewBounds = true
+        isClickable = true
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.animate().cancel().also { v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90).start() }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.OvershootInterpolator(3.5f)).start()
+                    if (e.actionMasked == MotionEvent.ACTION_UP && e.x in 0f..v.width.toFloat() && e.y in 0f..v.height.toFloat()) v.performClick()
+                }
+            }
+            true
+        }
+        setOnClickListener { onClick() }
+    }
+
+    private val hubViews = ArrayList<View>()
+
     private fun buildHub() {
         panel.addView(hub, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val pad = dp(16)
-        val top = FrameLayout(act)
-        hub.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76), Gravity.TOP).apply { setMargins(pad, pad, pad, 0) })
-        top.addView(ui.gameBtn("✕", GameUi.RUST, 22f, 14) { hide() }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START or Gravity.CENTER_VERTICAL))
-        top.addView(LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(logo(), LinearLayout.LayoutParams(dp(44), dp(44)))
-            addView(ui.outlined("Bearite", 28f).apply { setPadding(dp(10), 0, 0, 0) })
-        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-
+        // как в референсе: красная кнопка в углу, слева высокая «Моды», справа «Магазин» и «Редактор карт»
+        val close = imgBtn(R.drawable.btn_close_red) { hide() }
+        hub.addView(close, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.TOP or Gravity.START).apply { setMargins(dp(14), dp(14), 0, 0) })
         val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        hub.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            setMargins(pad, dp(96), pad, pad)
-        })
-        body.addView(ui.gameBtn("Моды", GameUi.GREEN, 34f, 28) { openScreen(SCR_MODS) },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        hub.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val mods = imgBtn(R.drawable.btn_mods) { openScreen(SCR_MODS) }
+        val shop = imgBtn(R.drawable.btn_shop) { openShopPopup() }
+        val editor = imgBtn(R.drawable.btn_mapeditor) { openScreen(SCR_MAPS) }
+        body.addView(mods, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 145f))
         val right = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        right.addView(ui.gameBtn("Магазин", GameUi.YELLOW, 26f, 28) { openShopPopup() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        right.addView(ui.gameBtn("Редактор карт", GameUi.YELLOW, 26f, 28) { openScreen(SCR_MAPS) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(14) })
-        body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { leftMargin = dp(14) })
+        right.addView(shop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 91f))
+        right.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 91f).apply { topMargin = dp(8) })
+        body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 301f).apply { leftMargin = dp(14) })
+        hubViews.addAll(listOf(close, mods, shop, editor))
+        // отступы тела — в долях панели, как на референсе
+        hub.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
+            val w = r - l; val h = bt - t
+            if (w > 0 && h > 0) {
+                val pl = (w * 0.09f).toInt(); val pt = (h * 0.28f).toInt(); val pr = (w * 0.10f).toInt(); val pb = (h * 0.11f).toInt()
+                if (body.paddingLeft != pl || body.paddingTop != pt) body.setPadding(pl, pt, pr, pb)
+            }
+        }
+    }
+
+    /** Появление главного экрана: кнопки одна за другой выпрыгивают с пружинкой. */
+    private fun animateHubIn() {
+        hubViews.forEachIndexed { i, v ->
+            v.animate().cancel()
+            v.alpha = 0f; v.scaleX = 0.55f; v.scaleY = 0.55f; v.translationY = dp(24).toFloat()
+            v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                .setStartDelay(60L + i * 70L).setDuration(380)
+                .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
+        }
     }
 
     private fun openShopPopup() {
@@ -201,6 +233,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun applyScreen() {
+        panel.background = if (screen == SCR_HUB) ui.round(0xFF69B7EB.toInt(), 28, GameUi.OUTLINE, 4) else ui.round(GameUi.SURFACE, 28, GameUi.OUTLINE, 4)
+        if (screen == SCR_HUB) panel.post { animateHubIn() }
         hub.visibility = if (screen == SCR_HUB) View.VISIBLE else View.GONE
         col.visibility = if (screen == SCR_HUB) View.GONE else View.VISIBLE
         if (screen != SCR_HUB) refresh()
