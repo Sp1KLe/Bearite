@@ -293,6 +293,36 @@ class GameActivity : Activity() {
     /** Кнопка «Меню» в паузе — копия родной кнопки игры (её создаёт нативный мод), своей нарисованной кнопки нет. */
     private fun updateMenuBtn(paused: Boolean) {}
 
+    /** -1 неизвестно, 0 игра идёт, 1 пауза. */
+    private fun pauseState(): Int = try {
+        nativeCls?.getField("pauseState")?.getInt(null) ?: -1
+    } catch (_: Throwable) {
+        -1
+    }
+
+    private fun gameMenuOpen(): Boolean = try {
+        File(File(filesDir, "maps"), "_menu").readText().trim() == "1"
+    } catch (_: Throwable) { false }
+
+    private var lastMenu = false
+    private var lastPaused = false
+    private var lastClick: String? = null
+    private val menuPoll = object : Runnable {
+        override fun run() {
+            val m = gameMenuOpen()
+            if (m != lastMenu) { lastMenu = m; updateModButton() } else if (lastPaused) updateMenuBtn(true)
+            // нажатие на копию кнопки в меню паузы: нативный мод увеличивает счётчик в maps/_menuclick
+            val c = try { File(File(filesDir, "maps"), "_menuclick").readText().trim() } catch (_: Throwable) { "" }
+            if (lastClick == null) lastClick = c
+            else if (c != lastClick) {
+                lastClick = c
+                modMenu?.show()
+                hud?.root?.visibility = View.GONE
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 150)
+        }
+    }
+
     private fun updateModButton() {
         val btn = modButton ?: return
         val st = pauseState()
