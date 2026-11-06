@@ -2736,6 +2736,166 @@ void replay_tick(long long now) {
     rp_write_status(now);
 }
 
+// ------------------------------------------------- копия родной кнопки «Достижения» в меню паузы
+// Клонируем настоящую кнопку игры (объект Unity целиком: спрайты, шрифт, обводка), ставим над оригиналом,
+// меняем надпись на «Меню» и отключаем компонент Button. Нажатие ловит прозрачная область лаунчера (maps/_menubtn).
+bool g_pmOpen = false;
+long long g_pmOpenAt = 0, g_pmLast = 0;
+int g_pmTries = 0;
+
+struct PmBtn { void* go = nullptr; void* tr = nullptr; float p[3] = {0, 0, 0}; std::string text, name; };
+
+void pm_status(const std::string& s) {
+    std::string path = g_mapsDir + "/_menubtn", tmp = g_mapsDir + "/.menubtn.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(s.c_str(), f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+}
+
+struct PmTypes {
+    bool init = false;
+    void *tButton = nullptr, *tText = nullptr, *tTmp = nullptr;
+    void *cText = nullptr, *cTmp = nullptr;
+    void *getText = nullptr, *setText = nullptr, *getTmp = nullptr, *setTmp = nullptr;
+    void *sibGet = nullptr, *sibSet = nullptr;
+} PM;
+
+void pm_init() {
+    if (PM.init) return;
+    PM.init = true;
+    PM.tButton = type_of("UnityEngine.UI", "Button");
+    PM.tText = type_of("UnityEngine.UI", "Text");
+    PM.tTmp = type_of("TMPro", "TMP_Text");
+    PM.cText = bearite_find_class("UnityEngine.UI", "Text");
+    PM.cTmp = bearite_find_class("TMPro", "TMP_Text");
+    PM.getText = PM.cText ? bearite_il2.class_get_method_from_name(PM.cText, "get_text", 0) : nullptr;
+    PM.getTmp = PM.cTmp ? bearite_il2.class_get_method_from_name(PM.cTmp, "get_text", 0) : nullptr;
+    PM.setText = PM.cText ? find_method_types(PM.cText, "set_text", {"String"}) : nullptr;
+    PM.setTmp = PM.cTmp ? find_method_types(PM.cTmp, "set_text", {"String"}) : nullptr;
+    if (void* trk = bearite_find_class("UnityEngine", "Transform")) {
+        PM.sibGet = bearite_il2.class_get_method_from_name(trk, "GetSiblingIndex", 0);
+        PM.sibSet = bearite_il2.class_get_method_from_name(trk, "SetSiblingIndex", 1);
+    }
+    logf_("кнопка меню паузы: Button=%d Text=%d TMP=%d sibling=%d", PM.tButton != nullptr, PM.tText != nullptr, PM.tTmp != nullptr, PM.sibSet != nullptr);
+}
+
+/** Текст первой надписи (Text или TextMeshPro) внутри кнопки. */
+std::string pm_get_text(void* go) {
+    if (!F.get_comps_children) return "";
+    for (int kind = 0; kind < 2; ++kind) {
+        void* t = kind == 0 ? PM.tText : PM.tTmp;
+        void* m = kind == 0 ? PM.getText : PM.getTmp;
+        if (!t || !m) continue;
+        bool inc = true;
+        void* a[2] = {t, &inc};
+        void* arr = inv(F.get_comps_children, go, a);
+        if (!arr || arr_len(arr) == 0) continue;
+        void* c = *(void**)arr_elem(arr, sizeof(void*), 0);
+        if (!c) continue;
+        std::string r = utf8(inv(m, c));
+        if (!r.empty()) return r;
+    }
+    return "";
+}
+
+void pm_set_text(void* go, const char* text) {
+    if (!F.get_comps_children) return;
+    for (int kind = 0; kind < 2; ++kind) {
+        void* t = kind == 0 ? PM.tText : PM.tTmp;
+        void* m = kind == 0 ? PM.setText : PM.setTmp;
+        if (!t || !m) continue;
+        bool inc = true;
+        void* a[2] = {t, &inc};
+        void* arr = inv(F.get_comps_children, go, a);
+        if (!arr) continue;
+        uintptr_t n = arr_len(arr);
+        for (uintptr_t i = 0; i < n && i < 8; ++i) {
+            void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!c) continue;
+            void* b[1] = {bearite_il2.string_new(text)};
+            inv(m, c, b);
+        }
+    }
+}
+
+void pm_scan(std::vector<PmBtn>& out) {
+    void* arr = find_objects(PM.tButton);
+    if (!arr) return;
+    uintptr_t n = arr_len(arr);
+    for (uintptr_t i = 0; i < n && i < 300; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!c) continue;
+        PmBtn b;
+        b.go = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        b.tr = inv(F.get_transform, c);
+        if (!b.go || !b.tr) continue;
+        if (void* pv = inv(F.get_position, b.tr)) memcpy(b.p, obj_unbox(pv), sizeof b.p);
+        b.name = name_of(b.go);
+        b.text = pm_get_text(b.go);
+        out.push_back(b);
+    }
+}
+
+bool pm_is_achievements(const std::string& t) {
+    for (const char* k : {"остижен", "ОСТИЖЕН", "chievem", "CHIEVEM", "ogros", "ccès", "rfolg"})
+        if (t.find(k) != std::string::npos) return true;
+    return false;
+}
+
+void pm_tick(long long now) {
+    if (!g_pmOpen || now - g_pmOpenAt < 250 || now - g_pmLast < 300) return;
+    g_pmLast = now;
+    pm_init();
+    if (!PM.tButton || !F.instantiate_parent || !F.get_parent) { if (g_pmTries++ == 0) pm_status("fail\tнет нужных методов"); return; }
+    std::vector<PmBtn> v;
+    pm_scan(v);
+    PmBtn *mine = nullptr, *tgt = nullptr;
+    for (auto& b : v) {
+        if (b.name == "BeariteMenuButton") mine = &b;
+        else if (!tgt && pm_is_achievements(b.text)) tgt = &b;
+    }
+    if (mine) { pm_set_text(mine->go, "Меню"); return; }
+    if (!tgt) {
+        if (g_pmTries < 4) {
+            logf_("кнопка «Достижения» не найдена; кнопок в сцене: %d", (int)v.size());
+            for (auto& b : v) logf_("  кнопка «%s» объект «%s» (%.0f; %.0f)", b.text.c_str(), b.name.c_str(), b.p[0], b.p[1]);
+        }
+        if (++g_pmTries >= 4) pm_status("fail\tкнопка Достижения не найдена");
+        return;
+    }
+    // ближайшая кнопка под ней в той же колонке — задаёт шаг между кнопками
+    float step = 0;
+    float best = 1e30f;
+    for (auto& b : v) {
+        if (&b == tgt || b.name == "BeariteMenuButton") continue;
+        float dx = fabsf(b.p[0] - tgt->p[0]), dy = tgt->p[1] - b.p[1];
+        if (dx > fmaxf(6.f, fabsf(tgt->p[0]) * 0.02f) || dy <= 1.f) continue;
+        if (dy < best) { best = dy; step = dy; }
+    }
+    if (step <= 0) { logf_("под кнопкой «Достижения» нет соседней кнопки: не знаю шаг"); if (++g_pmTries >= 4) pm_status("fail\tнет соседней кнопки"); return; }
+    void* parent = inv(F.get_parent, tgt->tr);
+    void* a[2] = {tgt->go, parent};
+    void* clone = inv(F.instantiate_parent, nullptr, a);
+    if (!clone) { if (++g_pmTries >= 4) pm_status("fail\tInstantiate не удался"); return; }
+    void* ctr = F.go_transform ? inv(F.go_transform, clone) : nullptr;
+    if (!ctr) { if (++g_pmTries >= 4) pm_status("fail\tнет transform у копии"); return; }
+    if (F.set_name) { void* b[1] = {bearite_il2.string_new("BeariteMenuButton")}; inv(F.set_name, clone, b); }
+    if (PM.sibGet && PM.sibSet) {  // если кнопки лежат в VerticalLayoutGroup, копия встанет на место оригинала и сдвинет его вниз
+        void* si = inv(PM.sibGet, tgt->tr);
+        if (si) { int idx = *(const int*)obj_unbox(si); void* sa[1] = {&idx}; inv(PM.sibSet, ctr, sa); }
+    }
+    V3 np{tgt->p[0], tgt->p[1] + step, tgt->p[2]};
+    void* pa[1] = {&np};
+    inv(F.set_position, ctr, pa);
+    pm_set_text(clone, "Меню");
+    if (F.get_component && F.beh_set_enabled) {  // копия не должна открывать достижения
+        void* ga[1] = {PM.tButton};
+        if (void* bt = inv(F.get_component, clone, ga)) { bool off = false; void* ea[1] = {&off}; inv(F.beh_set_enabled, bt, ea); }
+    }
+    char buf[160];
+    snprintf(buf, sizeof buf, "ok\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", np.x, np.y, tgt->p[0], tgt->p[1], step);
+    pm_status(buf);
+    logf_("кнопка «Меню» скопирована из «%s»: (%.0f; %.0f), шаг %.0f", tgt->text.c_str(), np.x, np.y, step);
+}
+
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
@@ -2745,6 +2905,7 @@ void update() {
     cmd_poll();
     publish_positions(now);
     try { replay_tick(now); } catch (...) {}
+    try { pm_tick(now); } catch (...) {}
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
@@ -2985,6 +3146,8 @@ void (*o_pause_menu)(void*, uint8_t, const void*) = nullptr;
 void h_pause_menu(void* self, uint8_t en, const void* mi) {
     static int lastV = -1;
     int v = en ? 1 : 0;
+    g_pmOpen = v != 0;
+    if (v) { g_pmOpenAt = now_ms(); g_pmTries = 0; pm_status("wait"); }
     if (v != lastV) {
         lastV = v;
         std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";

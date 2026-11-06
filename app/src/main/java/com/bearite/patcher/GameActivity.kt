@@ -58,6 +58,7 @@ class GameActivity : Activity() {
     private var cheats: CheatOverlay? = null
     private var replayUi: ReplayOverlay? = null
     private var modButton: View? = null
+    private var touchBtn: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
 
@@ -161,6 +162,7 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
+        touchBtn = menuTouch().also { root.addView(it) }
         val hudDensity = UiScale.density(this)
         root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * hudDensity).toInt(); rightMargin = (12 * hudDensity).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -264,6 +266,64 @@ class GameActivity : Activity() {
         return b
     }
 
+    /** Прозрачная область поверх КОПИИ родной кнопки (её создаёт нативный мод): ловит нажатие и открывает меню Bearite. */
+    private fun menuTouch(): View = View(this).apply {
+        visibility = View.GONE
+        isClickable = true
+        setOnClickListener {
+            modMenu?.show()
+            hud?.root?.visibility = View.GONE
+        }
+    }
+
+    /** Состояние копии кнопки: null — нет данных/ошибка (рисуем свою), "wait" — копия создаётся, иначе положение копии. */
+    private fun readMenuBtn(): Pair<String, List<Float>> {
+        return try {
+            val f = File(File(filesDir, "maps"), "_menubtn")
+            if (!f.exists()) return "none" to emptyList()
+            val parts = f.readText().trim().split('\t')
+            val age = System.currentTimeMillis() - f.lastModified()
+            when (parts[0]) {
+                "ok" -> "ok" to parts.drop(1).mapNotNull { it.toFloatOrNull() }
+                "wait" -> (if (age < 3000) "wait" else "none") to emptyList()
+                else -> "none" to emptyList()
+            }
+        } catch (_: Throwable) { "none" to emptyList() }
+    }
+
+    /** Ставит прозрачную область точно на копию кнопки: координаты Unity (пиксели, ноль снизу слева) → экран. */
+    private fun placeTouch(v: View, pos: List<Float>) {
+        val dm = resources.displayMetrics
+        val h = dm.heightPixels
+        val k = h / 720f
+        val w = (272 * k).toInt()
+        val bh = (84 * k).toInt()
+        // запасное положение — по эталонному скриншоту: правая колонка, над «Достижения»
+        var cx = dm.widthPixels - (20 * k) - w / 2f
+        var cy = (192 * k) + bh / 2f
+        if (pos.size >= 2) {
+            val nx = pos[0]
+            val ny = h - pos[1]
+            if (nx in 0f..dm.widthPixels.toFloat() && ny in 0f..h.toFloat() && Math.abs(nx - cx) < dm.widthPixels * 0.25f) { cx = nx; cy = ny }
+        }
+        v.layoutParams = FrameLayout.LayoutParams(w, bh, Gravity.TOP or Gravity.START).apply {
+            leftMargin = (cx - w / 2f).toInt()
+            topMargin = (cy - bh / 2f).toInt()
+        }
+    }
+
+    private fun updateMenuBtn(paused: Boolean) {
+        val drawn = modButton ?: return
+        val touch = touchBtn
+        if (!paused) { drawn.visibility = View.GONE; touch?.visibility = View.GONE; return }
+        val (state, pos) = readMenuBtn()
+        when {
+            touch != null && state == "ok" -> { placeTouch(touch, pos); touch.visibility = View.VISIBLE; drawn.visibility = View.GONE }
+            state == "wait" -> { touch?.visibility = View.GONE; drawn.visibility = View.GONE }
+            else -> { touch?.visibility = View.GONE; drawn.visibility = View.VISIBLE }
+        }
+    }
+
     /** -1 неизвестно, 0 игра идёт, 1 пауза. */
     private fun pauseState(): Int = try {
         nativeCls?.getField("pauseState")?.getInt(null) ?: -1
@@ -276,10 +336,11 @@ class GameActivity : Activity() {
     } catch (_: Throwable) { false }
 
     private var lastMenu = false
+    private var lastPaused = false
     private val menuPoll = object : Runnable {
         override fun run() {
             val m = gameMenuOpen()
-            if (m != lastMenu) { lastMenu = m; updateModButton() }
+            if (m != lastMenu) { lastMenu = m; updateModButton() } else if (lastPaused) updateMenuBtn(true)
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 300)
         }
     }
@@ -291,7 +352,8 @@ class GameActivity : Activity() {
         // в комнате пауза не останавливает время: там смотрим, открыто ли меню паузы игры (мод пишет maps/_menu)
         val inRoom = chat?.inRoom == true
         val paused = if (inRoom) gameMenuOpen() else st != 0
-        btn.visibility = if (paused) View.VISIBLE else View.GONE
+        lastPaused = paused
+        updateMenuBtn(paused)
         if (!paused && modMenu?.isOpen == true) modMenu?.hide()
         // кнопки модов видны, пока игра идёт (и пока паузу не удаётся определить), и скрыты на паузе и в меню
         val showHud = st != 1 && modMenu?.isOpen != true
