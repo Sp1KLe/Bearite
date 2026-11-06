@@ -55,7 +55,6 @@ class GameActivity : Activity() {
 
     private var modMenu: GameModMenu? = null
     private var hud: GameHud? = null
-    private var cheats: CheatOverlay? = null
     private var replayUi: ReplayOverlay? = null
     private var modButton: View? = null
     private var touchBtn: View? = null
@@ -165,7 +164,6 @@ class GameActivity : Activity() {
         val hudDensity = UiScale.density(this)
         root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * hudDensity).toInt(); rightMargin = (12 * hudDensity).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        cheats = CheatOverlay(this, root).also { it.start() }
         replayUi = ReplayOverlay(this, root).also { it.start() }
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
@@ -244,26 +242,7 @@ class GameActivity : Activity() {
         return m.invoke(p) as View
     }
 
-    /**
-     * Кнопка «Меню» Bearite — копия жёлтых кнопок игры. Стоит в правой колонке меню паузы прямо над
-     * родной кнопкой «Достижения»; размеры берутся от высоты экрана, как у интерфейса игры (эталон 1560×720).
-     */
-    private fun menuButton(): View {
-        val h = resources.displayMetrics.heightPixels
-        val k = h / 720f
-        val ui = GameUi(this)
-        val d = UiScale.density(this)
-        val b = ui.gameBtn("Меню", GameUi.YELLOW, (84 * k * 0.30f) / d / UiScale.factor(this), 1) {
-            modMenu?.show()
-            hud?.root?.visibility = View.GONE
-        }
-        b.background = GameBtnBg(GameUi.YELLOW, 84 * k * 0.30f, 3 * k)
-        val lp = FrameLayout.LayoutParams((272 * k).toInt(), (84 * k).toInt(), Gravity.TOP or Gravity.END)
-        lp.topMargin = (192 * k).toInt()
-        lp.rightMargin = (20 * k).toInt()
-        b.layoutParams = lp
-        return b
-    }
+    private fun menuButton(): View = View(this).apply { visibility = View.GONE }
 
     /** Прозрачная область поверх КОПИИ родной кнопки (её создаёт нативный мод): ловит нажатие и открывает меню Bearite. */
     private fun menuTouch(): View = View(this).apply {
@@ -311,47 +290,8 @@ class GameActivity : Activity() {
         }
     }
 
-    private fun updateMenuBtn(paused: Boolean) {
-        val drawn = modButton ?: return
-        val touch = touchBtn
-        if (!paused) { drawn.visibility = View.GONE; touch?.visibility = View.GONE; return }
-        val (state, pos) = readMenuBtn()
-        when {
-            state == "ok" -> { touch?.visibility = View.GONE; drawn.visibility = View.GONE }  // видна настоящая копия кнопки игры
-            state == "wait" -> { touch?.visibility = View.GONE; drawn.visibility = View.GONE }
-            else -> { touch?.visibility = View.GONE; drawn.visibility = View.VISIBLE }
-        }
-    }
-
-    /** -1 неизвестно, 0 игра идёт, 1 пауза. */
-    private fun pauseState(): Int = try {
-        nativeCls?.getField("pauseState")?.getInt(null) ?: -1
-    } catch (_: Throwable) {
-        -1
-    }
-
-    private fun gameMenuOpen(): Boolean = try {
-        File(File(filesDir, "maps"), "_menu").readText().trim() == "1"
-    } catch (_: Throwable) { false }
-
-    private var lastMenu = false
-    private var lastPaused = false
-    private var lastClick: String? = null
-    private val menuPoll = object : Runnable {
-        override fun run() {
-            val m = gameMenuOpen()
-            if (m != lastMenu) { lastMenu = m; updateModButton() } else if (lastPaused) updateMenuBtn(true)
-            // нажатие на копию кнопки в меню паузы: нативный мод увеличивает счётчик в maps/_menuclick
-            val c = try { File(File(filesDir, "maps"), "_menuclick").readText().trim() } catch (_: Throwable) { "" }
-            if (lastClick == null) lastClick = c
-            else if (c != lastClick) {
-                lastClick = c
-                modMenu?.show()
-                hud?.root?.visibility = View.GONE
-            }
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 150)
-        }
-    }
+    /** Кнопка «Меню» в паузе — копия родной кнопки игры (её создаёт нативный мод), своей нарисованной кнопки нет. */
+    private fun updateMenuBtn(paused: Boolean) {}
 
     private fun updateModButton() {
         val btn = modButton ?: return

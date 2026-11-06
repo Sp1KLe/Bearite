@@ -111,8 +111,10 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     var gameCam: DoubleArray? = null  // позиция камеры игры в координатах карты (x y z fx fy fz)
     /** Файл картинки текстуры: по нему рисуем настоящую текстуру, а не средний цвет. */
     var texFile: ((String) -> java.io.File?)? = null
-    /** Геометрия сцены игры (мировые координаты, по 6 чисел: центр и полуразмеры): рисуется каркасом под блоками. */
+    /** Геометрия сцены игры (мировые координаты, по 10 чисел: центр, полуразмеры, цвет, номер текстуры): рисуется закрашенными блоками под объектами карты. */
     var scene: FloatArray? = null
+    /** Текстуры материалов мира игры по номеру (maps/scene_tex/N.png). */
+    var sceneTexFile: ((Int) -> java.io.File?)? = null
     var showScene = true
 
     // камера
@@ -311,41 +313,93 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         line.color = 0xCC7EC14A.toInt(); seg(c, 0f, 0f, 0f, 0f, 6f, 0f)
     }
 
-    private var sceneLines = FloatArray(0)
+    private val sceneTexCache = HashMap<Int, Tex?>()
+    private val sceneFilters = HashMap<Int, LightingColorFilter>()
+    private val sq4 = FloatArray(8)
+    private val sd4 = FloatArray(8)
+    private val sp4 = Array(4) { FloatArray(3) }
+    private val qpath = Path()
 
-    /** Каркас сцены игры (рендереры): серые рёбра ограничивающих коробок, чтобы ставить блоки не в пустоту. */
+    private fun sceneTex(i: Int): Tex? {
+        if (sceneTexCache.containsKey(i)) return sceneTexCache[i]
+        val t: Tex? = try {
+            val f = sceneTexFile?.invoke(i)
+            val bmp = if (f == null) null else BitmapFactory.decodeFile(f.path)
+            if (bmp == null) null else Tex(bmp, BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT))
+        } catch (_: Throwable) { null }
+        sceneTexCache[i] = t
+        return t
+    }
+
+    /** Мир игры: закрашенные блоки (границы рендереров) с цветом и текстурой материала, от дальних к ближним. */
     private fun drawScene(c: Canvas) {
         val sc = scene ?: return
-        if (!showScene || sc.size < 6) return
+        if (!showScene || sc.size < 10) return
         val s = if (map.scale == 0.0) 1f else map.scale.toFloat()
         val ox = map.ox.toFloat(); val oy = map.oy.toFloat(); val oz = map.oz.toFloat()
-        val n = sc.size / 6
-        // не больше 2500 ближайших к центру обзора коробок: рисование должно оставаться плавным
-        var idx = IntArray(n) { it }
-        if (n > 2500) {
-            val dd = FloatArray(n) { j -> val dx = (sc[j * 6] - ox) / s - tx; val dy = (sc[j * 6 + 1] - oy) / s - ty; val dz = (sc[j * 6 + 2] - oz) / s - tz; dx * dx + dy * dy + dz * dz }
-            idx = idx.sortedBy { dd[it] }.take(2500).toIntArray()
+        val n = sc.size / 10
+        val dd = FloatArray(n) { j ->
+            val dx = (sc[j * 10] - ox) / s - tx; val dy = (sc[j * 10 + 1] - oy) / s - ty; val dz = (sc[j * 10 + 2] - oz) / s - tz
+            dx * dx + dy * dy + dz * dz
         }
-        if (sceneLines.size < idx.size * 48) sceneLines = FloatArray(idx.size * 48)
-        var cnt = 0
-        val pa = FloatArray(3); val pb = FloatArray(3)
+        var idx = (0 until n).toList()
+        if (n > 900) idx = idx.sortedBy { dd[it] }.take(900)
+        // порядок: дальние (и крупные, вроде земли) первыми
+        val key = FloatArray(n)
         for (j in idx) {
-            val cx = (sc[j * 6] - ox) / s; val cy = (sc[j * 6 + 1] - oy) / s; val cz = (sc[j * 6 + 2] - oz) / s
-            val hx = sc[j * 6 + 3] / s; val hy = sc[j * 6 + 4] / s; val hz = sc[j * 6 + 5] / s
-            for (e in 0 until 12) {
-                // 4 ребра вдоль каждой оси
-                val ax = e / 4; val sa = (e and 1) * 2 - 1; val sb = ((e shr 1) and 1) * 2 - 1
-                val x1 = cx + hx * (if (ax == 0) -1 else sa); val x2 = cx + hx * (if (ax == 0) 1 else sa)
-                val y1 = cy + hy * (if (ax == 1) -1 else if (ax == 0) sa else sb); val y2 = cy + hy * (if (ax == 1) 1 else if (ax == 0) sa else sb)
-                val z1 = cz + hz * (if (ax == 2) -1 else sb); val z2 = cz + hz * (if (ax == 2) 1 else sb)
-                if (proj(x1, y1, z1, pa) && proj(x2, y2, z2, pb)) {
-                    sceneLines[cnt++] = pa[0]; sceneLines[cnt++] = pa[1]; sceneLines[cnt++] = pb[0]; sceneLines[cnt++] = pb[1]
+            val cx = (sc[j * 10] - ox) / s; val cy = (sc[j * 10 + 1] - oy) / s; val cz = (sc[j * 10 + 2] - oz) / s
+            val big = max(sc[j * 10 + 3], max(sc[j * 10 + 4], sc[j * 10 + 5])) / s
+            val dx = cx - ex; val dy = cy - ey; val dz = cz - ez
+            key[j] = sqrt(dx * dx + dy * dy + dz * dz) + 2f * big
+        }
+        val order = idx.sortedByDescending { key[it] }
+        for (j in order) {
+            val cx = (sc[j * 10] - ox) / s; val cy = (sc[j * 10 + 1] - oy) / s; val cz = (sc[j * 10 + 2] - oz) / s
+            val hx = sc[j * 10 + 3] / s; val hy = sc[j * 10 + 4] / s; val hz = sc[j * 10 + 5] / s
+            var cr = sc[j * 10 + 6]; var cg = sc[j * 10 + 7]; var cb = sc[j * 10 + 8]
+            if (cr + cg + cb < 0.3f) { cr = 0.55f; cg = 0.55f; cb = 0.55f }
+            val tex = sceneTex(sc[j * 10 + 9].toInt())
+            val sx = if (ex > cx) 1f else -1f; val sy = if (ey > cy) 1f else -1f; val sz = if (ez > cz) 1f else -1f
+            for (face in 0 until 3) {
+                // углы грани: a и b — две оси грани, w — размер вдоль них (для числа повторов текстуры)
+                val (k, wa, wb) = when (face) { 0 -> Triple(0.85f, 2 * hz, 2 * hy); 1 -> Triple(1.0f, 2 * hx, 2 * hz); else -> Triple(0.7f, 2 * hx, 2 * hy) }
+                for (q in 0 until 4) {
+                    val a = if (q == 0 || q == 3) -1f else 1f
+                    val b = if (q < 2) 1f else -1f   // порядок: (a-,b+) (a+,b+) (a+,b-) (a-,b-)
+                    val px: Float; val py: Float; val pz: Float
+                    when (face) {
+                        0 -> { px = cx + sx * hx; py = cy + b * hy; pz = cz + a * hz }
+                        1 -> { px = cx + a * hx; py = cy + sy * hy; pz = cz + b * hz }
+                        else -> { px = cx + a * hx; py = cy + b * hy; pz = cz + sz * hz }
+                    }
+                    if (!proj(px, py, pz, sp4[q])) { sp4[q][2] = -1f }
                 }
+                if (sp4.any { it[2] < 0f }) continue
+                var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+                for (q in 0 until 4) { minX = min(minX, sp4[q][0]); maxX = max(maxX, sp4[q][0]); minY = min(minY, sp4[q][1]); maxY = max(maxY, sp4[q][1]) }
+                if (maxX < 0 || minX > width || maxY < 0 || minY > height || (maxX - minX < 1.5f && maxY - minY < 1.5f)) continue
+                qpath.rewind()
+                qpath.moveTo(sp4[0][0], sp4[0][1]); qpath.lineTo(sp4[1][0], sp4[1][1]); qpath.lineTo(sp4[2][0], sp4[2][1]); qpath.lineTo(sp4[3][0], sp4[3][1]); qpath.close()
+                val mul = Color.rgb(min(255, (cr * k * 255).toInt()), min(255, (cg * k * 255).toInt()), min(255, (cb * k * 255).toInt()))
+                if (tex != null) {
+                    val tu = max(1f, min(8f, Math.round(wa).toFloat())); val tv = max(1f, min(8f, Math.round(wb).toFloat()))
+                    val bw = tex.bmp.width * tu; val bh = tex.bmp.height * tv
+                    sq4[0] = 0f; sq4[1] = 0f; sq4[2] = bw; sq4[3] = 0f; sq4[4] = bw; sq4[5] = bh; sq4[6] = 0f; sq4[7] = bh
+                    for (q in 0 until 4) { sd4[q * 2] = sp4[q][0]; sd4[q * 2 + 1] = sp4[q][1] }
+                    if (texMatrix.setPolyToPoly(sq4, 0, sd4, 0, 4)) {
+                        tex.shader.setLocalMatrix(texMatrix)
+                        texPaint.shader = tex.shader
+                        texPaint.colorFilter = sceneFilters.getOrPut(mul) { LightingColorFilter(mul, 0) }
+                        c.drawPath(qpath, texPaint)
+                        continue
+                    }
+                }
+                fill.color = mul
+                c.drawPath(qpath, fill)
             }
         }
-        line.strokeWidth = 1f
-        line.color = 0x66B7A58E
-        c.drawLines(sceneLines, 0, cnt, line)
+        texPaint.shader = null
+        texPaint.colorFilter = null
     }
 
     private fun drawObjects(c: Canvas) {

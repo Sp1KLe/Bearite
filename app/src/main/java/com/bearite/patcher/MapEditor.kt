@@ -59,6 +59,7 @@ class MapEditor(
         vp.gameCam = camInMap()
         vp.texAvg = { store.textureAverage(it) }
         vp.texFile = { store.textureFile(it) }
+        vp.sceneTexFile = { store.sceneTexFile(it) }
         vp.onSelect = { select(it) }
         vp.onEdited = { refreshLive() }
         vp.onCommit = { commit(); refreshTree() }
@@ -361,7 +362,7 @@ class MapEditor(
         select(vp.selected)
     }
 
-    /** Просит мод записать геометрию сцены игры и, как только файл появился, показывает её в редакторе серым каркасом. */
+    /** Просит мод записать геометрию сцены игры и, как только файл появился, показывает её в редакторе закрашенными блоками с текстурами. */
     private fun loadScene(auto: Boolean = false) {
         val asked = System.currentTimeMillis()
         sceneAskedAt = asked
@@ -374,7 +375,7 @@ class MapEditor(
                 if (store.sceneStamp() >= asked - 1000) {
                     val sc = store.readScene()
                     vp.scene = sc; vp.invalidate()
-                    if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 6} объектов")
+                    if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return
                 }
                 if (++tries < 12) h.postDelayed(this, 500)

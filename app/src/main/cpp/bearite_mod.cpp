@@ -2061,6 +2061,80 @@ void photon_nick(const std::string& nick) {
 
 void rp_command(const std::vector<std::string>& p);  // реплей: определён ниже, рядом с update()
 
+// ---- материалы сцены для редактора карт: цвет и текстура (копия в PNG через RenderTexture, оригиналы не читаются)
+void* sc_method(void* k, const char* n, int argc) { return k ? bearite_il2.class_get_method_from_name(k, n, argc) : nullptr; }
+
+struct SceneMat { float c[3]; int tex; };
+
+/** Сохраняет текстуру игры как maps/scene_tex/<idx>.png (не больше 128 px). */
+bool scene_export_tex(void* tex, int idx) {
+    static bool init = false;
+    static void *getW, *getH, *getTmp, *relTmp, *blit, *setActive, *getActive, *readPx, *encode, *ctor2;
+    if (!init) {
+        init = true;
+        void* texK = bearite_find_class("UnityEngine", "Texture");
+        void* rtK = bearite_find_class("UnityEngine", "RenderTexture");
+        void* grK = bearite_find_class("UnityEngine", "Graphics");
+        void* icK = bearite_find_class("UnityEngine", "ImageConversion");
+        getW = sc_method(texK, "get_width", 0);
+        getH = sc_method(texK, "get_height", 0);
+        getTmp = rtK ? find_method_types(rtK, "GetTemporary", {"Int32", "Int32"}) : nullptr;
+        relTmp = rtK ? find_method_types(rtK, "ReleaseTemporary", {"RenderTexture"}) : nullptr;
+        setActive = rtK ? find_method_types(rtK, "set_active", {"RenderTexture"}) : nullptr;
+        getActive = sc_method(rtK, "get_active", 0);
+        blit = grK ? find_method_types(grK, "Blit", {"Texture", "RenderTexture"}) : nullptr;
+        readPx = F.tex2d ? find_method_types(F.tex2d, "ReadPixels", {"Rect", "Int32", "Int32"}) : nullptr;
+        ctor2 = F.tex2d ? find_method_types(F.tex2d, ".ctor", {"Int32", "Int32"}) : nullptr;
+        encode = icK ? find_method_types(icK, "EncodeToPNG", {"Texture2D"}) : nullptr;
+        logf_("экспорт текстур сцены: w=%d h=%d tmp=%d rel=%d blit=%d act=%d read=%d ctor=%d png=%d", getW != 0, getH != 0, getTmp != 0, relTmp != 0, blit != 0,
+              setActive != 0, readPx != 0, ctor2 != 0, encode != 0);
+    }
+    if (!getW || !getH || !getTmp || !relTmp || !blit || !setActive || !getActive || !readPx || !ctor2 || !encode || !obj_new || !F.tex2d) return false;
+    void* wv = inv(getW, tex);
+    void* hv = inv(getH, tex);
+    if (!wv || !hv) return false;
+    int w = *(const int*)obj_unbox(wv), h = *(const int*)obj_unbox(hv);
+    if (w < 1 || h < 1) return false;
+    int sw = w < 128 ? w : 128, sh = h < 128 ? h : 128;
+    void* ga[2] = {&sw, &sh};
+    void* rt = inv(getTmp, nullptr, ga);
+    if (!rt) return false;
+    void* ba[2] = {tex, rt};
+    inv(blit, nullptr, ba);
+    void* prev = inv(getActive, nullptr);
+    void* sa[1] = {rt};
+    inv(setActive, nullptr, sa);
+    bool ok = false;
+    void* t2 = obj_new(F.tex2d);
+    void* bytes = nullptr;
+    if (t2) {
+        void* ca[2] = {&sw, &sh};
+        inv(ctor2, t2, ca, &ok);
+        if (ok) {
+            struct { float x, y, w, h; } rc{0.f, 0.f, (float)sw, (float)sh};
+            int z = 0;
+            void* pa[3] = {&rc, &z, &z};
+            inv(readPx, t2, pa, &ok);
+            if (ok) { void* ea[1] = {t2}; bytes = inv(encode, nullptr, ea); }
+        }
+    }
+    void* ra[1] = {prev};
+    inv(setActive, nullptr, ra);
+    void* la[1] = {rt};
+    inv(relTmp, nullptr, la);
+    if (t2 && F.destroy) { void* da[1] = {t2}; inv(F.destroy, nullptr, da); }
+    if (!bytes) return false;
+    uintptr_t n = arr_len(bytes);
+    if (n < 16 || n > 4000000) return false;
+    mkdir((g_mapsDir + "/scene_tex").c_str(), 0775);
+    std::string path = g_mapsDir + "/scene_tex/" + std::to_string(idx) + ".png";
+    FILE* fp = fopen(path.c_str(), "wb");
+    if (!fp) return false;
+    fwrite(arr_elem(bytes, 1, 0), 1, n, fp);
+    fclose(fp);
+    return true;
+}
+
 /** Геометрия сцены для редактора карт: maps/_scene = «центр x y z, полуразмеры x y z» (мировые координаты) каждого включённого рендерера. */
 void dump_scene() {
     if (!F.type_renderer || !F.rend_bounds) { logf_("сцена для редактора: у игры нет Renderer.bounds"); return; }
@@ -2068,32 +2142,70 @@ void dump_scene() {
     if (!arr) { logf_("сцена для редактора: рендереры не найдены"); return; }
     uintptr_t cnt = arr_len(arr);
     if (cnt > 200000) cnt = 200000;
+    static void* rdK = bearite_find_class("UnityEngine", "Renderer");
+    static void* getShared = rdK ? bearite_il2.class_get_method_from_name(rdK, "get_sharedMaterial", 0) : nullptr;
+    static void* getCol = F.mat_class ? find_method_types(F.mat_class, "GetColor", {"String"}) : nullptr;
+    static void* getTex = F.mat_class ? find_method_types(F.mat_class, "GetTexture", {"String"}) : nullptr;
+    static std::map<int, int> texIdx;       // id текстуры игры -> номер файла scene_tex/N.png (0 = не вышло)
+    static int texNext = 1;
+    std::map<int, SceneMat> mats;
     bool oc = g_crumbs;
     g_crumbs = false;
     std::string out;
-    int n = 0;
+    int n = 0, exported = 0, withTex = 0;
     for (uintptr_t i = 0; i < cnt && n < 6000; ++i) {
         void* o = *(void**)arr_elem(arr, sizeof(void*), i);
         if (!o) continue;
         if (F.rend_get_enabled) { void* r = inv(F.rend_get_enabled, o); if (r && !*(const uint8_t*)obj_unbox(r)) continue; }
         void* bb = inv(F.rend_bounds, o);
         if (!bb) continue;
-        const float* f = (const float*)obj_unbox(bb);
+        float f[6];
+        memcpy(f, obj_unbox(bb), sizeof f);
         if (f[3] > 150.f || f[4] > 150.f || f[5] > 150.f) continue;                 // небо, вода и прочее «на весь мир»
         if (f[3] < 0.03f && f[4] < 0.03f && f[5] < 0.03f) continue;                 // пылинки и частицы
         if (F.get_transform) if (void* tr = inv(F.get_transform, o)) {
             std::string nm = name_of(tr);
             if (nm == "Shadow" || nm.rfind("Footstep", 0) == 0 || nm.rfind("Jump VFX", 0) == 0 || nm.rfind("Bearite/", 0) == 0) continue;
         }
-        char line[160];
-        snprintf(line, sizeof line, "%.2f %.2f %.2f %.2f %.2f %.2f\n", f[0], f[1], f[2], f[3], f[4], f[5]);
+        SceneMat sm{{0.72f, 0.7f, 0.66f}, 0};
+        void* mat = getShared ? inv(getShared, o) : nullptr;
+        if (mat) {
+            int mid = inst_id(mat);
+            auto it = mats.find(mid);
+            if (it != mats.end()) sm = it->second;
+            else {
+                const char* colProp = mat_has(mat, "_BaseColor") ? "_BaseColor" : (mat_has(mat, "_Color") ? "_Color" : nullptr);
+                if (colProp && getCol) {
+                    void* a[1] = {bearite_il2.string_new(colProp)};
+                    if (void* cv = inv(getCol, mat, a)) { const float* c = (const float*)obj_unbox(cv); sm.c[0] = c[0]; sm.c[1] = c[1]; sm.c[2] = c[2]; }
+                }
+                const char* texProp = mat_has(mat, "_BaseMap") ? "_BaseMap" : (mat_has(mat, "_MainTex") ? "_MainTex" : nullptr);
+                if (texProp && getTex) {
+                    void* a[1] = {bearite_il2.string_new(texProp)};
+                    if (void* tx = inv(getTex, mat, a)) {
+                        int tid = inst_id(tx);
+                        auto ti = texIdx.find(tid);
+                        if (ti == texIdx.end()) {
+                            int idx = 0;
+                            if (exported < 60 && scene_export_tex(tx, texNext)) { idx = texNext++; ++exported; }
+                            ti = texIdx.emplace(tid, idx).first;
+                        }
+                        sm.tex = ti->second;
+                    }
+                }
+                mats[mid] = sm;
+            }
+        }
+        if (sm.tex) ++withTex;
+        char line[200];
+        snprintf(line, sizeof line, "%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %d\n", f[0], f[1], f[2], f[3], f[4], f[5], sm.c[0], sm.c[1], sm.c[2], sm.tex);
         out += line;
         ++n;
     }
     g_crumbs = oc;
     std::string path = g_mapsDir + "/_scene", tmp = g_mapsDir + "/.scene.tmp";
     if (FILE* fp = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), fp); fclose(fp); rename(tmp.c_str(), path.c_str()); }
-    logf_("сцена для редактора: записано рендереров %d из %d", n, (int)cnt);
+    logf_("сцена для редактора: рендереров %d из %d, с текстурой %d, текстур выгружено сейчас %d, всего %d", n, (int)cnt, withTex, exported, (int)texIdx.size());
 }
 
 void cmd_poll() {

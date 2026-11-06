@@ -180,7 +180,7 @@ class MapStore(private val dir: File) {
     /** Время последней записи сцены или 0. */
     fun sceneStamp(): Long = File(dir, "_scene").let { if (it.isFile) it.lastModified() else 0L }
 
-    /** Рендереры сцены: по 6 чисел на объект (центр x y z и полуразмеры x y z, мировые координаты). */
+    /** Рендереры сцены: по 10 чисел на объект (центр x y z, полуразмеры x y z, цвет r g b, номер текстуры; мировые координаты). */
     fun readScene(): FloatArray? {
         val f = File(dir, "_scene")
         if (!f.isFile) return null
@@ -188,11 +188,14 @@ class MapStore(private val dir: File) {
             val out = ArrayList<Float>()
             f.forEachLine { l ->
                 val p = l.trim().split(' ')
-                if (p.size == 6) { val v = p.mapNotNull { it.toFloatOrNull() }; if (v.size == 6) out.addAll(v) }
+                if (p.size == 10) { val v = p.mapNotNull { it.toFloatOrNull() }; if (v.size == 10) out.addAll(v) }
             }
             out.toFloatArray()
         } catch (_: Throwable) { null }
     }
+
+    /** Текстура материала мира игры (выгружает нативный мод в maps/scene_tex/N.png). */
+    fun sceneTexFile(idx: Int): File? = File(File(dir, "scene_tex"), "$idx.png").takeIf { it.isFile }
 
     /** Файл картинки для превью с текстурой в редакторе. */
     fun textureFile(id: String): File? = texturePng(id).takeIf { it.isFile }
