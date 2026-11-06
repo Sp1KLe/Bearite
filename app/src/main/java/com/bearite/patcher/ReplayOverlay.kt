@@ -128,7 +128,7 @@ class ReplayOverlay(private val act: Activity, private val parent: FrameLayout) 
         // нижняя панель: время и камера
         bar = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = ui.round(0xE61B1410.toInt(), 16, GameUi.LINE_TAN)
+            background = ui.round(0xF01D2A40.toInt(), 16, GameUi.OUTLINE, 3)
             setPadding(dp(10), dp(8), dp(10), dp(8))
             visibility = View.GONE
             isClickable = true
@@ -172,7 +172,7 @@ class ReplayOverlay(private val act: Activity, private val parent: FrameLayout) 
 
         // короткие сообщения мода («Запись сохранена», «Открой ту же карту»…)
         note = ui.label("", 14f, GameUi.CREAM).apply {
-            background = ui.round(0xE61B1410.toInt(), 14, GameUi.LINE_TAN)
+            background = ui.round(0xF01D2A40.toInt(), 14, GameUi.OUTLINE, 3)
             setPadding(dp(14), dp(8), dp(14), dp(8))
             visibility = View.GONE
             isClickable = false

@@ -28,15 +28,7 @@ class CheatOverlay(private val act: Activity, private val parent: FrameLayout) {
     }
 
     fun start() {
-        val b = TextView(act).apply {
-            text = "Читы"
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(GameUi.ON_CREAM)
-            gravity = Gravity.CENTER
-            background = ui.round(GameUi.CREAM, 18, GameUi.TAN, 2)
-            setOnClickListener { toggle() }
-        }
+        val b = ui.gameBtn("Читы", GameUi.YELLOW, 15f, 14) { toggle() }
         button = b
         parent.addView(b, FrameLayout.LayoutParams(dp(92), dp(38), Gravity.TOP or Gravity.START).apply {
             leftMargin = dp(10)
@@ -59,7 +51,7 @@ class CheatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = ui.round(GameUi.BG, 20, GameUi.TAN, 2)
+            background = ui.round(GameUi.SURFACE, 20, GameUi.OUTLINE, 3)
             setPadding(dp(16), dp(14), dp(16), dp(16))
         }
 

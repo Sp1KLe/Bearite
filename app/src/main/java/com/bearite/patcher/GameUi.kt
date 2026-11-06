@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.InputType
@@ -42,21 +43,25 @@ class GameUi(val act: Activity) {
 
     fun matchWrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
-    /** Объёмная «леденцовая» кнопка игры: градиент сверху вниз, толстая тёмная обводка. */
-    fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3) = GradientDrawable(
-        GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(lighten(base), base)
-    ).apply {
-        cornerRadius = dp(radiusDp).toFloat()
-        setStroke(dp(strokeDp), OUTLINE)
+    /** Объёмный фон кнопки игры: тёмная обводка, градиент, глянцевый блик. */
+    fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3): Drawable =
+        GameBtnBg(base, dp(radiusDp).toFloat(), dp(strokeDp).toFloat())
+
+    /** Белый текст с толстой тёмной окантовкой, как в игре. */
+    fun outlined(text: String, sizeSp: Float, color: Int = 0xFFFFFFFF.toInt()): OutlinedText = OutlinedText(act).apply {
+        this.text = text
+        textSize = sizeSp * UiScale.factor(act)
+        setTextColor(color)
+        typeface = Typeface.DEFAULT_BOLD
+        outlineWidthPx = dp(1) * 2f + sizeSp * 0.12f * d
     }
 
-    /** Кнопка игры: белый текст с тёмной окантовкой на цветной плашке. */
+    /** Кнопка игры: белый текст с окантовкой на цветной глянцевой плашке. */
     fun gameBtn(text: String, base: Int, sizeSp: Float = 18f, radiusDp: Int = 16, onClick: () -> Unit): TextView =
-        label(text, sizeSp, 0xFFFFFFFF.toInt()).apply {
+        outlined(text, sizeSp).apply {
             gravity = Gravity.CENTER
             setPadding(dp(12), 0, dp(12), 0)
-            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), OUTLINE)
-            background = chunky(base, radiusDp)
+            background = chunky(base, radiusDp, 3)
             setOnClickListener { onClick() }
         }
 
@@ -71,11 +76,10 @@ class GameUi(val act: Activity) {
         text: String, primary: Boolean = false, danger: Boolean = false, sizeSp: Float = 14f,
         onClick: () -> Unit
     ): TextView =
-        label(text, sizeSp, 0xFFFFFFFF.toInt()).apply {
+        outlined(text, sizeSp).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), 0, dp(14), 0)
             minHeight = dp(40)
-            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), OUTLINE)
             background = when {
                 primary -> chunky(YELLOW, 18, 2)
                 danger -> chunky(RUST, 18, 2)
@@ -90,8 +94,8 @@ class GameUi(val act: Activity) {
         val t = label("", 15f).apply { gravity = Gravity.CENTER }
         fun paint() {
             t.text = if (state) "Вкл" else "Выкл"
-            t.setTextColor(if (state) ON_CREAM else MUTED)
-            t.background = round(if (state) GREEN else SURFACE3, 18)
+            t.setTextColor(0xFFFFFFFF.toInt())
+            t.background = chunky(if (state) GREEN else SURFACE3, 16, 2)
         }
         paint()
         t.setOnClickListener {
@@ -292,7 +296,7 @@ class GameUi(val act: Activity) {
             background = round(SURFACE, 24, OUTLINE, 3)
             setPadding(dp(20), dp(18), dp(20), dp(16))
         }
-        box.addView(label(title, 19f))
+        box.addView(outlined(title, 20f))
         if (content != null) box.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         if (buttons.isNotEmpty()) {
             val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }

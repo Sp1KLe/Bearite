@@ -243,24 +243,25 @@ class GameActivity : Activity() {
         return m.invoke(p) as View
     }
 
-    /** Кнопки «Моды» и «Достижения» в стиле игры (жёлтые, с толстой обводкой): видны на паузе. */
+    /**
+     * Кнопка «Меню» Bearite — копия жёлтых кнопок игры. Стоит в правой колонке меню паузы прямо над
+     * родной кнопкой «Достижения»; размеры берутся от высоты экрана, как у интерфейса игры (эталон 1560×720).
+     */
     private fun menuButton(): View {
-        val d = UiScale.density(this)
+        val h = resources.displayMetrics.heightPixels
+        val k = h / 720f
         val ui = GameUi(this)
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        val mods = ui.gameBtn("Моды", GameUi.YELLOW, 18f, 16) {
+        val d = UiScale.density(this)
+        val b = ui.gameBtn("Меню", GameUi.YELLOW, (84 * k * 0.30f) / d / UiScale.factor(this), 1) {
             modMenu?.show()
             hud?.root?.visibility = View.GONE
         }
-        val ach = ui.gameBtn("Достижения", GameUi.YELLOW, 18f, 16) { ui.soon("Достижения") }
-        row.addView(mods, LinearLayout.LayoutParams((110 * d).toInt(), (46 * d).toInt()))
-        row.addView(ach, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (46 * d).toInt()).apply { leftMargin = (8 * d).toInt() })
-        val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
-        lp.topMargin = (10 * d).toInt()
-        row.layoutParams = lp
-        return row
+        b.background = GameBtnBg(GameUi.YELLOW, 84 * k * 0.30f, 3 * k)
+        val lp = FrameLayout.LayoutParams((272 * k).toInt(), (84 * k).toInt(), Gravity.TOP or Gravity.END)
+        lp.topMargin = (192 * k).toInt()
+        lp.rightMargin = (20 * k).toInt()
+        b.layoutParams = lp
+        return b
     }
 
     /** -1 неизвестно, 0 игра идёт, 1 пауза. */

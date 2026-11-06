@@ -35,11 +35,12 @@ class GameHud(private val act: Activity, mods: ModManager) {
             if (!m.enabled || m.hud.isEmpty()) continue
             if (m.libs.isNotEmpty() && !mods.isNativeAccepted(m.id)) continue
             for (b in m.hud) {
-                val v = TextView(act).apply {
+                val v = OutlinedText(act).apply {
+                    outlineWidthPx = dp(3).toFloat()
                     text = b.label
                     textSize = if (b.label.length > 2) 13f else 22f
                     typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(GameUi.CREAM)
+                    setTextColor(0xFFFFFFFF.toInt())
                     gravity = Gravity.CENTER
                     isClickable = true
                 }
@@ -56,7 +57,7 @@ class GameHud(private val act: Activity, mods: ModManager) {
         hint.typeface = Typeface.DEFAULT_BOLD
         hint.setTextColor(GameUi.CREAM)
         hint.setPadding(dp(16), dp(8), dp(16), dp(8))
-        hint.background = round(0xEE30221A.toInt(), 16).apply { setStroke(dp(1), GameUi.LINE_TAN) }
+        hint.background = round(0xEE1D2A40.toInt(), 16).apply { setStroke(dp(3), GameUi.OUTLINE) }
         hint.alpha = 0f
         root.addView(
             hint,
@@ -91,10 +92,8 @@ class GameHud(private val act: Activity, mods: ModManager) {
     private fun paint(e: Entry) {
         val on = e.button.action == "toggle" &&
             (ModSettings.load(e.mod)[e.button.setting] as? Boolean) == true
-        e.view.setTextColor(if (on) GameUi.ON_CREAM else GameUi.CREAM)
-        e.view.background = round(if (on) 0xF2D6B18D.toInt() else 0xCC30221A.toInt(), 18).apply {
-            setStroke(dp(2), if (on) 0xFFF2DFC5.toInt() else GameUi.LINE_TAN)
-        }
+        e.view.setTextColor(0xFFFFFFFF.toInt())
+        e.view.background = GameBtnBg(if (on) GameUi.GREEN else GameUi.YELLOW, dp(18).toFloat(), dp(3).toFloat())
     }
 
     private fun click(e: Entry) {

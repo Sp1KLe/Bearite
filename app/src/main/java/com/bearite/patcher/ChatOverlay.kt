@@ -86,7 +86,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private fun build() {
         bubble = TextView(act).apply {
             text = "💬"; textSize = 22f; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xCC241A15.toInt()); setStroke(dp(2), GameUi.CREAM) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2E86DE.toInt()); setStroke(dp(3), GameUi.OUTLINE) }
         }
         bubble.visibility = View.GONE   // покажем, когда игрок окажется в настоящей комнате
         parent.addView(bubble, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)); topMargin = prefs.getInt("by", dp(72)) })
@@ -124,7 +124,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val h = (dm.heightPixels * 0.62f).toInt()
         panel = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply { setColor(0xE61B1410.toInt()); cornerRadius = dp(16).toFloat(); setStroke(dp(1), GameUi.LINE_TAN) }
+            background = GradientDrawable().apply { setColor(0xF01D2A40.toInt()); cornerRadius = dp(16).toFloat(); setStroke(dp(3), GameUi.OUTLINE) }
             setPadding(dp(10), dp(8), dp(10), dp(8))
             visibility = View.GONE; isClickable = true
         }
@@ -135,8 +135,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         head.addView(ui.label("✕", 18f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
         panel.addView(head)
         val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        tabChat = ui.label("Чат", 13f, GameUi.ON_CREAM).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
-        tabPlayers = ui.label("Игроки", 13f, GameUi.MUTED).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
+        tabChat = ui.outlined("Чат", 13f).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
+        tabPlayers = ui.outlined("Игроки", 13f).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
         tabs.addView(tabChat, LinearLayout.LayoutParams(0, dp(30), 1f).apply { rightMargin = dp(3) })
         tabs.addView(tabPlayers, LinearLayout.LayoutParams(0, dp(30), 1f).apply { leftMargin = dp(3) })
         panel.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
@@ -261,8 +261,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         inputRow.visibility = if (players) View.GONE else View.VISIBLE
         playersScroll.visibility = if (players) View.VISIBLE else View.GONE
         for ((t, on) in listOf(tabChat to !players, tabPlayers to players)) {
-            t.setTextColor(if (on) GameUi.ON_CREAM else GameUi.MUTED)
-            t.background = ui.round(if (on) GameUi.CREAM else GameUi.SURFACE2, 15)
+            t.setTextColor(0xFFFFFFFF.toInt())
+            t.background = ui.chunky(if (on) GameUi.YELLOW else GameUi.SURFACE3, 12, 2)
         }
         if (players) renderPlayers()
     }

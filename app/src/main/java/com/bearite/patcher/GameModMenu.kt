@@ -156,10 +156,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(logo(), LinearLayout.LayoutParams(dp(44), dp(44)))
-            addView(ui.label("Bearite", 28f, 0xFFFFFFFF.toInt()).apply {
-                setPadding(dp(10), 0, 0, 0)
-                setShadowLayer(dp(3).toFloat(), 0f, dp(2).toFloat(), GameUi.OUTLINE)
-            })
+            addView(ui.outlined("Bearite", 28f).apply { setPadding(dp(10), 0, 0, 0) })
         }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
@@ -217,10 +214,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             SCR_SHOP -> "Магазин модов"
             else -> "Редактор карт"
         }
-        val titleView = ui.label(title, 22f, 0xFFFFFFFF.toInt()).apply {
-            setPadding(dp(12), 0, dp(8), 0)
-            setShadowLayer(dp(3).toFloat(), 0f, dp(2).toFloat(), GameUi.OUTLINE)
-        }
+        val titleView = ui.outlined(title, 22f).apply { setPadding(dp(12), 0, dp(8), 0) }
         if (screen == SCR_MODS) {
             head.addView(titleView)
             for (t in listOf(tabInstalled, tabGames, tabReplay)) {
@@ -247,9 +241,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         scaleType = ImageView.ScaleType.FIT_CENTER
     }
 
-    private fun tab(text: String, id: Int) = ui.label(text, 15f, 0xFFFFFFFF.toInt()).apply {
+    private fun tab(text: String, id: Int) = ui.outlined(text, 15f).apply {
         gravity = Gravity.CENTER
-        setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), GameUi.OUTLINE)
         setOnClickListener { selectTab(id) }
     }
 
