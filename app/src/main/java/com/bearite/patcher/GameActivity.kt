@@ -162,7 +162,6 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
-        touchBtn = menuTouch().also { root.addView(it) }
         val hudDensity = UiScale.density(this)
         root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * hudDensity).toInt(); rightMargin = (12 * hudDensity).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -318,7 +317,7 @@ class GameActivity : Activity() {
         if (!paused) { drawn.visibility = View.GONE; touch?.visibility = View.GONE; return }
         val (state, pos) = readMenuBtn()
         when {
-            touch != null && state == "ok" -> { placeTouch(touch, pos); touch.visibility = View.VISIBLE; drawn.visibility = View.GONE }
+            state == "ok" -> { touch?.visibility = View.GONE; drawn.visibility = View.GONE }  // видна настоящая копия кнопки игры
             state == "wait" -> { touch?.visibility = View.GONE; drawn.visibility = View.GONE }
             else -> { touch?.visibility = View.GONE; drawn.visibility = View.VISIBLE }
         }
@@ -337,11 +336,20 @@ class GameActivity : Activity() {
 
     private var lastMenu = false
     private var lastPaused = false
+    private var lastClick: String? = null
     private val menuPoll = object : Runnable {
         override fun run() {
             val m = gameMenuOpen()
             if (m != lastMenu) { lastMenu = m; updateModButton() } else if (lastPaused) updateMenuBtn(true)
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 300)
+            // нажатие на копию кнопки в меню паузы: нативный мод увеличивает счётчик в maps/_menuclick
+            val c = try { File(File(filesDir, "maps"), "_menuclick").readText().trim() } catch (_: Throwable) { "" }
+            if (lastClick == null) lastClick = c
+            else if (c != lastClick) {
+                lastClick = c
+                modMenu?.show()
+                hud?.root?.visibility = View.GONE
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 150)
         }
     }
 

@@ -2840,6 +2840,31 @@ bool pm_is_achievements(const std::string& t) {
     return false;
 }
 
+void (*o_btn_click)(void*, void*, const void*) = nullptr;
+void (*o_btn_submit)(void*, void*, const void*) = nullptr;
+int g_pmClicks = 0;
+
+/** Нажата ли наша копия кнопки. Нажатие не отдаём игре (иначе откроются «Достижения»), а сообщаем лаунчеру. */
+bool pm_is_ours(void* btn) {
+    if (!btn || !F.get_gameobject) return false;
+    void* go = inv(F.get_gameobject, btn);
+    return go && name_of(go) == "BeariteMenuButton";
+}
+void pm_clicked() {
+    ++g_pmClicks;
+    std::string path = g_mapsDir + "/_menuclick", tmp = g_mapsDir + "/.menuclick.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fprintf(f, "%d", g_pmClicks); fclose(f); rename(tmp.c_str(), path.c_str()); }
+    logf_("нажата кнопка «Меню» в паузе");
+}
+void h_btn_click(void* self, void* ev, const void* mi) {
+    if (pm_is_ours(self)) { pm_clicked(); return; }
+    if (o_btn_click) o_btn_click(self, ev, mi);
+}
+void h_btn_submit(void* self, void* ev, const void* mi) {
+    if (pm_is_ours(self)) { pm_clicked(); return; }
+    if (o_btn_submit) o_btn_submit(self, ev, mi);
+}
+
 void pm_tick(long long now) {
     if (!g_pmOpen || now - g_pmOpenAt < 250 || now - g_pmLast < 300) return;
     g_pmLast = now;
@@ -2886,10 +2911,20 @@ void pm_tick(long long now) {
     void* pa[1] = {&np};
     inv(F.set_position, ctr, pa);
     pm_set_text(clone, "Меню");
-    if (F.get_component && F.beh_set_enabled) {  // копия не должна открывать достижения
-        void* ga[1] = {PM.tButton};
-        if (void* bt = inv(F.get_component, clone, ga)) { bool off = false; void* ea[1] = {&off}; inv(F.beh_set_enabled, bt, ea); }
+    // у надписей кнопки есть TranslateUI (ключ перевода): без его удаления игра вернёт «Достижения»
+    static void* tTrCached = type_of("", "TranslateUI");
+    if (void* tTr = tTrCached) if (F.get_comps_children && F.destroy_imm) {
+        bool inc = true;
+        void* ta[2] = {tTr, &inc};
+        if (void* arr = inv(F.get_comps_children, clone, ta)) {
+            uintptr_t n = arr_len(arr);
+            std::vector<void*> list;
+            for (uintptr_t i = 0; i < n && i < 16; ++i) if (void* c = *(void**)arr_elem(arr, sizeof(void*), i)) list.push_back(c);
+            for (void* c : list) { void* da[1] = {c}; inv(F.destroy_imm, nullptr, da); }
+        }
     }
+    pm_set_text(clone, "Меню");
+    if (F.set_active) { bool on = true; void* sa[1] = {&on}; inv(F.set_active, clone, sa); }
     char buf[160];
     snprintf(buf, sizeof buf, "ok\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", np.x, np.y, tgt->p[0], tgt->p[1], step);
     pm_status(buf);
@@ -3298,6 +3333,11 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     {
         int rc = bearite_hook_method(A, ID, "", "PauseMenuManager", "EnablePauseMenu", 1, (void*)h_pause_menu, (void**)&o_pause_menu);
         if (rc != 0) logf_("перехват меню паузы: не вышло (%d)", rc);
+    }
+    {
+        int r1 = bearite_hook_method(A, ID, "UnityEngine.UI", "Button", "OnPointerClick", 1, (void*)h_btn_click, (void**)&o_btn_click);
+        int r2 = bearite_hook_method(A, ID, "UnityEngine.UI", "Button", "OnSubmit", 1, (void*)h_btn_submit, (void**)&o_btn_submit);
+        if (r1 != 0 || r2 != 0) logf_("перехват нажатий кнопок UI: OnPointerClick=%d OnSubmit=%d", r1, r2);
     }
     {
         int r1 = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "CreateRoom", 4, (void*)h_create_room, (void**)&o_create_room);
