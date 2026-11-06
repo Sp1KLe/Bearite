@@ -161,7 +161,8 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
-        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * UiScale.density(this)).toInt(); rightMargin = (12 * UiScale.density(this)).toInt() })
+        val hudDensity = UiScale.density(this)
+        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * hudDensity).toInt(); rightMargin = (12 * hudDensity).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         cheats = CheatOverlay(this, root).also { it.start() }
         replayUi = ReplayOverlay(this, root).also { it.start() }
