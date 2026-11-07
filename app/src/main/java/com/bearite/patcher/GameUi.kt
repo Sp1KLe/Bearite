@@ -26,6 +26,8 @@ import java.util.Locale
  */
 class GameUi(val act: Activity) {
     private val d = UiScale.density(act)
+    /** Плоский стиль в духе Blender (редактор карт): серые кнопки, синий акцент, без окантовки текста. */
+    var flat = false
     fun dp(v: Int) = (v * d).toInt()
 
     fun label(text: String, sizeSp: Float, color: Int = CREAM, bold: Boolean = true) = TextView(act).apply {
@@ -107,11 +109,30 @@ class GameUi(val act: Activity) {
     }
 
     /** Кнопка-пилюля. primary = жёлтая (главное действие), danger = красная, иначе синяя. */
+    fun flatBg(color: Int, pressed: Int, radiusDp: Int = 5): Drawable = android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), round(pressed, radiusDp, 0xFF1A1A1A.toInt()))
+        addState(intArrayOf(), round(color, radiusDp, 0xFF1A1A1A.toInt()))
+    }
+
     fun pill(
         text: String, primary: Boolean = false, danger: Boolean = false, sizeSp: Float = 14f,
         onClick: () -> Unit
     ): TextView =
-        outlined(text, sizeSp).apply {
+        if (flat) TextView(act).apply {
+            this.text = text
+            textSize = (sizeSp - 1f).coerceAtLeast(11f) * UiScale.factor(act)
+            setTextColor(0xFFEDEDED.toInt())
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(10), 0, dp(10), 0)
+            minHeight = dp(32)
+            background = when {
+                primary -> flatBg(0xFF4772B3.toInt(), 0xFF5A86CC.toInt())
+                danger -> flatBg(0xFF9C3A3A.toInt(), 0xFFB84A4A.toInt())
+                else -> flatBg(0xFF545454.toInt(), 0xFF6A6A6A.toInt())
+            }
+            setOnClickListener { onClick() }
+        } else outlined(text, sizeSp).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), 0, dp(14), 0)
             minHeight = dp(40)
@@ -131,7 +152,7 @@ class GameUi(val act: Activity) {
         fun paint() {
             t.text = if (state) "Вкл" else "Выкл"
             t.setTextColor(0xFFFFFFFF.toInt())
-            t.background = chunky(if (state) GREEN else SURFACE3, 16, 2)
+            t.background = if (flat) flatBg(if (state) 0xFF4772B3.toInt() else 0xFF545454.toInt(), if (state) 0xFF5A86CC.toInt() else 0xFF6A6A6A.toInt()) else chunky(if (state) GREEN else SURFACE3, 16, 2)
         }
         paint()
         t.setOnClickListener {
