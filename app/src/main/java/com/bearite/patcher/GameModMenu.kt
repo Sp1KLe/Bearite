@@ -47,6 +47,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private lateinit var footer: TextView
     private val head = LinearLayout(act)
     private val hub = FrameLayout(act)
+    private val hubViews = ArrayList<View>()
     private lateinit var col: LinearLayout
     private var screen = SCR_HUB
     private lateinit var scroll: ScrollView
@@ -165,8 +166,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         }
         setOnClickListener { onClick() }
     }
-
-    private val hubViews = ArrayList<View>()
 
     private fun buildHub() {
         panel.addView(hub, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
