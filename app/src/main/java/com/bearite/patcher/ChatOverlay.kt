@@ -124,7 +124,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val h = (dm.heightPixels * 0.62f).toInt()
         panel = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply { setColor(0xF01D2A40.toInt()); cornerRadius = dp(16).toFloat(); setStroke(dp(3), GameUi.OUTLINE) }
+            background = ui.panelBg(16)
             setPadding(dp(10), dp(8), dp(10), dp(8))
             visibility = View.GONE; isClickable = true
         }

@@ -87,3 +87,35 @@ class OutlinedText(ctx: Context) : TextView(ctx) {
         super.onDraw(canvas)
     }
 }
+
+/** Фон-«девять частей»: углы картинки не растягиваются, середина и стороны тянутся. Используется для панелей и окон. */
+class NineSliceBg(private val bmp: android.graphics.Bitmap, private val cut: Int, private val cornerPx: Float) : Drawable() {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val src = android.graphics.Rect()
+    private val dst = RectF()
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        val w = b.width().toFloat(); val h = b.height().toFloat()
+        val k = minOf(cornerPx, w / 2f, h / 2f)
+        val sx = intArrayOf(0, cut, bmp.width - cut, bmp.width)
+        val sy = intArrayOf(0, cut, bmp.height - cut, bmp.height)
+        val dx = floatArrayOf(b.left.toFloat(), b.left + k, b.right - k, b.right.toFloat())
+        val dy = floatArrayOf(b.top.toFloat(), b.top + k, b.bottom - k, b.bottom.toFloat())
+        for (i in 0 until 3) for (j in 0 until 3) {
+            src.set(sx[i], sy[j], sx[i + 1], sy[j + 1])
+            dst.set(dx[i], dy[j], dx[i + 1], dy[j + 1])
+            c.drawBitmap(bmp, src, dst, p)
+        }
+    }
+
+    override fun getOutline(outline: android.graphics.Outline) {
+        outline.setRoundRect(bounds, cornerPx * 0.8f)
+        outline.alpha = 1f
+    }
+
+    override fun setAlpha(alpha: Int) { p.alpha = alpha }
+    override fun setColorFilter(cf: ColorFilter?) { p.colorFilter = cf }
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}

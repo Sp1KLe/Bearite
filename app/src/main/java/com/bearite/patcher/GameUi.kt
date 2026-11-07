@@ -43,6 +43,17 @@ class GameUi(val act: Activity) {
 
     fun matchWrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
+    /** Фон панелей и окон — картинка пользователя (res/drawable-nodpi/panel_bg.png), растянутая по девяти частям. */
+    fun panelBg(cornerDp: Int = 34): Drawable {
+        var b = panelBmp
+        if (b == null) {
+            val o = android.graphics.BitmapFactory.Options().apply { inScaled = false }
+            b = android.graphics.BitmapFactory.decodeResource(act.resources, R.drawable.panel_bg, o)
+            panelBmp = b
+        }
+        return if (b != null) NineSliceBg(b, 90, dp(cornerDp).toFloat()) else round(SURFACE, 28, OUTLINE, 4)
+    }
+
     /** Анимация нажатия: кнопка проседает и пружинит обратно. Нажатие не перехватывает. */
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     fun pressAnim(v: View) {
@@ -308,8 +319,8 @@ class GameUi(val act: Activity) {
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(SURFACE, 24, OUTLINE, 3)
-            setPadding(dp(20), dp(18), dp(20), dp(16))
+            background = panelBg()
+            setPadding(dp(26), dp(22), dp(26), dp(22))
         }
         box.addView(outlined(title, 20f))
         if (content != null) box.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
@@ -362,19 +373,20 @@ class GameUi(val act: Activity) {
 
     companion object {
         // палитра в стиле Super Bear Adventure: тёмно-синий фон, жёлтые и зелёные «леденцовые» кнопки, тёмная обводка
-        const val BG = 0xFF111A29.toInt()
-        const val BG_DEEP = 0xFF0D1522.toInt()
-        const val SURFACE = 0xFF1D2A40.toInt()
-        const val SURFACE2 = 0xFF28385A.toInt()
-        const val SURFACE3 = 0xFF37507D.toInt()
-        const val ROW = 0xFF223250.toInt()
+        const val BG = 0xFF4B4EA3.toInt()
+        const val BG_DEEP = 0xFF3E4194.toInt()
+        const val SURFACE = 0xFF5A5DB8.toInt()
+        const val SURFACE2 = 0xFF6A6DC8.toInt()
+        const val SURFACE3 = 0xFF4F52AA.toInt()
+        const val ROW = 0xFF6366C2.toInt()
         const val CREAM = 0xFFF6F8FF.toInt()
-        const val MUTED = 0xFFB6C4DE.toInt()
-        const val DIM = 0xFF7F90AE.toInt()
+        const val MUTED = 0xFFE4E6FF.toInt()
+        const val DIM = 0xFFBFC2F2.toInt()
         const val TAN = 0xFFFFD23F.toInt()
         const val BROWN = 0xFFFFA726.toInt()
         const val RUST = 0xFFE5483D.toInt()
         const val GREEN = 0xFF63D32B.toInt()
+        private var panelBmp: android.graphics.Bitmap? = null
         const val YELLOW = 0xFFFFC61A.toInt()
         const val ON_CREAM = 0xFF3A2400.toInt()
         const val OUTLINE = 0xFF1A1206.toInt()

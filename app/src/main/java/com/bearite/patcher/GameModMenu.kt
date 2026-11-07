@@ -78,7 +78,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         root.setOnClickListener { hide() }
 
         val dm = act.resources.displayMetrics
-        panel.background = ui.round(GameUi.SURFACE, 28, GameUi.OUTLINE, 4)
+        panel.background = ui.panelBg()
         panel.clipToOutline = true
         panel.outlineProvider = ViewOutlineProvider.BACKGROUND
         panel.isClickable = true
@@ -86,14 +86,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             panel,
             FrameLayout.LayoutParams((dm.widthPixels * 0.88f).toInt(), (dm.heightPixels * 0.88f).toInt(), Gravity.CENTER)
         )
-        // мягкие пятна в углах, как на витрине концепта
-        panel.addView(blob(0x3363D32B, 190), FrameLayout.LayoutParams(dp(190), dp(190), Gravity.END or Gravity.BOTTOM).apply {
-            rightMargin = -dp(55); bottomMargin = -dp(70)
-        })
-        panel.addView(blob(0x33FFC61A, 150), FrameLayout.LayoutParams(dp(150), dp(150), Gravity.END or Gravity.TOP).apply {
-            rightMargin = -dp(40); topMargin = -dp(60)
-        })
-
         col = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(10))
@@ -169,26 +161,38 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
 
     private fun buildHub() {
         panel.addView(hub, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        // как в референсе: красная кнопка в углу, слева высокая «Моды», справа «Магазин» и «Редактор карт»
+        // как в референсе: красная кнопка в углу, слева высокая «Моды», справа «Магазин» и «Редактор карт», шестерёнка справа внизу
         val close = imgBtn(R.drawable.btn_close_red) { hide() }
-        hub.addView(close, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.TOP or Gravity.START).apply { setMargins(dp(14), dp(14), 0, 0) })
+        val gear = imgBtn(R.drawable.btn_settings) { openScreen(SCR_SETTINGS) }
+        hub.addView(close, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.TOP or Gravity.START))
+        hub.addView(gear, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.TOP or Gravity.START))
         val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         hub.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val mods = imgBtn(R.drawable.btn_mods) { openScreen(SCR_MODS) }
         val shop = imgBtn(R.drawable.btn_shop) { openShopPopup() }
         val editor = imgBtn(R.drawable.btn_mapeditor) { openScreen(SCR_MAPS) }
-        body.addView(mods, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 145f))
+        body.addView(mods, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 260f))
         val right = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        right.addView(shop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 91f))
-        right.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 91f).apply { topMargin = dp(8) })
-        body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 301f).apply { leftMargin = dp(14) })
-        hubViews.addAll(listOf(close, mods, shop, editor))
-        // отступы тела — в долях панели, как на референсе
+        right.addView(shop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 175f))
+        right.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 180f).apply { topMargin = dp(10) })
+        body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 605f).apply { leftMargin = dp(14) })
+        hubViews.addAll(listOf(close, mods, shop, editor, gear))
+        // положение и размеры — в долях панели, как на референсе пользователя
         hub.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
             val w = r - l; val h = bt - t
             if (w > 0 && h > 0) {
-                val pl = (w * 0.09f).toInt(); val pt = (h * 0.28f).toInt(); val pr = (w * 0.10f).toInt(); val pb = (h * 0.11f).toInt()
+                val pl = (w * 0.11f).toInt(); val pt = (h * 0.235f).toInt(); val pr = (w * 0.22f).toInt(); val pb = (h * 0.085f).toInt()
                 if (body.paddingLeft != pl || body.paddingTop != pt) body.setPadding(pl, pt, pr, pb)
+                fun place(v: View, x: Float, y: Float, size: Float) {
+                    val lp = v.layoutParams as FrameLayout.LayoutParams
+                    val px = (w * size).toInt()
+                    if (lp.width != px || lp.leftMargin != (w * x).toInt()) {
+                        lp.width = px; lp.height = px; lp.leftMargin = (w * x).toInt(); lp.topMargin = (h * y).toInt()
+                        v.layoutParams = lp
+                    }
+                }
+                place(close, 0.026f, 0.054f, 0.07f)
+                place(gear, 0.84f, 0.65f, 0.113f)
             }
         }
     }
@@ -221,6 +225,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             SCR_MODS -> if (tab == TAB_GAMES || tab == TAB_REPLAY) tab else TAB_INSTALLED
             SCR_SHOP -> TAB_ALL
             SCR_MAPS -> TAB_MAPS
+            SCR_SETTINGS -> TAB_INSTALLED
             else -> tab
         }
         if (s == SCR_SHOP && catalog == null && !catalogBusy) loadCatalog()
@@ -249,7 +254,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun applyScreen() {
-        panel.background = if (screen == SCR_HUB) ui.round(0xFF69B7EB.toInt(), 28, GameUi.OUTLINE, 4) else ui.round(GameUi.SURFACE, 28, GameUi.OUTLINE, 4)
         if (screen == SCR_HUB) panel.post { animateHubIn() }
         hub.visibility = if (screen == SCR_HUB) View.VISIBLE else View.GONE
         col.visibility = if (screen == SCR_HUB) View.GONE else View.VISIBLE
@@ -262,6 +266,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         val title = when (screen) {
             SCR_MODS -> "Моды"
             SCR_SHOP -> "Магазин модов"
+            SCR_SETTINGS -> "Настройки Bearite"
             else -> "Редактор карт"
         }
         val titleView = ui.outlined(title, 22f).apply { setPadding(dp(12), 0, dp(8), 0) }
@@ -359,13 +364,30 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabGames to TAB_GAMES, tabReplay to TAB_REPLAY)) {
             t.background = ui.chunky(if (tab == id) GameUi.YELLOW else GameUi.SURFACE3, 16)
         }
-        searchRow.visibility = if (tab == TAB_ALL) View.VISIBLE else View.GONE
+        searchRow.visibility = if (tab == TAB_ALL && screen == SCR_SHOP) View.VISIBLE else View.GONE
         footer.text = if (tab == TAB_MAPS) "Карты применяются в игре сразу, как только Bearite их увидит"
         else "Включение модов и нативный код применяются после перезапуска игры"
         renderList()
     }
 
     private fun renderList() {
+        if (screen == SCR_SETTINGS) {
+            // только настройки встроенного мода Bearite; настройки модов сообщества остаются в «Моды» → «Установлено»
+            list.removeAllViews()
+            val own = mods.scan().firstOrNull { it.builtin }
+            if (own == null) {
+                list.addView(ui.label("Настройки Bearite недоступны", 14f, GameUi.MUTED, bold = false).apply { setPadding(dp(12), dp(30), dp(12), dp(30)) })
+            } else {
+                val card = LinearLayout(act).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = ui.round(GameUi.ROW, 18, GameUi.OUTLINE, 3)
+                    setPadding(dp(14), dp(10), dp(14), dp(14))
+                }
+                card.addView(buildDetails(own), ui.matchWrap())
+                list.addView(card, cardLp())
+            }
+            return
+        }
         if (tab == TAB_REPLAY) {
             try { replay.render(list) { if (tab == TAB_REPLAY && isOpen) renderList() } } catch (t: Throwable) { BLog.e("вкладка «Реплей»", t) }
             return
@@ -696,6 +718,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         const val SCR_MODS = 1
         const val SCR_SHOP = 2
         const val SCR_MAPS = 3
+        const val SCR_SETTINGS = 4
         val FILTER_NAMES = arrayOf("Все моды", "Только включённые", "Только выключенные", "С настройками", "С нативным кодом")
     }
 }
