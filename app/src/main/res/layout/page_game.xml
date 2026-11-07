@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:clipToPadding="false"
@@ -8,190 +9,249 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_horizontal"
         android:orientation="vertical"
         android:padding="20dp">
 
-        <FrameLayout
-            android:id="@+id/hero_visual"
-            android:layout_width="match_parent"
-            android:layout_height="190dp"
-            android:clipChildren="false">
-
-            <View
-                android:id="@+id/hero_glow"
-                android:layout_width="280dp"
-                android:layout_height="280dp"
-                android:layout_gravity="center"
-                android:background="@drawable/bg_glow" />
-
-            <ImageView
-                android:id="@+id/hero_icon"
-                android:layout_width="150dp"
-                android:layout_height="150dp"
-                android:layout_gravity="center"
-                android:contentDescription="@null"
-                android:elevation="8dp"
-                android:src="@drawable/bear_hero" />
-        </FrameLayout>
-
-        <com.bearite.patcher.OutlinedText
-            android:id="@+id/hero_title"
+        <LinearLayout
+            android:id="@+id/hero_tag"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Bearite"
-            android:textColor="#FFFFFF"
-            android:textSize="46sp" />
+            android:background="@drawable/bg_tag"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="13dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="13dp"
+            android:paddingBottom="8dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:gravity="center"
-            android:text="Super Bear Adventure с модами и своими картами. Оригинальная игра остаётся нетронутой."
-            android:textColor="@color/bear_muted"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/float1_text"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:background="@drawable/bg_tag"
-                android:gravity="center"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/bear_cream"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/game_mods_info"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_tag"
-                android:gravity="center"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:textColor="@color/bear_cream"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <com.bearite.patcher.OutlinedText
-            android:id="@+id/btn_play"
-            android:layout_width="match_parent"
-            android:layout_height="84dp"
-            android:layout_marginTop="16dp"
-            android:gravity="center"
-            android:text="ИГРАТЬ"
-            android:textColor="#FFFFFF"
-            android:textSize="32sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:background="@drawable/bg_panel"
-            android:orientation="vertical"
-            android:padding="14dp">
+            <View
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:background="@drawable/bg_dot" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Ник в мультиплеере"
-                android:textColor="@color/bear_cream"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:layout_marginStart="9dp"
+                android:letterSpacing="0.12"
+                android:text="FAN-MADE LAUNCHER"
+                android:textColor="@color/bear_tan"
+                android:textSize="11sp" />
+        </LinearLayout>
 
-            <EditText
+        <TextView
+            android:id="@+id/hero_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:letterSpacing="-0.04"
+            android:lineSpacingMultiplier="0.92"
+            android:textColor="@color/bear_cream"
+            android:textSize="46sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:lineSpacingMultiplier="1.3"
+            android:text="Запускай Super Bear Adventure с модами и своими картами. Оригинальная игра остаётся нетронутой."
+            android:textColor="@color/bear_muted"
+            android:textSize="15sp" />
+
+        <!-- витрина: свечение, орбиты, иконка и плавающие карточки -->
+        <FrameLayout
+            android:id="@+id/hero_visual"
+            android:layout_width="match_parent"
+            android:layout_height="330dp"
+            android:layout_marginTop="8dp"
+            android:clipChildren="false">
+
+            <View
+                android:id="@+id/hero_glow"
+                android:layout_width="300dp"
+                android:layout_height="300dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_glow" />
+
+            <View
+                android:id="@+id/hero_orbit1"
+                android:layout_width="280dp"
+                android:layout_height="280dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_orbit" />
+
+            <View
+                android:id="@+id/hero_orbit2"
+                android:layout_width="210dp"
+                android:layout_height="210dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_orbit_inner" />
+
+            <ImageView
+                android:id="@+id/hero_icon"
+                android:layout_width="170dp"
+                android:layout_height="170dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:elevation="14dp"
+                android:src="@drawable/bear_hero" />
+
+            <LinearLayout
+                android:id="@+id/float1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_floatcard"
+                android:elevation="10dp"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.08"
+                    android:text="ТВОЯ ИГРА"
+                    android:textColor="@color/bear_muted"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/float1_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="Super Bear Adventure"
+                    android:textColor="@color/bear_cream"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/float2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_floatcard"
+                android:elevation="10dp"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:letterSpacing="0.08"
+                    android:text="МОДЫ"
+                    android:textColor="@color/bear_muted"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/game_mods_info"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:textColor="@color/bear_cream"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_play"
+            style="@style/Widget.Bearite.Button.Light"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="8dp"
+            android:text="@string/play"
+            android:textSize="16sp"
+            app:icon="@drawable/ic_play"
+            app:iconGravity="textStart" />
+
+        <!-- ник для мультиплеера игры: мод ставит его перед подключением к Photon -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="Ник в мультиплеере"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+            <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/edit_nick"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_input"
-                android:hint="Например, Медвежонок"
+                android:layout_height="wrap_content"
                 android:imeOptions="actionDone"
                 android:inputType="text"
                 android:maxLength="24"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:singleLine="true"
-                android:textColor="@color/bear_cream"
-                android:textColorHint="@color/bear_dim"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+                android:singleLine="true" />
+        </com.google.android.material.textfield.TextInputLayout>
 
-        <com.bearite.patcher.OutlinedText
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_load_save"
+            style="@style/Widget.Bearite.Button.Dark"
             android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:layout_marginTop="12dp"
-            android:gravity="center"
+            android:layout_height="56dp"
+            android:layout_marginTop="10dp"
             android:text="Загрузить сохранение (.sba)"
-            android:textColor="#FFFFFF"
-            android:textSize="17sp" />
+            android:textSize="15sp"
+            app:icon="@drawable/ic_add"
+            app:iconGravity="textStart" />
 
-        <LinearLayout
+        <!-- состояние игры -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:background="@drawable/bg_panel"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="16dp">
-
-            <ImageView
-                android:id="@+id/status_icon"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:importantForAccessibility="no"
-                android:src="@drawable/ic_ok" />
+            android:layout_marginTop="16dp">
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="14dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="20dp">
 
-                <TextView
-                    android:id="@+id/status_title"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/bear_cream"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                <ImageView
+                    android:id="@+id/status_icon"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_ok" />
 
-                <TextView
-                    android:id="@+id/status_sub"
-                    android:layout_width="match_parent"
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:textColor="@color/bear_muted"
-                    android:textSize="13sp" />
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/status_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/bear_cream"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/status_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:textColor="@color/bear_muted"
+                        android:textSize="13sp" />
+                </LinearLayout>
             </LinearLayout>
-        </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:background="@drawable/bg_note"
-            android:lineSpacingMultiplier="1.2"
-            android:padding="18dp"
+            android:lineSpacingMultiplier="1.25"
+            android:padding="22dp"
             android:text="@string/note_original"
-            android:textColor="@color/bear_muted"
+            android:textColor="#D3B9A0"
             android:textSize="13sp" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

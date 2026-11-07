@@ -52,7 +52,7 @@
         android:layout_margin="16dp"
         android:text="@string/install_mod"
         android:textColor="@color/bear_on_cream"
-        app:backgroundTint="@color/bear_yellow"
+        app:backgroundTint="@color/bear_cream"
         app:icon="@drawable/ic_add"
         app:iconTint="@color/bear_on_cream"
         app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full" />
