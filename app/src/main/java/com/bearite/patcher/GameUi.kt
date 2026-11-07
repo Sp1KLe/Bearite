@@ -43,6 +43,19 @@ class GameUi(val act: Activity) {
 
     fun matchWrap() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
+    /** Анимация нажатия: кнопка проседает и пружинит обратно. Нажатие не перехватывает. */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    fun pressAnim(v: View) {
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.94f).scaleY(0.94f).setDuration(80).start()
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+            }
+            false
+        }
+    }
+
     /** Объёмный фон кнопки игры: тёмная обводка, градиент, глянцевый блик. */
     fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3): Drawable =
         GameBtnBg(base, dp(radiusDp).toFloat(), dp(strokeDp).toFloat())
@@ -63,6 +76,7 @@ class GameUi(val act: Activity) {
             setPadding(dp(12), 0, dp(12), 0)
             background = chunky(base, radiusDp, 3)
             setOnClickListener { onClick() }
+            pressAnim(this)
         }
 
     /** Окно «Скоро…» для разделов, которых ещё нет. */
@@ -86,6 +100,7 @@ class GameUi(val act: Activity) {
                 else -> chunky(SURFACE3, 18, 2)
             }
             setOnClickListener { onClick() }
+            pressAnim(this)
         }
 
     /** Переключатель «Вкл / Выкл». */
@@ -315,6 +330,11 @@ class GameUi(val act: Activity) {
             setDimAmount(0.6f)
         }
         if (onCancel != null) dlg.setOnCancelListener { onCancel() }
+        // окно выпрыгивает с пружинкой
+        dlg.setOnShowListener {
+            box.alpha = 0f; box.scaleX = 0.8f; box.scaleY = 0.8f
+            box.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(android.view.animation.OvershootInterpolator(2f)).start()
+        }
         return dlg
     }
 

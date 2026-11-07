@@ -227,9 +227,26 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         if (s == SCR_SHOP && catalog == null && !catalogBusy) loadCatalog()
         applyScreen()
         scroll.scrollTo(0, 0)
+        if (s != SCR_HUB) {
+            col.translationX = dp(56).toFloat()
+            col.animate().translationX(0f).setDuration(280).setInterpolator(DecelerateInterpolator()).start()
+            staggerList()
+        }
         panel.animate().cancel()
         panel.alpha = 0.4f
         panel.animate().alpha(1f).setDuration(180).start()
+    }
+
+    /** Элементы списка появляются по очереди снизу. */
+    private fun staggerList() {
+        list.post {
+            for (i in 0 until minOf(list.childCount, 14)) {
+                val v = list.getChildAt(i)
+                v.alpha = 0f; v.translationY = dp(26).toFloat()
+                v.animate().alpha(1f).translationY(0f).setStartDelay(90L + i * 45L).setDuration(300)
+                    .setInterpolator(DecelerateInterpolator()).start()
+            }
+        }
     }
 
     private fun applyScreen() {
