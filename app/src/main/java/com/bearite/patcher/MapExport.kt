@@ -177,7 +177,7 @@ object MapExport {
             if (o.an.isNotEmpty()) {
                 val dur = MapAnim.cycle(o)
                 animDur = max(animDur, dur)
-                val n = 48
+                val n = if (o.an == "keys") (dur * 30).toInt().coerceIn(8, 400) else 48
                 val times = FloatArray(n + 1) { (dur * it / n).toFloat() }
                 val p = DoubleArray(9)
                 val tr = FloatArray((n + 1) * 3); val rt = FloatArray((n + 1) * 4); val sc = FloatArray((n + 1) * 3)
@@ -202,6 +202,7 @@ object MapExport {
                     "move" -> channel("translation", tr, "VEC3", 3)
                     "rotate", "swing" -> channel("rotation", rt, "VEC4", 4)
                     "pulse" -> channel("scale", sc, "VEC3", 3)
+                    "keys" -> { channel("translation", tr, "VEC3", 3); channel("rotation", rt, "VEC4", 4); channel("scale", sc, "VEC3", 3) }
                 }
             }
         }

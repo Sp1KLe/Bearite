@@ -1,5 +1,6 @@
 package com.bearite.patcher
 
+import kotlin.math.abs
 import android.app.Activity
 import android.app.Dialog
 import android.graphics.Typeface
@@ -658,6 +659,7 @@ class MapEditor(
             if (o.an == "rotate" && o.ax == 0.0 && o.ay == 0.0 && o.az == 0.0) o.ay = 90.0
             if (o.an == "swing" && o.ax == 0.0 && o.ay == 0.0 && o.az == 0.0) o.az = 20.0
             if (o.an == "pulse" && o.ax == 0.0) o.ax = 0.3
+            if (o.an == "keys" && o.kf.isEmpty()) { o.kf = MapAnim.fmtKeys(listOf(MapAnim.Key(0.0, poseOf(o), 1))); o.ap = maxOf(o.ap, 2.0) }
             commit(); showInspector(); vp.invalidate()
         }
         inspector.addView(kind, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply { topMargin = dp(4) })
@@ -666,6 +668,7 @@ class MapEditor(
             return
         }
         inspector.addView(ui.label(MapAnim.HINTS[o.an] ?: "", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        if (o.an == "keys") { keysSection(o); return }
         vec3("Параметры", arrayOf({ o.ax }, { o.ay }, { o.az }), arrayOf({ v -> o.ax = v }, { v -> o.ay = v }, { v -> o.az = v }), "anim")
         val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val fp = numField(o.ap, "ap") { v -> o.ap = v.coerceIn(0.2, 3600.0) }
@@ -678,6 +681,83 @@ class MapEditor(
         r2.addView(ui.label("Задержка, с", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
         r2.addView(fd, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
         inspector.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+    }
+
+    private fun poseOf(o: MapObj) = doubleArrayOf(o.x, o.y, o.z, o.rx, o.ry, o.rz, o.sx, o.sy, o.sz)
+
+    private fun applyPose(o: MapObj, v: DoubleArray) {
+        o.x = v[0]; o.y = v[1]; o.z = v[2]; o.rx = v[3]; o.ry = v[4]; o.rz = v[5]; o.sx = v[6]; o.sy = v[7]; o.sz = v[8]
+        refreshLive(); commit("pose"); vp.invalidate()
+    }
+
+    private var kfSel = -1
+    private var kfHead = 0.0
+
+    /** Свои анимации: шкала времени с ключевыми кадрами. Ключ хранит полную позу объекта (позиция, поворот, размер). */
+    private fun keysSection(o: MapObj) {
+        val keys = MapAnim.parseKeys(o.kf).map { MapAnim.Key(it.t, it.v.copyOf(), it.ease) }.toMutableList()
+        val dur = maxOf(0.2, o.ap)
+        kfHead = kfHead.coerceIn(0.0, dur)
+        if (kfSel !in keys.indices) kfSel = -1
+        fun save() { o.kf = MapAnim.fmtKeys(keys); commit("kf") }
+        val info = ui.label("", 12f, GameUi.MUTED, bold = false).apply { setPadding(dp(4), dp(6), 0, 0) }
+        fun paintInfo() {
+            info.text = "Время: " + ui.fmt(kfHead, 2) + " с · ключей: " + keys.size + if (kfSel >= 0) " · выбран ключ " + (kfSel + 1) + " (" + MapAnim.EASES[keys[kfSel].ease] + ")" else ""
+        }
+        val tl = KeyTimeline(act, dp(1).toFloat())
+        tl.duration = dur; tl.keys = keys; tl.playhead = kfHead; tl.selected = kfSel
+        tl.onScrub = { t -> kfHead = t; kfSel = -1; paintInfo() }
+        tl.onKey = { i, done ->
+            kfSel = i; kfHead = keys[i].t; paintInfo()
+            if (done) {
+                val k = keys[i]; keys.sortBy { it.t }; kfSel = keys.indexOf(k); tl.selected = kfSel
+                save(); paintInfo(); tl.invalidate()
+            }
+        }
+        inspector.addView(tl, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)).apply { topMargin = dp(6) })
+        inspector.addView(info)
+        paintInfo()
+        fun row(vararg v: View) = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            for ((i, x) in v.withIndex()) addView(x, LinearLayout.LayoutParams(0, dp(38), 1f).apply { if (i > 0) leftMargin = dp(6) })
+        }.also { inspector.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) }) }
+        row(
+            ui.pill("+ Ключ", primary = true, sizeSp = 13f) {
+                val near = keys.indexOfFirst { abs(it.t - kfHead) < 0.04 }
+                if (near >= 0) { poseOf(o).copyInto(keys[near].v); kfSel = near }
+                else { keys.add(MapAnim.Key(kfHead, poseOf(o), keys.lastOrNull { it.t < kfHead }?.ease ?: 1)); keys.sortBy { it.t }; kfSel = keys.indexOfFirst { abs(it.t - kfHead) < 0.04 } }
+                save(); showInspector()
+            },
+            ui.pill("Удалить ключ", danger = true, sizeSp = 13f) {
+                if (kfSel in keys.indices) { keys.removeAt(kfSel); kfSel = -1; save(); showInspector() } else toast("Выбери ключ на шкале")
+            },
+        )
+        row(
+            ui.pill("Поза на этом времени", sizeSp = 12f) {
+                val v = DoubleArray(9); poseOf(o).copyInto(v)
+                MapAnim.evalKeys(keys.sortedBy { it.t }, kfHead, v)
+                if (keys.isNotEmpty()) applyPose(o, v)
+            },
+            ui.pill("Плавность: " + (if (kfSel >= 0) MapAnim.EASES[keys[kfSel].ease] else "—"), sizeSp = 12f) {
+                if (kfSel in keys.indices) { keys[kfSel].ease = (keys[kfSel].ease + 1) % MapAnim.EASES.size; save(); showInspector() } else toast("Выбери ключ на шкале")
+            },
+        )
+        row(
+            ui.pill(MapAnim.MODES[o.km], sizeSp = 12f) { o.km = (o.km + 1) % MapAnim.MODES.size; commit(); showInspector() },
+            ui.pill("Время ключа ± 0.5", sizeSp = 12f) {
+                if (kfSel in keys.indices) { val k = keys[kfSel]; k.t = (k.t + 0.5).coerceAtMost(dur); keys.sortBy { it.t }; kfSel = keys.indexOf(k); kfHead = k.t; save(); showInspector() } else toast("Выбери ключ на шкале")
+            },
+        )
+        val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val fp = numField(o.ap, "ap") { v -> o.ap = v.coerceIn(0.2, 3600.0); tl.duration = o.ap; tl.invalidate() }
+        val fd = numField(o.ad, "ad") { v -> o.ad = v }
+        liveFields.add(fp to { o.ap }); liveFields.add(fd to { o.ad })
+        r2.addView(ui.label("Длина, с", 12f, GameUi.MUTED), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        r2.addView(fp, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
+        r2.addView(ui.label("Задержка, с", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+        r2.addView(fd, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
+        inspector.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        inspector.addView(ui.label("Как делать: поставь объект в начальную позу (поля позиции, поворота, размера выше), время 0 на шкале, «+ Ключ». Потом тапни шкалу на другом времени, измени позу объекта, снова «+ Ключ». Ромбик можно перетаскивать. ▶ Анимация сверху покажет результат.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(8), 0, 0) })
     }
 
     /** Экспорт карты в .glb (glTF 2.0) с цветами, текстурами и анимациями; файл кладётся в «Загрузки». */

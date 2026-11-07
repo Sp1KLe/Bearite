@@ -318,6 +318,9 @@ struct Obj {
     std::string an;         // анимация: move, rotate, swing, pulse (пусто = нет)
     float ad3[3] = {0, 0, 0};  // параметры анимации (ax, ay, az)
     float aper = 2, adel = 0;  // период цикла и задержка, секунды
+    struct Key { float t; float v[9]; int e; };
+    std::vector<Key> keys;     // свои ключевые кадры (an == keys): t, x y z rx ry rz sx sy sz, плавность
+    int km = 0;                // 0 по кругу, 1 туда-обратно, 2 один раз
 };
 
 struct MapSpec {
@@ -416,7 +419,7 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
     if (!f) return false;
     m.id = id;
     m.name = id;
-    char line[1024];
+    static char line[16384];
     while (fgets(line, sizeof line, f)) {
         std::string l = line;
         while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
@@ -441,6 +444,27 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             if (p.size() > 27) o.aper = num(p[27], 2);
             if (p.size() > 28) o.adel = num(p[28], 0);
             if (o.aper < 0.2f) o.aper = 0.2f;
+            if (p.size() > 29 && !p[29].empty()) {
+                size_t pos = 0;
+                const std::string& kf = p[29];
+                while (pos < kf.size() && o.keys.size() < 60) {
+                    size_t e = kf.find(';', pos);
+                    if (e == std::string::npos) e = kf.size();
+                    std::string part = kf.substr(pos, e - pos);
+                    pos = e + 1;
+                    std::vector<std::string> f;
+                    size_t q = 0;
+                    while (true) { size_t b = part.find('|', q); if (b == std::string::npos) { f.push_back(part.substr(q)); break; } f.push_back(part.substr(q, b - q)); q = b + 1; }
+                    if (f.size() < 11) continue;
+                    Obj::Key k;
+                    k.t = num(f[0], 0);
+                    for (int i = 0; i < 9; ++i) k.v[i] = num(f[1 + i], 0);
+                    k.e = atoi(f[10].c_str());
+                    o.keys.push_back(k);
+                }
+                std::sort(o.keys.begin(), o.keys.end(), [](const Obj::Key& a, const Obj::Key& b) { return a.t < b.t; });
+            }
+            if (p.size() > 30) o.km = atoi(p[30].c_str());
             m.objs.push_back(o);
             continue;
         }
@@ -825,6 +849,29 @@ void anim_eval(const Obj& o, float* p, float* r, float* s) {
     double t = (double)ts.tv_sec + ts.tv_nsec / 1e9;
     double per = o.aper < 0.2f ? 0.2 : o.aper;
     double dt = t - o.adel;
+    if (o.an == "keys") {
+        if (o.keys.empty()) return;
+        double D = o.aper, lt;
+        if (dt <= 0) lt = 0;
+        else if (o.km == 2) lt = dt < D ? dt : D;
+        else if (o.km == 1) { double m = fmod(dt, 2 * D); lt = m <= D ? m : 2 * D - m; }
+        else lt = fmod(dt, D);
+        const auto& K = o.keys;
+        float v[9];
+        if (K.size() == 1 || lt <= K[0].t) memcpy(v, K[0].v, sizeof v);
+        else if (lt >= K.back().t) memcpy(v, K.back().v, sizeof v);
+        else {
+            size_t i = 0;
+            while (i + 1 < K.size() && K[i + 1].t <= lt) ++i;
+            const auto& a = K[i]; const auto& b = K[i + 1];
+            double span = b.t - a.t;
+            double u = span < 1e-6 ? 1.0 : (lt - a.t) / span;
+            if (a.e == 2) u = 0; else if (a.e != 0) u = u * u * (3 - 2 * u);
+            for (int k = 0; k < 9; ++k) v[k] = (float)(a.v[k] + (b.v[k] - a.v[k]) * u);
+        }
+        for (int k = 0; k < 3; ++k) { p[k] = v[k]; r[k] = v[3 + k]; s[k] = v[6 + k]; }
+        return;
+    }
     double ph = fmod(fmod(dt, per) + per, per) / per;
     const double TAU = 6.283185307179586;
     if (o.an == "move") {

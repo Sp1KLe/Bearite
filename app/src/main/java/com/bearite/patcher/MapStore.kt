@@ -22,6 +22,8 @@ data class MapObj(
     var ax: Double = 0.0, var ay: Double = 0.0, var az: Double = 0.0,  // параметры анимации
     var ap: Double = 2.0,        // период одного цикла, секунды
     var ad: Double = 0.0,        // задержка начала, секунды
+    var kf: String = "",         // свои ключевые кадры (см. MapAnim.parseKeys), для an = keys
+    var km: Int = 0,             // режим ключей: 0 по кругу, 1 туда-обратно, 2 один раз
 )
 
 data class GameMap(
@@ -255,7 +257,7 @@ class MapStore(private val dir: File) {
                 append('\t').append(if (o.solid) 1 else 0)
                 append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv))
                 append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\t').append(clean(o.bind)).append('\t').append(if (o.clone) 1 else 0)
-                append('\t').append(clean(o.an)).append('\t').append(f(o.ax)).append('\t').append(f(o.ay)).append('\t').append(f(o.az)).append('\t').append(f(o.ap)).append('\t').append(f(o.ad)).append('\n')
+                append('\t').append(clean(o.an)).append('\t').append(f(o.ax)).append('\t').append(f(o.ay)).append('\t').append(f(o.az)).append('\t').append(f(o.ap)).append('\t').append(f(o.ad)).append('\t').append(clean(o.kf)).append('\t').append(o.km).append('\n')
             }
         }
 
@@ -284,6 +286,7 @@ class MapStore(private val dir: File) {
                             an = (p.getOrNull(23) ?: "").takeIf { it in MapAnim.KINDS } ?: "",
                             ax = p.getOrNull(24)?.toDoubleOrNull() ?: 0.0, ay = p.getOrNull(25)?.toDoubleOrNull() ?: 0.0, az = p.getOrNull(26)?.toDoubleOrNull() ?: 0.0,
                             ap = (p.getOrNull(27)?.toDoubleOrNull() ?: 2.0).coerceIn(0.2, 3600.0), ad = p.getOrNull(28)?.toDoubleOrNull() ?: 0.0,
+                            kf = MapAnim.fmtKeys(MapAnim.parseKeys(p.getOrNull(29) ?: "")), km = (p.getOrNull(30)?.toIntOrNull() ?: 0).coerceIn(0, 2),
                         )
                     )
                     continue
