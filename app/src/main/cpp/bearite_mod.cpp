@@ -922,7 +922,7 @@ void sync_all() {
 /** Двигает анимированные объекты (каждый кадр, но не чаще ~60 раз в секунду). */
 void anim_tick(long long now) {
     static long long last = 0;
-    if (now - last < 16) return;
+    if (now - last < 7) return;
     last = now;
     for (const auto& m : g_specs) {
         auto it = g_live.find(m.id);
@@ -3146,7 +3146,6 @@ void update() {
     }
     prompt_poll(now);
     if (g_engineOk && !g_dirty) portals_tick(now);
-    if (g_engineOk && !g_dirty) anim_tick(now);
     if (slow && g_engineOk) {
         std::string guard = g_mapsDir + "/_guard";
         if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("мир", gf); fclose(gf); }
@@ -3190,6 +3189,11 @@ void on_tick() {
     if (m == 0) { latch(me); return; }
     if (m != me || t_busy) return;
     long long now = now_ms();
+    if (g_engineOk && !g_dirty) {  // анимации двигаем каждый кадр, а не раз в 100 мс вместе с остальным тиком
+        t_busy = true;
+        try { anim_tick(now); } catch (...) {}
+        t_busy = false;
+    }
     if (now - g_lastTick < 100) return;
     g_lastTick = now;
     t_busy = true;

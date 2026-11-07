@@ -68,8 +68,18 @@ class GameUi(val act: Activity) {
     }
 
     /** Объёмный фон кнопки игры: тёмная обводка, градиент, глянцевый блик. */
-    fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3): Drawable =
-        GameBtnBg(base, dp(radiusDp).toFloat(), dp(strokeDp).toFloat())
+    private val btnBitmaps = HashMap<String, android.graphics.Bitmap>()
+    private fun btnBmp(name: String): android.graphics.Bitmap? = btnBitmaps.getOrPut(name) {
+        val id = act.resources.getIdentifier("btn9_$name", "drawable", act.packageName)
+        if (id == 0) return null
+        android.graphics.BitmapFactory.decodeResource(act.resources, id) ?: return null
+    }
+
+    fun chunky(base: Int, radiusDp: Int, strokeDp: Int = 3): Drawable {
+        val name = when (base) { YELLOW -> "yellow"; GREEN -> "green"; RUST -> "red"; SURFACE3 -> "blue"; else -> null }
+        val bmp = name?.let { btnBmp(it) }
+        return if (bmp != null) ImgBtnBg(bmp, dp(radiusDp + 2).toFloat()) else GameBtnBg(base, dp(radiusDp).toFloat(), dp(strokeDp).toFloat())
+    }
 
     /** Белый текст с толстой тёмной окантовкой, как в игре. */
     fun outlined(text: String, sizeSp: Float, color: Int = 0xFFFFFFFF.toInt()): OutlinedText = OutlinedText(act).apply {

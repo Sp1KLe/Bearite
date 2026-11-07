@@ -119,3 +119,26 @@ class NineSliceBg(private val bmp: android.graphics.Bitmap, private val cut: Int
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
+
+/** Кнопка из картинки игры (9-slice): при нажатии темнеет. Картинки: res/drawable-nodpi/btn9_*.png. */
+class ImgBtnBg(bmp: android.graphics.Bitmap, cornerPx: Float) : Drawable() {
+    private val inner = NineSliceBg(bmp, 34, cornerPx)
+    private var pressed = false
+
+    override fun onBoundsChange(b: android.graphics.Rect) { inner.bounds = b }
+    override fun draw(c: Canvas) {
+        inner.colorFilter = if (pressed) android.graphics.PorterDuffColorFilter(0x55000000, android.graphics.PorterDuff.Mode.SRC_ATOP) else null
+        inner.draw(c)
+    }
+    override fun isStateful() = true
+    override fun onStateChange(state: IntArray): Boolean {
+        val now = state.contains(android.R.attr.state_pressed)
+        if (now == pressed) return false
+        pressed = now; invalidateSelf(); return true
+    }
+    override fun getOutline(outline: android.graphics.Outline) = inner.getOutline(outline)
+    override fun setAlpha(alpha: Int) { inner.alpha = alpha }
+    override fun setColorFilter(cf: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}

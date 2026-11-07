@@ -176,7 +176,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         right.addView(shop, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 175f))
         right.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 180f).apply { topMargin = dp(10) })
         body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 605f).apply { leftMargin = dp(14) })
-        hubViews.addAll(listOf(close, mods, shop, editor, gear))
+        val hubTitle = android.widget.ImageView(act).apply { setImageResource(R.drawable.title_menu); scaleType = android.widget.ImageView.ScaleType.FIT_CENTER; adjustViewBounds = true }
+        hub.addView(hubTitle, FrameLayout.LayoutParams(dp(180), dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        hubViews.addAll(listOf(hubTitle, close, mods, shop, editor, gear))
         // положение и размеры — в долях панели, как на референсе пользователя
         hub.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
             val w = r - l; val h = bt - t
@@ -192,6 +194,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
                     }
                 }
                 place(close, 0.026f, 0.054f, 0.07f)
+                val th = (h * 0.17f).toInt(); val tlp = hubTitle.layoutParams as FrameLayout.LayoutParams
+                if (tlp.height != th) { tlp.height = th; tlp.width = (th * 3.7f).toInt(); tlp.topMargin = (h * 0.04f).toInt(); hubTitle.layoutParams = tlp }
                 place(gear, 0.84f, 0.65f, 0.113f)
             }
         }
@@ -269,15 +273,19 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             SCR_SETTINGS -> "Настройки Bearite"
             else -> "Редактор карт"
         }
-        val titleView = ui.outlined(title, 22f).apply { setPadding(dp(12), 0, dp(8), 0) }
+        val titleRes = when (screen) { SCR_MODS -> R.drawable.title_mods; SCR_SHOP -> R.drawable.title_shop; SCR_SETTINGS -> R.drawable.title_settings; else -> 0 }
+        val titleView: View = if (titleRes != 0) android.widget.ImageView(act).apply {
+            setImageResource(titleRes); scaleType = android.widget.ImageView.ScaleType.FIT_START; adjustViewBounds = true
+            setPadding(dp(12), 0, dp(8), 0)
+        } else ui.outlined(title, 22f).apply { setPadding(dp(12), 0, dp(8), 0) }
         if (screen == SCR_MODS) {
-            head.addView(titleView)
+            head.addView(titleView, LinearLayout.LayoutParams(dp(150), dp(40)))
             for (t in listOf(tabInstalled, tabGames, tabReplay)) {
                 (t.parent as? ViewGroup)?.removeView(t)
                 head.addView(t, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
             }
         } else {
-            head.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            head.addView(titleView, LinearLayout.LayoutParams(0, if (titleRes != 0) dp(40) else ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             if (screen == SCR_MAPS) {
                 head.addView(ui.gameBtn("Новая карта", GameUi.YELLOW, 16f, 16) { maps.newMapDialog { renderList() } },
                     LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(46)).apply { leftMargin = dp(6) })
