@@ -19,7 +19,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import java.io.File
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
@@ -31,7 +30,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pageGame: View
     private lateinit var pageMods: View
     private lateinit var pageLog: View
-    private lateinit var nav: BottomNavigationView
+    private lateinit var nav: LinearLayout
+    private var curPage = R.id.nav_game
 
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) installMod(uri)
@@ -53,14 +53,11 @@ class MainActivity : AppCompatActivity() {
         pageLog = findViewById(R.id.page_log)
         nav = findViewById(R.id.nav)
 
-        nav.setOnItemSelectedListener { item ->
-            showPage(item.itemId)
-            true
-        }
-        findViewById<MaterialButton>(R.id.btn_play).setOnClickListener { play() }
-        findViewById<MaterialButton>(R.id.btn_load_save).setOnClickListener { pickSave.launch(arrayOf("*/*")) }
+        for (id in listOf(R.id.nav_game, R.id.nav_mods, R.id.nav_log)) findViewById<View>(id).setOnClickListener { showPage(id) }
+        findViewById<View>(R.id.btn_play).apply { background = gameButtonBg(this@MainActivity, "green", 24); setOnClickListener { play() } }
+        findViewById<View>(R.id.btn_load_save).apply { background = gameButtonBg(this@MainActivity, "blue", 18); setOnClickListener { pickSave.launch(arrayOf("*/*")) }; press(this) }
         // ник для мультиплеера: тот же, что в чате (prefs «chat», ключ «nick»)
-        val nickField = findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.edit_nick)
+        val nickField = findViewById<android.widget.EditText>(R.id.edit_nick)
         val chatPrefs = getSharedPreferences("chat", Context.MODE_PRIVATE)
         nickField.setText(chatPrefs.getString("nick", "") ?: "")
         nickField.addTextChangedListener(object : android.text.TextWatcher {
@@ -86,50 +83,37 @@ class MainActivity : AppCompatActivity() {
 
         setupHero()
 
-        if (savedInstanceState == null) {
-            nav.selectedItemId = R.id.nav_game  // сработает и слушатель -> showPage
-        } else {
-            showPage(nav.selectedItemId)
+        showPage(savedInstanceState?.getInt("page", R.id.nav_game) ?: R.id.nav_game)
+    }
+
+    private fun press(v: View) {
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80).start()
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+            }
+            false
         }
     }
 
-    /** Заголовок в два цвета, вращающиеся орбиты и парящие карточки, как в концепте. */
+    override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); outState.putInt("page", curPage) }
+
+    /** Медведь парит, под ним пульсирует свечение, кнопка «Играть» слегка «дышит». */
     private fun setupHero() {
-        val title = SpannableStringBuilder("Твоё новое\nприключение.")
-        title.setSpan(
-            ForegroundColorSpan(getColor(R.color.bear_tan)), 11, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        findViewById<TextView>(R.id.hero_title).text = title
         val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Throwable) { "" }
         findViewById<TextView>(R.id.header_chip).text = "v$ver"
-
-        fun spin(id: Int, ms: Long, reverse: Boolean) {
-            ObjectAnimator.ofFloat(findViewById<View>(id), View.ROTATION, if (reverse) 360f else 0f, if (reverse) 0f else 360f).apply {
-                duration = ms
-                repeatCount = ValueAnimator.INFINITE
-                interpolator = LinearInterpolator()
-                start()
-            }
+        ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_icon), View.TRANSLATION_Y, 0f, -16f).apply {
+            duration = 2200; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start()
         }
-        fun float(id: Int, ms: Long, delay: Long) {
-            ObjectAnimator.ofFloat(findViewById<View>(id), View.TRANSLATION_Y, 0f, -22f).apply {
-                duration = ms
-                startDelay = delay
-                repeatMode = ValueAnimator.REVERSE
-                repeatCount = ValueAnimator.INFINITE
-                start()
-            }
+        ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_glow), View.ALPHA, 0.55f, 1f).apply {
+            duration = 2400; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start()
         }
-        spin(R.id.hero_orbit1, 30000, false)
-        spin(R.id.hero_orbit2, 30000, true)
-        float(R.id.hero_icon, 2500, 0)
-        float(R.id.float1, 3000, 0)
-        float(R.id.float2, 3000, 1200)
-        ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_glow), View.ALPHA, 0.6f, 1f).apply {
-            duration = 2800
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
-            start()
+        val play = findViewById<View>(R.id.btn_play)
+        ObjectAnimator.ofPropertyValuesHolder(play,
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.025f),
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.025f)).apply {
+            duration = 1100; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start()
         }
     }
 
@@ -158,6 +142,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPage(id: Int) {
+        curPage = id
+        for (nid in listOf(R.id.nav_game, R.id.nav_mods, R.id.nav_log))
+            findViewById<View>(nid).background = gameButtonBg(this, if (nid == id) "yellow" else "blue", 16)
         pageGame.visibility = if (id == R.id.nav_game) View.VISIBLE else View.GONE
         pageMods.visibility = if (id == R.id.nav_mods) View.VISIBLE else View.GONE
         pageLog.visibility = if (id == R.id.nav_log) View.VISIBLE else View.GONE
@@ -176,7 +163,7 @@ class MainActivity : AppCompatActivity() {
         val icon = findViewById<ImageView>(R.id.status_icon)
         val title = findViewById<TextView>(R.id.status_title)
         val sub = findViewById<TextView>(R.id.status_sub)
-        val play = findViewById<MaterialButton>(R.id.btn_play)
+        val play = findViewById<View>(R.id.btn_play)
 
         if (game == null) {
             icon.setImageResource(R.drawable.ic_error)
@@ -188,6 +175,7 @@ class MainActivity : AppCompatActivity() {
             sub.text = "Версия ${game.version} · ${game.pkg}"
         }
         play.isEnabled = game != null
+        play.alpha = if (game != null) 1f else 0.5f
 
         val all = mods.scan()
         findViewById<TextView>(R.id.game_mods_info).text =

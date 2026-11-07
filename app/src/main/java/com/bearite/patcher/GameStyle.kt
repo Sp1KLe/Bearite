@@ -65,9 +65,17 @@ class GameBtnBg(private val base: Int, private val radius: Float, private val st
 }
 
 /** Текст с толстой тёмной окантовкой, как надписи в игре. */
-class OutlinedText(ctx: Context) : TextView(ctx) {
+class OutlinedText @JvmOverloads constructor(ctx: Context, attrs: android.util.AttributeSet? = null) : TextView(ctx, attrs) {
     var outlineColor = GameUi.OUTLINE
     var outlineWidthPx = 0f
+
+    init {
+        // из XML: жирный шрифт и окантовка по размеру текста
+        if (attrs != null) {
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            outlineWidthPx = textSize * 0.14f + resources.displayMetrics.density * 1.5f
+        }
+    }
     private var busy = false
 
     override fun invalidate() { if (!busy) super.invalidate() }
@@ -141,4 +149,12 @@ class ImgBtnBg(bmp: android.graphics.Bitmap, cornerPx: Float) : Drawable() {
     override fun setColorFilter(cf: ColorFilter?) {}
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Фон-картинка кнопки игры (btn9_yellow / green / red / blue) для экранов лаунчера. */
+fun gameButtonBg(ctx: Context, name: String, radiusDp: Int = 18): Drawable? {
+    val id = ctx.resources.getIdentifier("btn9_$name", "drawable", ctx.packageName)
+    if (id == 0) return null
+    val bmp = android.graphics.BitmapFactory.decodeResource(ctx.resources, id) ?: return null
+    return ImgBtnBg(bmp, radiusDp * ctx.resources.displayMetrics.density)
 }

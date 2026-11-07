@@ -22,15 +22,14 @@
             android:contentDescription="@null"
             android:src="@drawable/bear_hero" />
 
-        <TextView
+        <com.bearite.patcher.OutlinedText
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:text="@string/app_name"
-            android:textColor="@color/bear_cream"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:textColor="#FFFFFF"
+            android:textSize="24sp" />
 
         <TextView
             android:id="@+id/header_chip"
@@ -41,8 +40,9 @@
             android:paddingTop="6dp"
             android:paddingEnd="12dp"
             android:paddingBottom="6dp"
-            android:textColor="@color/bear_tan"
-            android:textSize="12sp" />
+            android:textColor="@color/bear_cream"
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <View
@@ -68,29 +68,47 @@
             layout="@layout/page_log" />
     </FrameLayout>
 
-    <!-- плавающая панель-таблетка: активная вкладка в тёмной овальной плашке -->
-    <FrameLayout
+    <!-- нижняя навигация в стиле игры: три кнопки, активная жёлтая -->
+    <LinearLayout
+        android:id="@+id/nav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="horizontal"
         android:paddingStart="14dp"
         android:paddingTop="6dp"
         android:paddingEnd="14dp"
         android:paddingBottom="10dp">
 
-        <com.google.android.material.bottomnavigation.BottomNavigationView
-            android:id="@+id/nav"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_nav"
-            android:paddingTop="6dp"
-            android:paddingBottom="2dp"
-            app:elevation="0dp"
-            app:itemActiveIndicatorStyle="@style/Widget.Bearite.NavIndicator"
-            app:itemIconTint="@color/nav_item"
-            app:itemTextAppearanceActive="@style/TextAppearance.Bearite.Nav"
-            app:itemTextAppearanceInactive="@style/TextAppearance.Bearite.Nav"
-            app:itemTextColor="@color/nav_item"
-            app:labelVisibilityMode="labeled"
-            app:menu="@menu/bottom_nav" />
-    </FrameLayout>
+        <com.bearite.patcher.OutlinedText
+            android:id="@+id/nav_game"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Игра"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp" />
+
+        <com.bearite.patcher.OutlinedText
+            android:id="@+id/nav_mods"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Моды"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp" />
+
+        <com.bearite.patcher.OutlinedText
+            android:id="@+id/nav_log"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Лог"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp" />
+    </LinearLayout>
 </LinearLayout>
