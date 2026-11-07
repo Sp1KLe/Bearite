@@ -18,6 +18,10 @@ data class MapObj(
     var dx: Double = 0.0, var dy: Double = 1.0, var dz: Double = 0.0,  // точка назначения в этой карте
     var clone: Boolean = false,  // с bind: поставить копию платформы на месте круга, а не занимать оригинал
     var bind: String = "",       // имя родного объекта игры (платформа запуска уровня), который круг «занимает»; пусто = свой круг
+    var an: String = "",         // анимация: "", move, rotate, swing, pulse (см. MapAnim)
+    var ax: Double = 0.0, var ay: Double = 0.0, var az: Double = 0.0,  // параметры анимации
+    var ap: Double = 2.0,        // период одного цикла, секунды
+    var ad: Double = 0.0,        // задержка начала, секунды
 )
 
 data class GameMap(
@@ -30,6 +34,7 @@ data class GameMap(
     var ox: Double = 0.0, var oy: Double = 0.0, var oz: Double = 0.0,
     var scale: Double = 1.0,
     var layer: Int = 0,
+    var shared: Boolean = false,      // делиться картой с игроками комнаты в мультиплеере
     var world: Boolean = false,       // отдельный мир: остальной мир скрывается, игрок появляется на карте
     var sky: Int = 0x87B8E8,          // цвет неба в отдельном мире
     var spx: Double = 0.0, var spy: Double = 2.0, var spz: Double = 0.0,  // точка появления (в координатах карты)
@@ -57,7 +62,7 @@ class MapStore(private val dir: File) {
     init { dir.mkdirs() }
 
     fun list(): List<GameMap> =
-        (dir.listFiles { f -> f.isFile && f.name.endsWith(".map") } ?: emptyArray())
+        (dir.listFiles { f -> f.isFile && f.name.endsWith(".map") && !f.name.startsWith("net_") } ?: emptyArray())
             .sortedBy { it.name }
             .mapNotNull { f -> try { parse(f.name.removeSuffix(".map"), f.readText()) } catch (_: Throwable) { null } }
 
@@ -235,6 +240,7 @@ class MapStore(private val dir: File) {
             append("oz=").append(f(m.oz)).append('\n')
             append("scale=").append(f(m.scale)).append('\n')
             append("layer=").append(m.layer).append('\n')
+            if (m.shared) append("shared=1\n")
             if (m.world) {
                 append("world=1\n")
                 append("sky=").append(String.format("%06X", m.sky and 0xFFFFFF)).append('\n')
@@ -248,7 +254,8 @@ class MapStore(private val dir: File) {
                 append('\t').append(String.format("%06X", o.color and 0xFFFFFF))
                 append('\t').append(if (o.solid) 1 else 0)
                 append('\t').append(clean(o.tex)).append('\t').append(f(o.tu)).append('\t').append(f(o.tv))
-                append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\t').append(clean(o.bind)).append('\t').append(if (o.clone) 1 else 0).append('\n')
+                append('\t').append(clean(o.dest)).append('\t').append(f(o.dx)).append('\t').append(f(o.dy)).append('\t').append(f(o.dz)).append('\t').append(clean(o.bind)).append('\t').append(if (o.clone) 1 else 0)
+                append('\t').append(clean(o.an)).append('\t').append(f(o.ax)).append('\t').append(f(o.ay)).append('\t').append(f(o.az)).append('\t').append(f(o.ap)).append('\t').append(f(o.ad)).append('\n')
             }
         }
 
@@ -274,6 +281,9 @@ class MapStore(private val dir: File) {
                             dz = p.getOrNull(20)?.toDoubleOrNull() ?: 0.0,
                             bind = p.getOrNull(21) ?: "",
                             clone = p.getOrNull(22) == "1",
+                            an = (p.getOrNull(23) ?: "").takeIf { it in MapAnim.KINDS } ?: "",
+                            ax = p.getOrNull(24)?.toDoubleOrNull() ?: 0.0, ay = p.getOrNull(25)?.toDoubleOrNull() ?: 0.0, az = p.getOrNull(26)?.toDoubleOrNull() ?: 0.0,
+                            ap = (p.getOrNull(27)?.toDoubleOrNull() ?: 2.0).coerceIn(0.2, 3600.0), ad = p.getOrNull(28)?.toDoubleOrNull() ?: 0.0,
                         )
                     )
                     continue
@@ -293,6 +303,7 @@ class MapStore(private val dir: File) {
                     "oz" -> m.oz = v.toDoubleOrNull() ?: 0.0
                     "scale" -> m.scale = (v.toDoubleOrNull() ?: 1.0).coerceIn(0.01, 100.0)
                     "layer" -> m.layer = (v.toIntOrNull() ?: 0).coerceIn(0, 31)
+                    "shared" -> m.shared = v == "1" || v == "true"
                     "world" -> m.world = v == "1" || v == "true"
                     "sky" -> m.sky = v.trim().toIntOrNull(16) ?: 0x87B8E8
                     "spx" -> m.spx = v.toDoubleOrNull() ?: 0.0

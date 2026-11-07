@@ -46,6 +46,7 @@ class GameActivity : Activity() {
     private var levelPrompt: LevelPrompt? = null
     private var chat: ChatOverlay? = null
     private var miniGames: MiniGames? = null
+    var mapSync: MapSync? = null
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
 
@@ -167,6 +168,7 @@ class GameActivity : Activity() {
         replayUi = ReplayOverlay(this, root).also { it.start() }
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
+        mapSync = MapSync(this).also { it.start() }
         chat = ChatOverlay(this, root).also { it.onRoomChanged = { updateModButton() }; it.start() }
         updateModButton()
         menuPoll.run()

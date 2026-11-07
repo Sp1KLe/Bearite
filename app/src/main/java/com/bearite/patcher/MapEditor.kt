@@ -37,6 +37,7 @@ class MapEditor(
     private val toolBtns = HashMap<MapViewport.Tool, TextView>()
     private lateinit var undoBtn: TextView
     private lateinit var redoBtn: TextView
+    private lateinit var animBtn: TextView
     private lateinit var snapBtn: TextView
     private lateinit var sceneBtn: TextView
     private var sceneAskedAt = 0L
@@ -175,6 +176,9 @@ class MapEditor(
         }
         tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        animBtn = ui.pill("▶ Анимация", sizeSp = 13f) { vp.animate = !vp.animate; paintTools() }
+        tools.addView(animBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        tools.addView(ui.pill("Экспорт .glb", sizeSp = 13f) { exportGlb() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("Фокус", sizeSp = 13f) { vp.focusSelected() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("К камере игры", sizeSp = 13f) { toGameCamera() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         bar.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(tools) },
@@ -190,6 +194,7 @@ class MapEditor(
             b.setTextColor(if (on) GameUi.ON_CREAM else GameUi.CREAM)
         }
         snapBtn.text = if (vp.snap) "Сетка: вкл" else "Сетка: выкл"
+        animBtn.text = if (vp.animate) "■ Анимация" else "▶ Анимация"
         snapBtn.alpha = if (vp.snap) 1f else 0.7f
         sceneBtn.text = if (vp.showScene) "Мир игры: вкл" else "Мир игры: выкл"
         sceneBtn.alpha = if (vp.showScene) 1f else 0.7f
@@ -597,6 +602,7 @@ class MapEditor(
     }
 
     private fun textureSection(o: MapObj) {
+        animationSection(o)
         section("Текстура")
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(thumb(null, o.tex.isEmpty(), {
@@ -642,6 +648,51 @@ class MapEditor(
         }
     }
 
+    /** Анимация объекта: вид, параметры по осям, период и задержка. Проигрывается в игре у всех игроков одинаково. */
+    private fun animationSection(o: MapObj) {
+        section("Анимация")
+        val kind = ui.pill(MapAnim.NAMES[o.an] ?: "Нет", sizeSp = 13f) {}
+        kind.setOnClickListener {
+            o.an = MapAnim.KINDS[(MapAnim.KINDS.indexOf(o.an) + 1) % MapAnim.KINDS.size]
+            if (o.an == "move" && o.ax == 0.0 && o.ay == 0.0 && o.az == 0.0) o.ay = 3.0
+            if (o.an == "rotate" && o.ax == 0.0 && o.ay == 0.0 && o.az == 0.0) o.ay = 90.0
+            if (o.an == "swing" && o.ax == 0.0 && o.ay == 0.0 && o.az == 0.0) o.az = 20.0
+            if (o.an == "pulse" && o.ax == 0.0) o.ax = 0.3
+            commit(); showInspector(); vp.invalidate()
+        }
+        inspector.addView(kind, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply { topMargin = dp(4) })
+        if (o.an.isEmpty()) {
+            inspector.addView(ui.label("Выбери вид анимации, потом жми «▶ Анимация» сверху, чтобы посмотреть.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+            return
+        }
+        inspector.addView(ui.label(MapAnim.HINTS[o.an] ?: "", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        vec3("Параметры", arrayOf({ o.ax }, { o.ay }, { o.az }), arrayOf({ v -> o.ax = v }, { v -> o.ay = v }, { v -> o.az = v }), "anim")
+        val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val fp = numField(o.ap, "ap") { v -> o.ap = v.coerceIn(0.2, 3600.0) }
+        val fd = numField(o.ad, "ad") { v -> o.ad = v }
+        liveFields.add(fp to { o.ap }); liveFields.add(fd to { o.ad })
+        if (o.an != "rotate") {
+            r2.addView(ui.label("Период, с", 12f, GameUi.MUTED), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(fp, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
+        }
+        r2.addView(ui.label("Задержка, с", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+        r2.addView(fd, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
+        inspector.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+    }
+
+    /** Экспорт карты в .glb (glTF 2.0) с цветами, текстурами и анимациями; файл кладётся в «Загрузки». */
+    private fun exportGlb() {
+        try {
+            val bytes = MapExport.glb(map, store)
+            val name = map.name.replace(Regex("[^\\p{L}\\p{N}_-]+"), "_").trim('_').ifEmpty { "map" } + ".glb"
+            val where = MapExport.save(act, name, bytes)
+            toast("Сохранено: $where")
+        } catch (t: Throwable) {
+            BLog.e("экспорт glb не удался", t)
+            toast("Экспорт не удался: ${t.message ?: t.javaClass.simpleName}")
+        }
+    }
+
     private fun importTexture(o: MapObj) {
         val g = act as? GameActivity ?: return toast("Выбор картинки доступен только в игре")
         g.pickImage { uri ->
@@ -671,6 +722,11 @@ class MapEditor(
             commit(); vp.frameAll(); showInspector(); vp.invalidate()
         }
         inspector.addView(ui.row("Отдельный мир", worldToggle), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        if (!map.world) {
+            val shareToggle = ui.togglePill(map.shared, 84) { on -> map.shared = on; commit("shared") }
+            inspector.addView(ui.row("Делиться с игроками", shareToggle), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+            inspector.addView(ui.label("В мультиплеере игроки комнаты увидят эти объекты (без текстур) и смогут стоять на них и взаимодействовать. Телепорты на другие карты и привязки к объектам игры у них отключаются.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        }
         inspector.addView(ui.label(
             if (map.world) "Остальной мир скрывается, игрок переносится на точку появления, небо заливается цветом ниже. Выключи карту, и всё вернётся."
             else "Выключено: объекты просто добавляются в обычную сцену игры.",

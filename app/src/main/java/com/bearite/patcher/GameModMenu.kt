@@ -383,6 +383,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
                     background = ui.round(GameUi.ROW, 18, GameUi.OUTLINE, 3)
                     setPadding(dp(14), dp(10), dp(14), dp(14))
                 }
+                (act as? GameActivity)?.mapSync?.let { ms ->
+                    card.addView(ui.row("Карты других игроков", ui.togglePill(ms.acceptRemote, 84) { on -> ms.acceptRemote = on }), ui.matchWrap().apply { bottomMargin = dp(8) })
+                }
                 card.addView(buildDetails(own), ui.matchWrap())
                 list.addView(card, cardLp())
             }

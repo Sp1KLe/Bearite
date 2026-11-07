@@ -315,6 +315,9 @@ struct Obj {
     float dp[3] = {0, 0, 0};
     bool clone = false;     // с bind: поставить копию платформы на месте круга, а не занимать оригинал
     std::string bind;       // имя родного объекта игры, который этот круг «занимает» (пусто = свой круг)
+    std::string an;         // анимация: move, rotate, swing, pulse (пусто = нет)
+    float ad3[3] = {0, 0, 0};  // параметры анимации (ax, ay, az)
+    float aper = 2, adel = 0;  // период цикла и задержка, секунды
 };
 
 struct MapSpec {
@@ -433,6 +436,11 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
             if (p.size() > 20) for (int i = 0; i < 3; ++i) o.dp[i] = num(p[18 + i], 0);
             if (p.size() > 21) o.bind = p[21];
             if (p.size() > 22) o.clone = p[22] == "1";
+            if (p.size() > 23) o.an = p[23];
+            if (p.size() > 26) for (int i = 0; i < 3; ++i) o.ad3[i] = num(p[24 + i], 0);
+            if (p.size() > 27) o.aper = num(p[27], 2);
+            if (p.size() > 28) o.adel = num(p[28], 0);
+            if (o.aper < 0.2f) o.aper = 0.2f;
             m.objs.push_back(o);
             continue;
         }
@@ -809,6 +817,30 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
     return true;
 }
 
+/** Анимация объекта от общего «настенного» времени (у всех игроков комнаты фаза одинаковая). Формулы совпадают с MapAnim.kt. */
+void anim_eval(const Obj& o, float* p, float* r, float* s) {
+    if (o.an.empty()) return;
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    double t = (double)ts.tv_sec + ts.tv_nsec / 1e9;
+    double per = o.aper < 0.2f ? 0.2 : o.aper;
+    double dt = t - o.adel;
+    double ph = fmod(fmod(dt, per) + per, per) / per;
+    const double TAU = 6.283185307179586;
+    if (o.an == "move") {
+        double k = 0.5 - 0.5 * cos(TAU * ph);
+        for (int i = 0; i < 3; ++i) p[i] += (float)(o.ad3[i] * k);
+    } else if (o.an == "rotate") {
+        for (int i = 0; i < 3; ++i) r[i] += (float)fmod(o.ad3[i] * dt, 360.0);
+    } else if (o.an == "swing") {
+        double k = sin(TAU * ph);
+        for (int i = 0; i < 3; ++i) r[i] += (float)(o.ad3[i] * k);
+    } else if (o.an == "pulse") {
+        double k = 1 + o.ad3[0] * sin(TAU * ph);
+        for (int i = 0; i < 3; ++i) s[i] *= (float)k;
+    }
+}
+
 void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& fullName) {
     void* go = target(L.h);
     if (!go) return;
@@ -819,9 +851,11 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     }
     void* tr = inv(F.go_transform, go);  // у GameObject свой get_transform, не Component'ский
     if (!tr) return;
-    V3 pos{m.off[0] + m.scale * o.p[0], m.off[1] + m.scale * o.p[1], m.off[2] + m.scale * o.p[2]};
-    V3 size{m.scale * o.s[0], m.scale * o.s[1], m.scale * o.s[2]};
-    V3 rot{o.r[0], o.r[1], o.r[2]};
+    float lp[3] = {o.p[0], o.p[1], o.p[2]}, ls[3] = {o.s[0], o.s[1], o.s[2]}, lr[3] = {o.r[0], o.r[1], o.r[2]};
+    anim_eval(o, lp, lr, ls);
+    V3 pos{m.off[0] + m.scale * lp[0], m.off[1] + m.scale * lp[1], m.off[2] + m.scale * lp[2]};
+    V3 size{m.scale * ls[0], m.scale * ls[1], m.scale * ls[2]};
+    V3 rot{lr[0], lr[1], lr[2]};
     if (memcmp(L.pos, &pos, sizeof pos) != 0) {
         void* a[1] = {&pos};
         inv(F.set_position, tr, a);
@@ -881,6 +915,23 @@ void sync_all() {
                 continue;
             }
             apply_live(L, o, m, full);
+        }
+    }
+}
+
+/** Двигает анимированные объекты (каждый кадр, но не чаще ~60 раз в секунду). */
+void anim_tick(long long now) {
+    static long long last = 0;
+    if (now - last < 16) return;
+    last = now;
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end() || it->second.size() != m.objs.size()) continue;
+        for (size_t i = 0; i < m.objs.size(); ++i) {
+            const Obj& o = m.objs[i];
+            if (o.an.empty() || !it->second[i].h) continue;
+            std::string full = "Bearite/" + m.name + "/" + (o.name.empty() ? std::to_string(i + 1) : o.name);
+            apply_live(it->second[i], o, m, full);
         }
     }
 }
@@ -3095,6 +3146,7 @@ void update() {
     }
     prompt_poll(now);
     if (g_engineOk && !g_dirty) portals_tick(now);
+    if (g_engineOk && !g_dirty) anim_tick(now);
     if (slow && g_engineOk) {
         std::string guard = g_mapsDir + "/_guard";
         if (FILE* gf = fopen(guard.c_str(), "w")) { fputs("мир", gf); fclose(gf); }

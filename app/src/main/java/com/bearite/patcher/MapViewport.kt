@@ -259,8 +259,10 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
 
     // ---------------------------------------------------------------- отрисовка
 
-    private fun rot(o: MapObj, out: FloatArray) {
-        val a = Math.toRadians(o.rx); val b = Math.toRadians(o.ry); val g = Math.toRadians(o.rz)
+    private fun rot(o: MapObj, out: FloatArray) = rotXYZ(o.rx, o.ry, o.rz, out)
+
+    private fun rotXYZ(rx: Double, ry: Double, rz: Double, out: FloatArray) {
+        val a = Math.toRadians(rx); val b = Math.toRadians(ry); val g = Math.toRadians(rz)
         val cx = cos(a).toFloat(); val sx = sin(a).toFloat()
         val cy = cos(b).toFloat(); val sy = sin(b).toFloat()
         val cz = cos(g).toFloat(); val sz = sin(g).toFloat()
@@ -281,6 +283,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         if (width == 0 || height == 0) return
+        if (animate) postInvalidateOnAnimation()
         updateBasis()
         if (map.world) {
             val sk = map.sky
@@ -402,6 +405,12 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         texPaint.colorFilter = null
     }
 
+    /** Предпросмотр анимаций объектов (кнопка «▶ Анимация»): перерисовываем каждый кадр, пока включено. */
+    var animate = false
+        set(v) { field = v; animT0 = System.nanoTime(); invalidate() }
+    private var animT0 = System.nanoTime()
+    private val ps = DoubleArray(9)
+
     private fun drawObjects(c: Canvas) {
         var maxTris = 0; var maxVerts = 0
         for (o in map.objects) { val m = PrimMeshes.get(o.shape); maxTris += m.t.size / 3; maxVerts = max(maxVerts, m.v.size / 3) }
@@ -413,15 +422,19 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val p = FloatArray(3)
         for ((oi, o) in map.objects.withIndex()) {
             val mesh = PrimMeshes.get(o.shape)
-            rot(o, m9)
-            val sxx = o.sx.toFloat(); val syy = o.sy.toFloat(); val szz = o.sz.toFloat()
+            // предпросмотр анимации: положение объекта в текущий момент
+            val anim = animate && o.an.isNotEmpty()
+            if (anim) MapAnim.pose(o, (System.nanoTime() - animT0) / 1e9, ps)
+            if (anim) rotXYZ(ps[3], ps[4], ps[5], m9) else rot(o, m9)
+            val sxx = (if (anim) ps[6] else o.sx).toFloat(); val syy = (if (anim) ps[7] else o.sy).toFloat(); val szz = (if (anim) ps[8] else o.sz).toFloat()
+            val opx = (if (anim) ps[0] else o.x).toFloat(); val opy = (if (anim) ps[1] else o.y).toFloat(); val opz = (if (anim) ps[2] else o.z).toFloat()
             val nv = mesh.v.size / 3
             // мир (vtmp[i*6..2]) и экран (vtmp[i*6+3..5]; глубина < 0 → не виден)
             for (i in 0 until nv) {
                 val vx = mesh.v[i * 3] * sxx; val vy = mesh.v[i * 3 + 1] * syy; val vz = mesh.v[i * 3 + 2] * szz
-                val wx = m9[0] * vx + m9[1] * vy + m9[2] * vz + o.x.toFloat()
-                val wy = m9[3] * vx + m9[4] * vy + m9[5] * vz + o.y.toFloat()
-                val wz = m9[6] * vx + m9[7] * vy + m9[8] * vz + o.z.toFloat()
+                val wx = m9[0] * vx + m9[1] * vy + m9[2] * vz + opx
+                val wy = m9[3] * vx + m9[4] * vy + m9[5] * vz + opy
+                val wz = m9[6] * vx + m9[7] * vy + m9[8] * vz + opz
                 vtmp[i * 6] = wx; vtmp[i * 6 + 1] = wy; vtmp[i * 6 + 2] = wz
                 if (proj(wx, wy, wz, p)) { vtmp[i * 6 + 3] = p[0]; vtmp[i * 6 + 4] = p[1]; vtmp[i * 6 + 5] = p[2] }
                 else vtmp[i * 6 + 5] = -1f
