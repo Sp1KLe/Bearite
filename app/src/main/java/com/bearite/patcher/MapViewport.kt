@@ -948,10 +948,14 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             MotionEvent.ACTION_MOVE -> {
                 if (panning && e.pointerCount >= 2) {
                     val dd = pinchDist(e)
-                    if (lastDist2 > 0f && dd > 0f) dist = (dist * lastDist2 / dd).coerceIn(1.5f, 250f)
+                    // зум и сдвиг с постоянной скоростью: камера летит вперёд сквозь цель, а не замедляется у неё
+                    if (lastDist2 > 0f && dd > 0f) {
+                        val step = (dd - lastDist2) * 0.12f
+                        tx += fx * step; ty += fy * step; tz += fz * step
+                    }
                     lastDist2 = dd
                     val mx = (e.getX(0) + e.getX(1)) / 2; val my = (e.getY(0) + e.getY(1)) / 2
-                    val k = dist / focal
+                    val k = 30f / focal
                     tx -= (rx * (mx - lastMidX) - ux * (my - lastMidY)) * k
                     ty -= (ry * (mx - lastMidX) - uy * (my - lastMidY)) * k
                     tz -= (rz * (mx - lastMidX) - uz * (my - lastMidY)) * k

@@ -441,7 +441,7 @@ class MapEditor(
                     vp.scene = sc; vp.invalidate()
                     Thread {
                         val me = store.readMeshes(); val ins = store.readInstances()
-                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; gl.setData(me, ins, sc); vp.invalidate() }
+                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; gl.setData(me, ins); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return
