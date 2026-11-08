@@ -37,9 +37,30 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         renderMode = RENDERMODE_WHEN_DIRTY
     }
 
-    fun setData(m: List<MapStore.SceneMesh>?, i: Map<Int, MapStore.SceneInst>?) {
-        meshes = m; insts = i; dataVer++; requestRender()
+    @Volatile private var boxes: List<MapStore.SceneInst>? = null
+
+    /** Крупные объекты без читаемой геометрии (здания, земля) показываем простым блоком по их размерам: ориентир, пока форму взять нельзя. */
+    fun setData(m: List<MapStore.SceneMesh>?, i: Map<Int, MapStore.SceneInst>?, scene: FloatArray? = null) {
+        meshes = m; insts = i
+        val bx = ArrayList<MapStore.SceneInst>()
+        if (scene != null) for (j in 0 until scene.size / 10) {
+            if (i != null && i.containsKey(j)) continue
+            val hx = scene[j * 10 + 3]; val hy = scene[j * 10 + 4]; val hz = scene[j * 10 + 5]
+            if (maxOf(hx, maxOf(hy, hz)) < 3f) continue
+            val tf = scene[j * 10 + 9].toInt()
+            val mm = floatArrayOf(2 * hx, 0f, 0f, 0f, 0f, 2 * hy, 0f, 0f, 0f, 0f, 2 * hz, 0f, scene[j * 10], scene[j * 10 + 1], scene[j * 10 + 2], 1f)
+            val r = scene[j * 10 + 6]; val g = scene[j * 10 + 7]; val b = scene[j * 10 + 8]
+            bx.add(MapStore.SceneInst(-1, mm, floatArrayOf(r, g, b, ((tf / 1000) * 1000).toFloat(), 1f, 1f, 0f, 0f)))
+        }
+        boxes = bx
+        dataVer++; requestRender()
     }
+
+    private val cubeMesh = MapStore.SceneMesh(
+        floatArrayOf(-.5f, -.5f, -.5f, .5f, -.5f, -.5f, .5f, .5f, -.5f, -.5f, .5f, -.5f, -.5f, -.5f, .5f, .5f, -.5f, .5f, .5f, .5f, .5f, -.5f, .5f, .5f),
+        FloatArray(16),
+        intArrayOf(0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2)
+    )
 
     fun setCamera(c: FloatArray) { cam = c; requestRender() }
 
@@ -232,8 +253,10 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
 
         val opaque = ArrayList<Item>()
         val blend = ArrayList<Part>()
-        for ((j, inst) in ins) {
-            val mesh = ms.getOrNull(inst.mesh) ?: continue
+        val all = ArrayList<Pair<MapStore.SceneMesh, MapStore.SceneInst>>(ins.size + 64)
+        for ((_, inst) in ins) { val me = ms.getOrNull(inst.mesh) ?: continue; all.add(me to inst) }
+        boxes?.let { for (b in it) all.add(cubeMesh to b) }
+        for ((mesh, inst) in all) {
             val g = gpu.getOrPut(inst.mesh) { upload(inst.mesh, mesh) } ?: continue
             val m = inst.m
             // модель в координатах редактора: (мир − смещение карты) / масштаб
@@ -258,7 +281,6 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
                 if (ti / 1000 > 0) { blend.add(Part(it, sub, cvz)); anyBlend = true }
             }
             if (!anyBlend || nsub > 1) opaque.add(it)
-            @Suppress("UNUSED_VARIABLE") val unused = j
         }
 
         G.glEnable(G.GL_DEPTH_TEST)

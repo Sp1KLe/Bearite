@@ -2241,6 +2241,7 @@ struct MeshApi {
     bool init = false;
     void *compGet = nullptr, *tMF = nullptr, *mfShared = nullptr, *isReadable = nullptr, *verts = nullptr, *tris = nullptr, *uv = nullptr, *l2w = nullptr;
     void *subCount = nullptr, *idxStart = nullptr, *idxCount = nullptr, *sharedMats = nullptr;
+    void *tSMR = nullptr, *smrShared = nullptr;   // SkinnedMeshRenderer: геометрия в базовой позе
 };
 std::vector<std::string> g_meshBlobs;
 std::vector<int> g_meshSubs;       // число подмешей (материалов) у каждого blob'а
@@ -2327,6 +2328,8 @@ void dump_scene() {
         M.subCount = sc_method(meshK, "get_subMeshCount", 0);
         M.idxStart = meshK ? find_method_types(meshK, "GetIndexStart", {"Int32"}) : nullptr;
         M.idxCount = meshK ? find_method_types(meshK, "GetIndexCount", {"Int32"}) : nullptr;
+        M.tSMR = type_of("UnityEngine", "SkinnedMeshRenderer");
+        { void* sk = bearite_find_class("UnityEngine", "SkinnedMeshRenderer"); M.smrShared = sk ? bearite_il2.class_get_method_from_name(sk, "get_sharedMesh", 0) : nullptr; }
         { void* rk = bearite_find_class("UnityEngine", "Renderer"); M.sharedMats = sc_method(rk, "get_sharedMaterials", 0); }
         logf_("меши сцены: GetComponent=%d MeshFilter=%d sharedMesh=%d isReadable=%d vertices=%d triangles=%d uv=%d l2w=%d", M.compGet != 0, M.tMF != 0, M.mfShared != 0,
               M.isReadable != 0, M.verts != 0, M.tris != 0, M.uv != 0, M.l2w != 0);
@@ -2397,6 +2400,10 @@ void dump_scene() {
             void* ta[1] = {M.tMF};
             void* mf = inv(M.compGet, o, ta);
             void* mesh = mf ? inv(M.mfShared, mf) : nullptr;
+            if (!mesh && M.tSMR && M.smrShared) {
+                void* sa[1] = {M.tSMR};
+                if (void* sm = inv(M.compGet, o, sa)) mesh = inv(M.smrShared, sm);
+            }
             int mi = mesh ? mesh_blob(M, mesh) : -1;
             void* tr2 = F.get_transform ? inv(F.get_transform, o) : nullptr;
             void* mv = (mi >= 0 && tr2) ? inv(M.l2w, tr2) : nullptr;
