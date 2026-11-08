@@ -48,6 +48,12 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private val head = LinearLayout(act)
     private val hub = FrameLayout(act)
     private val hubViews = ArrayList<View>()
+    private lateinit var modsBadge: TextView
+    private lateinit var mapsBadge: TextView
+    private lateinit var hubStatus: TextView
+    private var hubMods: View? = null
+    private var hubEditor: View? = null
+    private var hubBody: View? = null
     private lateinit var col: LinearLayout
     private var screen = SCR_HUB
     private lateinit var scroll: ScrollView
@@ -178,7 +184,20 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         body.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 605f).apply { leftMargin = dp(14) })
         val hubTitle = android.widget.ImageView(act).apply { setImageResource(R.drawable.title_menu); scaleType = android.widget.ImageView.ScaleType.FIT_CENTER; adjustViewBounds = true }
         hub.addView(hubTitle, FrameLayout.LayoutParams(dp(180), dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        // бейджи-счётчики на углах кнопок и строка состояния внизу
+        fun badge(): TextView = ui.outlined("", 15f).apply {
+            gravity = Gravity.CENTER
+            background = ui.chunky(GameUi.GREEN, 14, 3)
+            setPadding(dp(8), 0, dp(8), 0)
+            visibility = View.GONE
+        }
+        modsBadge = badge(); mapsBadge = badge()
+        hub.addView(modsBadge, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(30), Gravity.TOP or Gravity.START))
+        hub.addView(mapsBadge, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(30), Gravity.TOP or Gravity.START))
+        hubStatus = ui.outlined("", 12f).apply { gravity = Gravity.CENTER; alpha = 0.9f }
+        hub.addView(hubStatus, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(6) })
         hubViews.addAll(listOf(hubTitle, close, mods, shop, editor, gear))
+        hubMods = mods; hubEditor = editor; hubBody = body
         // положение и размеры — в долях панели, как на референсе пользователя
         hub.addOnLayoutChangeListener { _, l, t, r, bt, _, _, _, _ ->
             val w = r - l; val h = bt - t
@@ -197,18 +216,68 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
                 val th = (h * 0.17f).toInt(); val tlp = hubTitle.layoutParams as FrameLayout.LayoutParams
                 if (tlp.height != th) { tlp.height = th; tlp.width = (th * 3.7f).toInt(); tlp.topMargin = (h * 0.04f).toInt(); hubTitle.layoutParams = tlp }
                 place(gear, 0.84f, 0.65f, 0.113f)
+                hub.post { positionBadges() }
             }
         }
     }
 
+    private fun offsetIn(root: View, v: View): IntArray {
+        var x = 0; var y = 0; var cur: View = v
+        while (cur !== root) { x += cur.left; y += cur.top; cur = (cur.parent as? View) ?: break }
+        return intArrayOf(x, y)
+    }
+
+    /** Счётчик у правого верхнего угла кнопки. */
+    private fun placeBadge(b: TextView, target: View?) {
+        if (target == null || b.visibility != View.VISIBLE || target.width == 0) return
+        val o = offsetIn(hub, target)
+        b.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val lp = b.layoutParams as FrameLayout.LayoutParams
+        lp.leftMargin = o[0] + target.width - b.measuredWidth - dp(10); lp.topMargin = o[1] + dp(6)
+        b.layoutParams = lp
+    }
+
+    private fun positionBadges() { placeBadge(modsBadge, hubMods); placeBadge(mapsBadge, hubEditor) }
+
+    /** Числа на кнопках и состояние мультиплеера; вызывается при показе главного экрана. */
+    private fun refreshHub() {
+        try {
+            val on = mods.scan().count { it.enabled }
+            modsBadge.text = on.toString(); modsBadge.visibility = if (on > 0) View.VISIBLE else View.GONE
+            val mc = MapStore(act).list().count { it.enabled }
+            mapsBadge.text = mc.toString(); mapsBadge.visibility = if (mc > 0) View.VISIBLE else View.GONE
+            val room = try { java.io.File(act.filesDir, "maps/_room").readText().trim() } catch (_: Throwable) { "" }
+            val online = room.isNotEmpty() && room != MiniGames.OFFLINE_ROOM
+            hubStatus.text = "Bearite · " + (if (online) "мультиплеер: комната «$room»" else "одиночная игра")
+            hub.post { positionBadges() }
+        } catch (t: Throwable) { BLog.e("главный экран", t) }
+    }
+
     /** Появление главного экрана: кнопки одна за другой выпрыгивают с пружинкой. */
+    private var bobAnim: android.animation.ObjectAnimator? = null
+
     private fun animateHubIn() {
+        bobAnim?.cancel(); bobAnim = null
         hubViews.forEachIndexed { i, v ->
             v.animate().cancel()
             v.alpha = 0f; v.scaleX = 0.55f; v.scaleY = 0.55f; v.translationY = dp(24).toFloat()
             v.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
                 .setStartDelay(60L + i * 70L).setDuration(380)
                 .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
+        }
+        for ((i, b) in listOf(modsBadge, mapsBadge).withIndex()) {
+            b.animate().cancel(); b.scaleX = 0f; b.scaleY = 0f
+            b.animate().scaleX(1f).scaleY(1f).setStartDelay(520L + i * 90L).setDuration(320)
+                .setInterpolator(android.view.animation.OvershootInterpolator(4f)).start()
+        }
+        // заголовок слегка парит
+        hubViews.firstOrNull()?.let { t ->
+            t.postDelayed({
+                if (screen == SCR_HUB) android.animation.ObjectAnimator.ofFloat(t, View.TRANSLATION_Y, 0f, -dp(3).toFloat()).apply {
+                    duration = 1800; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE
+                    bobAnim = this; start()
+                }
+            }, 900)
         }
     }
 
@@ -258,7 +327,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     }
 
     private fun applyScreen() {
-        if (screen == SCR_HUB) panel.post { animateHubIn() }
+        if (screen == SCR_HUB) { refreshHub(); panel.post { animateHubIn() } }
+        if (screen != SCR_HUB) { bobAnim?.cancel(); bobAnim = null }
         hub.visibility = if (screen == SCR_HUB) View.VISIBLE else View.GONE
         col.visibility = if (screen == SCR_HUB) View.GONE else View.VISIBLE
         if (screen != SCR_HUB) refresh()
