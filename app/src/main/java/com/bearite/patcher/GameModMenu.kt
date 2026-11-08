@@ -76,6 +76,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     var onClosed: (() -> Unit)? = null
 
     init {
+        maps.hideMenu = { h -> root.alpha = if (h) 0f else 1f }
         games.onStarted = { hide() }
         replay.onPlay = { hide() }
         root.visibility = View.GONE
