@@ -2963,6 +2963,44 @@ float g_edOldFov = 60.f;
 float g_edPose[6] = {0, 0, 0, 0, 0, 60.f};
 long long g_edStamp = 0;
 
+// Меню паузы и весь интерфейс игры (Canvas) на время редактора скрываем: в окне карты должен быть только мир
+std::vector<uintptr_t> g_edCanvas;
+long long g_edCanvasScan = 0;
+
+void ed_ui_scan() {
+    static void *cvK = nullptr, *getEn = nullptr; static bool init = false;
+    if (!init) {
+        init = true;
+        cvK = bearite_find_class("UnityEngine", "Canvas");
+        void* bk = bearite_find_class("UnityEngine", "Behaviour");
+        getEn = bk ? bearite_il2.class_get_method_from_name(bk, "get_enabled", 0) : nullptr;
+    }
+    void* setEn = rp_en_method();
+    if (!cvK || !getEn || !setEn) return;
+    void* arr = find_objects(cvK);
+    if (!arr) return;
+    uintptr_t cnt = arr_len(arr);
+    int added = 0;
+    for (uintptr_t i = 0; i < cnt && i < 64; ++i) {
+        void* o = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!o) continue;
+        void* en = inv(getEn, o);
+        if (!en || !*(const uint8_t*)obj_unbox(en)) continue;
+        uint8_t off = 0; void* a[1] = {&off}; inv(setEn, o, a);
+        g_edCanvas.push_back(gch_new(o, 0)); ++added;
+    }
+    if (added) logf_("камера редактора: скрыто окон интерфейса игры: %d", added);
+}
+
+void ed_ui_restore() {
+    void* setEn = rp_en_method();
+    for (uintptr_t h : g_edCanvas) {
+        if (setEn) if (void* o = target(h)) { uint8_t on = 1; void* a[1] = {&on}; inv(setEn, o, a); }
+        gch_free(h);
+    }
+    g_edCanvas.clear();
+}
+
 void ed_cam_tick() {
     if (g_rpCamMode != 0) return;   // идёт реплей со своей камерой
     struct stat sb;
@@ -2983,7 +3021,7 @@ void ed_cam_tick() {
     }
     if (!fresh) {
         if (g_edCam) {
-            g_edCam = false; rp_cam_release(true);
+            g_edCam = false; rp_cam_release(true); ed_ui_restore();
             void* cm = F.cam_main ? inv(F.cam_main, nullptr) : nullptr;
             if (g_edFovSet && cm) { float fv = g_edOldFov; void* a[1] = {&fv}; inv(g_edFovSet, cm, a); }
             logf_("камера редактора: возвращена игре");
@@ -3007,6 +3045,8 @@ void ed_cam_tick() {
         g_edFovSet = setFov;
         logf_("камера редактора: взята у игры");
     }
+    { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); long long ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+      if (ms - g_edCanvasScan > 400) { g_edCanvasScan = ms; ed_ui_scan(); } }
     V3 pos{g_edPose[0], g_edPose[1], g_edPose[2]};
     { void* a[1] = {&pos}; inv(F.set_position, tr, a); }
     V3 eu{g_edPose[4], g_edPose[3], 0.f};
