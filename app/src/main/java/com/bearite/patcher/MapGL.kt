@@ -111,7 +111,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         )
         skyTop = G.glGetUniformLocation(skyProg, "uTop"); skyBot = G.glGetUniformLocation(skyProg, "uBot")
         val q = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
-        val ids = IntArray(1); G.glGenBuffers(1, ids); quadBuf = ids[0]
+        val ids = IntArray(1); G.glGenBuffers(1, ids, 0); quadBuf = ids[0]
         G.glBindBuffer(G.GL_ARRAY_BUFFER, quadBuf)
         G.glBufferData(G.GL_ARRAY_BUFFER, q.size * 4, ByteBuffer.allocateDirect(q.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(q).also { it.position(0) }, G.GL_STATIC_DRAW)
         // контекст пересоздан: все старые ресурсы недействительны
@@ -135,7 +135,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         val ib = ByteBuffer.allocateDirect(m.idx.size * 2).order(ByteOrder.nativeOrder()).asShortBuffer()
         for (v in m.idx) ib.put(v.toShort())
         ib.position(0)
-        val ids = IntArray(2); G.glGenBuffers(2, ids)
+        val ids = IntArray(2); G.glGenBuffers(2, ids, 0)
         G.glBindBuffer(G.GL_ARRAY_BUFFER, ids[0]); G.glBufferData(G.GL_ARRAY_BUFFER, nv * 20, vb, G.GL_STATIC_DRAW)
         G.glBindBuffer(G.GL_ELEMENT_ARRAY_BUFFER, ids[1]); G.glBufferData(G.GL_ELEMENT_ARRAY_BUFFER, m.idx.size * 2, ib, G.GL_STATIC_DRAW)
         val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2; val cz = (minZ + maxZ) / 2
@@ -158,7 +158,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
                 val o2 = BitmapFactory.Options(); o2.inSampleSize = ss
                 val bmp: Bitmap? = BitmapFactory.decodeFile(f.path, o2)
                 if (bmp != null) {
-                    val t = IntArray(1); G.glGenTextures(1, t); id = t[0]
+                    val t = IntArray(1); G.glGenTextures(1, t, 0); id = t[0]
                     G.glBindTexture(G.GL_TEXTURE_2D, id)
                     GLUtils.texImage2D(G.GL_TEXTURE_2D, 0, bmp, 0)
                     G.glGenerateMipmap(G.GL_TEXTURE_2D)
