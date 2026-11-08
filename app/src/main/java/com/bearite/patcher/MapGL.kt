@@ -111,10 +111,17 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
             out vec4 o;
             void main() {
                 vec4 c = uCol;
-                if (uUseTex > 0.5) { vec4 t = texture(uTex, vec2(vUv.x, 1.0 - vUv.y)); c.rgb *= t.rgb; if (uCol.a < 0.999) c.a *= t.a; }
+                if (uUseTex > 0.5) {
+                    vec4 t = texture(uTex, vec2(vUv.x, 1.0 - vUv.y));
+                    // вырезные материалы (листва, плющ, тени-пятна): прозрачные пиксели текстуры не рисуем, иначе они чёрные
+                    if (uCol.a >= 0.999) { if (t.a < 0.4) discard; } else c.a *= t.a;
+                    c.rgb *= t.rgb;
+                }
                 vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
                 float l = abs(dot(n, normalize(vec3(0.35, 0.8, -0.45))));
-                c.rgb *= 0.62 + 0.38 * l;
+                c.rgb *= 0.58 + 0.42 * l;
+                float gr = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+                c.rgb = mix(vec3(gr), c.rgb, 1.12);
                 if (c.a < 0.02) discard;
                 o = c;
             }"""
