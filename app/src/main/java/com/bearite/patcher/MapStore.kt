@@ -213,8 +213,10 @@ class MapStore(private val dir: File) {
         } catch (_: Throwable) { null }
     }
 
-    class SceneMesh(val v: FloatArray, val uv: FloatArray, val idx: IntArray)
-    class SceneInst(val mesh: Int, val m: FloatArray)
+    /** subs: пары (начало, число индексов) каждого подмеша; пусто — один материал на всю модель. */
+    class SceneMesh(val v: FloatArray, val uv: FloatArray, val idx: IntArray, val subs: IntArray = IntArray(0))
+    /** mats: по 4 числа на подмеш — цвет r g b и номер текстуры. */
+    class SceneInst(val mesh: Int, val m: FloatArray, val mats: FloatArray = FloatArray(0))
 
     /** Настоящая геометрия объектов мира (maps/_meshes), если игра оставила её читаемой. */
     fun readMeshes(): List<SceneMesh>? {
@@ -230,9 +232,13 @@ class MapStore(private val dir: File) {
                 val v = FloatArray(nv * 3); bb.asFloatBuffer().get(v); bb.position(bb.position() + nv * 12)
                 val uv = FloatArray(nv * 2); bb.asFloatBuffer().get(uv); bb.position(bb.position() + nv * 8)
                 val ix = IntArray(ni); bb.asIntBuffer().get(ix); bb.position(bb.position() + ni * 4)
+                val ns = bb.getInt()
+                if (ns < 0 || ns > 16) return null
+                val subs = IntArray(ns * 2) { bb.getInt() }
                 var ok = true
                 for (i in ix) if (i < 0 || i >= nv) { ok = false; break }
-                out.add(if (ok) SceneMesh(v, uv, ix) else SceneMesh(FloatArray(0), FloatArray(0), IntArray(0)))
+                for (q in 0 until ns) if (subs[q * 2] < 0 || subs[q * 2] + subs[q * 2 + 1] > ni) ok = false
+                out.add(if (ok) SceneMesh(v, uv, ix, subs) else SceneMesh(FloatArray(0), FloatArray(0), IntArray(0)))
             }
             out
         } catch (_: Throwable) { null }
@@ -246,10 +252,11 @@ class MapStore(private val dir: File) {
         try {
             f.forEachLine { l ->
                 val p = l.trim().split(' ')
-                if (p.size == 18) {
+                if (p.size >= 18) {
                     val j = p[0].toIntOrNull(); val mi = p[1].toIntOrNull()
                     val m = FloatArray(16) { p[2 + it].toFloatOrNull() ?: 0f }
-                    if (j != null && mi != null && mi >= 0) out[j] = SceneInst(mi, m)
+                    val mats = FloatArray(p.size - 18) { p[18 + it].toFloatOrNull() ?: 0f }
+                    if (j != null && mi != null && mi >= 0) out[j] = SceneInst(mi, m, mats)
                 }
             }
         } catch (_: Throwable) {}

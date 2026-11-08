@@ -2238,8 +2238,10 @@ bool scene_export_tex(void* tex, int idx) {
 struct MeshApi {
     bool init = false;
     void *compGet = nullptr, *tMF = nullptr, *mfShared = nullptr, *isReadable = nullptr, *verts = nullptr, *tris = nullptr, *uv = nullptr, *l2w = nullptr;
+    void *subCount = nullptr, *idxStart = nullptr, *idxCount = nullptr, *sharedMats = nullptr;
 };
 std::vector<std::string> g_meshBlobs;
+std::vector<int> g_meshSubs;       // число подмешей (материалов) у каждого blob'а
 std::map<int, int> g_meshIdx;      // id меша игры -> номер blob'а (-1 = нечитаем или слишком большой)
 size_t g_meshBytes = 0;
 int g_meshBad = 0, g_meshBig = 0;
@@ -2265,6 +2267,23 @@ int mesh_blob(MeshApi& M, void* mesh) {
         b.append((const char*)arr_elem(va, 12, 0), nv * 12);
         if (nu == nv) b.append((const char*)arr_elem(ua, 8, 0), nv * 8); else b.append(nv * 8, '\0');
         b.append((const char*)arr_elem(ta, 4, 0), ni * 4);
+        // подмеши: у каждого свой материал (начало и число индексов)
+        int nsub = 0;
+        std::vector<int32_t> sub;
+        if (M.subCount && M.idxStart && M.idxCount) {
+            if (void* sc = inv(M.subCount, mesh)) nsub = *(const int*)obj_unbox(sc);
+            if (nsub < 0 || nsub > 16) nsub = 0;
+            for (int k = 0; k < nsub; ++k) {
+                void* ka[1] = {&k};
+                void* a = inv(M.idxStart, mesh, ka); void* c = inv(M.idxCount, mesh, ka);
+                if (!a || !c) { nsub = 0; sub.clear(); break; }
+                sub.push_back(*(const int*)obj_unbox(a)); sub.push_back(*(const int*)obj_unbox(c));
+            }
+        }
+        int32_t ns = nsub;
+        b.append((const char*)&ns, 4);
+        if (nsub) b.append((const char*)sub.data(), sub.size() * 4);
+        g_meshSubs.push_back(nsub);
         g_meshBytes += b.size();
         g_meshBlobs.push_back(std::move(b));
         res = (int)g_meshBlobs.size() - 1;
@@ -2300,6 +2319,10 @@ void dump_scene() {
         M.tris = sc_method(meshK, "get_triangles", 0);
         M.uv = sc_method(meshK, "get_uv", 0);
         M.l2w = sc_method(trK, "get_localToWorldMatrix", 0);
+        M.subCount = sc_method(meshK, "get_subMeshCount", 0);
+        M.idxStart = meshK ? find_method_types(meshK, "GetIndexStart", {"Int32"}) : nullptr;
+        M.idxCount = meshK ? find_method_types(meshK, "GetIndexCount", {"Int32"}) : nullptr;
+        { void* rk = bearite_find_class("UnityEngine", "Renderer"); M.sharedMats = sc_method(rk, "get_sharedMaterials", 0); }
         logf_("меши сцены: GetComponent=%d MeshFilter=%d sharedMesh=%d isReadable=%d vertices=%d triangles=%d uv=%d l2w=%d", M.compGet != 0, M.tMF != 0, M.mfShared != 0,
               M.isReadable != 0, M.verts != 0, M.tris != 0, M.uv != 0, M.l2w != 0);
     }
@@ -2311,6 +2334,34 @@ void dump_scene() {
     g_crumbs = false;
     std::string out;
     int n = 0, exported = 0, withTex = 0;
+    int texLimit = 150;
+    auto matInfo = [&](void* mat) -> SceneMat {
+        SceneMat sm{{0.72f, 0.7f, 0.66f}, 0};
+        int mid = inst_id(mat);
+        auto it = mats.find(mid);
+        if (it != mats.end()) return it->second;
+        const char* colProp = mat_has(mat, "_BaseColor") ? "_BaseColor" : (mat_has(mat, "_Color") ? "_Color" : nullptr);
+        if (colProp && getCol) {
+            void* a[1] = {bearite_il2.string_new(colProp)};
+            if (void* cv = inv(getCol, mat, a)) { const float* c = (const float*)obj_unbox(cv); sm.c[0] = c[0]; sm.c[1] = c[1]; sm.c[2] = c[2]; }
+        }
+        const char* texProp = mat_has(mat, "_BaseMap") ? "_BaseMap" : (mat_has(mat, "_MainTex") ? "_MainTex" : nullptr);
+        if (texProp && getTex) {
+            void* a[1] = {bearite_il2.string_new(texProp)};
+            if (void* tx = inv(getTex, mat, a)) {
+                int tid = inst_id(tx);
+                auto ti = texIdx.find(tid);
+                if (ti == texIdx.end()) {
+                    int idx = 0;
+                    if (exported < texLimit && scene_export_tex(tx, texNext)) { idx = texNext++; ++exported; }
+                    ti = texIdx.emplace(tid, idx).first;
+                }
+                sm.tex = ti->second;
+            }
+        }
+        mats[mid] = sm;
+        return sm;
+    };
     for (uintptr_t i = 0; i < cnt && n < 6000; ++i) {
         void* o = *(void**)arr_elem(arr, sizeof(void*), i);
         if (!o) continue;
@@ -2327,33 +2378,7 @@ void dump_scene() {
         }
         SceneMat sm{{0.72f, 0.7f, 0.66f}, 0};
         void* mat = getShared ? inv(getShared, o) : nullptr;
-        if (mat) {
-            int mid = inst_id(mat);
-            auto it = mats.find(mid);
-            if (it != mats.end()) sm = it->second;
-            else {
-                const char* colProp = mat_has(mat, "_BaseColor") ? "_BaseColor" : (mat_has(mat, "_Color") ? "_Color" : nullptr);
-                if (colProp && getCol) {
-                    void* a[1] = {bearite_il2.string_new(colProp)};
-                    if (void* cv = inv(getCol, mat, a)) { const float* c = (const float*)obj_unbox(cv); sm.c[0] = c[0]; sm.c[1] = c[1]; sm.c[2] = c[2]; }
-                }
-                const char* texProp = mat_has(mat, "_BaseMap") ? "_BaseMap" : (mat_has(mat, "_MainTex") ? "_MainTex" : nullptr);
-                if (texProp && getTex) {
-                    void* a[1] = {bearite_il2.string_new(texProp)};
-                    if (void* tx = inv(getTex, mat, a)) {
-                        int tid = inst_id(tx);
-                        auto ti = texIdx.find(tid);
-                        if (ti == texIdx.end()) {
-                            int idx = 0;
-                            if (exported < 60 && scene_export_tex(tx, texNext)) { idx = texNext++; ++exported; }
-                            ti = texIdx.emplace(tid, idx).first;
-                        }
-                        sm.tex = ti->second;
-                    }
-                }
-                mats[mid] = sm;
-            }
-        }
+        if (mat) sm = matInfo(mat);
         if (sm.tex) ++withTex;
         if (meshOk) {
             void* ta[1] = {M.tMF};
@@ -2365,9 +2390,20 @@ void dump_scene() {
             if (mv) {
                 float m[16];
                 memcpy(m, obj_unbox(mv), sizeof m);
-                char il[400];
+                char il[1000];
                 int k = snprintf(il, sizeof il, "%d %d", n, mi);
                 for (int q = 0; q < 16 && k < (int)sizeof il - 20; ++q) k += snprintf(il + k, sizeof il - k, " %.5g", m[q]);
+                // материалы подмешей: r g b номер_текстуры
+                int nsub = g_meshSubs[mi];
+                if (nsub > 0 && M.sharedMats) {
+                    void* marr = inv(M.sharedMats, o);
+                    uintptr_t nm = marr ? arr_len(marr) : 0;
+                    for (int q = 0; q < nsub && k < (int)sizeof il - 70; ++q) {
+                        SceneMat sq = sm;
+                        if (nm > 0) { void* mq = *(void**)arr_elem(marr, sizeof(void*), q < (int)nm ? q : nm - 1); if (mq) sq = matInfo(mq); }
+                        k += snprintf(il + k, sizeof il - k, " %.3f %.3f %.3f %d", sq.c[0], sq.c[1], sq.c[2], sq.tex);
+                    }
+                }
                 inst += il; inst += '\n';
                 ++withMesh;
             }
