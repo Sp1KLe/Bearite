@@ -296,7 +296,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             c.drawColor(Color.rgb((0x1E + (Color.red(sk) - 0x1E) / 2), (0x19 + (Color.green(sk) - 0x19) / 2), (0x14 + (Color.blue(sk) - 0x14) / 2)))
         } else {
             if (bgShader == null || bgH != height) {
-                bgShader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0xFF424242.toInt(), 0xFF242424.toInt(), Shader.TileMode.CLAMP); bgH = height
+                bgShader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0xFF3B3E8C.toInt(), 0xFF1F2152.toInt(), Shader.TileMode.CLAMP); bgH = height
             }
             bgPaint.shader = bgShader
             c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
