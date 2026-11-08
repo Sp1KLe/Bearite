@@ -241,7 +241,33 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         rxx /= rl; rzz /= rl
         rx = rxx; ry = 0f; rz = rzz
         ux = fy * rz - fz * ry; uy = fz * rx - fx * rz; uz = fx * ry - fy * rx
-        focal = 0.866f * height
+        if (gameView && rootView.height > 0) {
+            // настоящая камера игры смотрит на весь экран, а вьюпорт — только его часть: берём центр и фокус всего экрана
+            val loc = IntArray(2); getLocationInWindow(loc)
+            focal = 0.866f * rootView.height
+            pcx = rootView.width / 2f - loc[0]; pcy = rootView.height / 2f - loc[1]
+        } else { focal = 0.866f * height; pcx = width / 2f; pcy = height / 2f }
+    }
+
+    // игровая камера: редактор отдаёт позу, мод ставит её настоящей камере игры, мир рисует сама игра
+    var gameView = false
+        set(v) { field = v; lastCamSent = 0L; invalidate() }
+    var onCamera: ((FloatArray) -> Unit)? = null
+    private var pcx = 0f
+    private var pcy = 0f
+    private var lastCamSent = 0L
+    private var lastCamSig = ""
+
+    private fun sendCam() {
+        val now = System.currentTimeMillis()
+        val sig = "%.3f %.3f %.3f %.4f %.4f %.4f".format(ex, ey, ez, fx, fy, fz)
+        if (sig == lastCamSig && now - lastCamSent < 500) { postInvalidateDelayed(520); return }
+        lastCamSig = sig; lastCamSent = now
+        val sc = if (map.scale == 0.0) 1f else map.scale.toFloat()
+        val yaw = Math.toDegrees(Math.atan2(fx.toDouble(), fz.toDouble())).toFloat()
+        val pitch = -Math.toDegrees(Math.asin(fy.toDouble().coerceIn(-1.0, 1.0))).toFloat()
+        onCamera?.invoke(floatArrayOf(ex * sc + map.ox.toFloat(), ey * sc + map.oy.toFloat(), ez * sc + map.oz.toFloat(), yaw, pitch, 60f))
+        postInvalidateDelayed(520)  // сердцебиение: пока редактор открыт, мод держит камеру
     }
 
     /** Мировая точка → экран. out: x, y, глубина. false, если точка за камерой. */
@@ -251,8 +277,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         if (cz < 0.05f) return false
         val cx = vx * rx + vy * ry + vz * rz
         val cy = vx * ux + vy * uy + vz * uz
-        out[0] = width / 2f + cx / cz * focal
-        out[1] = height / 2f - cy / cz * focal
+        out[0] = pcx + cx / cz * focal
+        out[1] = pcy - cy / cz * focal
         out[2] = cz
         return true
     }
@@ -323,24 +349,28 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         if (width == 0 || height == 0) return
         if (animate) postInvalidateOnAnimation()
         updateBasis()
-        if (map.world) {
-            val sk = map.sky
-            c.drawColor(Color.rgb((0x1E + (Color.red(sk) - 0x1E) / 2), (0x19 + (Color.green(sk) - 0x19) / 2), (0x14 + (Color.blue(sk) - 0x14) / 2)))
+        if (gameView) {
+            sendCam()   // фон не рисуем: сквозь прозрачное окно виден настоящий мир игры
         } else {
-            if (bgShader == null || bgH != height) {
-                bgShader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0xFF3B3E8C.toInt(), 0xFF1F2152.toInt(), Shader.TileMode.CLAMP); bgH = height
+            if (map.world) {
+                val sk = map.sky
+                c.drawColor(Color.rgb((0x1E + (Color.red(sk) - 0x1E) / 2), (0x19 + (Color.green(sk) - 0x19) / 2), (0x14 + (Color.blue(sk) - 0x14) / 2)))
+            } else {
+                if (bgShader == null || bgH != height) {
+                    bgShader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0xFF3B3E8C.toInt(), 0xFF1F2152.toInt(), Shader.TileMode.CLAMP); bgH = height
+                }
+                bgPaint.shader = bgShader
+                c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
             }
-            bgPaint.shader = bgShader
-            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+            val vi = viewImage
+            if (realView && vi != null) {
+                viewSrc.set(0, 0, vi.width, vi.height); viewDst.set(0f, 0f, width.toFloat(), height.toFloat())
+                c.drawBitmap(vi, viewSrc, viewDst, viewPaint)
+            }
+            if (realView) requestViewIfMoved()
+            drawGrid(c)
+            if (!(realView && vi != null)) drawWorld(c)
         }
-        val vi = viewImage
-        if (realView && vi != null) {
-            viewSrc.set(0, 0, vi.width, vi.height); viewDst.set(0f, 0f, width.toFloat(), height.toFloat())
-            c.drawBitmap(vi, viewSrc, viewDst, viewPaint)
-        }
-        if (realView) requestViewIfMoved()
-        drawGrid(c)
-        if (!(realView && vi != null)) drawWorld(c)
         drawObjects(c)
         drawCameraMarker(c)
         drawSpawn(c)
@@ -630,6 +660,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val ll = sqrt(lx * lx + ly * ly + lz * lz)
         val p = FloatArray(3)
         for ((oi, o) in map.objects.withIndex()) {
+            if (gameView && oi != selected) continue   // остальные объекты уже нарисовала сама игра
             val mesh = PrimMeshes.get(o.shape)
             // предпросмотр анимации: положение объекта в текущий момент
             val anim = animate && o.an.isNotEmpty()
@@ -698,6 +729,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                     triCol[i] = Color.rgb(min(255, (Color.red(o.color) * k).toInt()), min(255, (Color.green(o.color) * k).toInt()), min(255, (Color.blue(o.color) * k).toInt()))
                     triTex[i] = 1
                 }
+                if (gameView) { triCol[i] = (triCol[i] and 0x00FFFFFF) or 0x77000000; triTex[i] = 0 }
                 val depth = (vtmp[a * 6 + 5] + vtmp[bb * 6 + 5] + vtmp[cc * 6 + 5]) / 3f
                 // ключ: глубина (положительные float сортируются как целые): ближние первыми
                 order[i] = (java.lang.Float.floatToIntBits(depth).toLong() shl 32) or i.toLong()
@@ -1023,7 +1055,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private var axDirLen = 1f
 
     private fun groundHit(x: Float, y: Float, planeY: Float): FloatArray? {
-        val sx = (x - width / 2f) / focal; val sy = -(y - height / 2f) / focal
+        val sx = (x - pcx) / focal; val sy = -(y - pcy) / focal
         val dx = fx + rx * sx + ux * sy; val dy = fy + ry * sx + uy * sy; val dz = fz + rz * sx + uz * sy
         if (abs(dy) < 1e-4f) return null
         val t = (planeY - ey) / dy

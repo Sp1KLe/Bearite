@@ -194,6 +194,17 @@ class MapStore(private val dir: File) {
         } catch (_: Throwable) {}
     }
 
+    /** Поза камеры редактора для мода: x y z (мир), yaw, pitch, fov. Пока файл свежий, настоящая камера игры смотрит отсюда. */
+    fun writeEdCam(p: FloatArray) {
+        try {
+            val t = File(dir, "_edcam.tmp")
+            t.writeText(p.joinToString(" ") { String.format(java.util.Locale.US, "%.4f", it) })
+            t.renameTo(File(dir, "_edcam"))
+        } catch (_: Throwable) {}
+    }
+
+    fun clearEdCam() { try { File(dir, "_edcam").delete() } catch (_: Throwable) {} }
+
     fun viewFile(): File = File(dir, "_view.jpg")
 
     /** Время последней записи сцены или 0. */

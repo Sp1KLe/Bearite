@@ -2955,6 +2955,65 @@ void rp_cam_apply() {
     inv(F.set_euler, tr, b);
 }
 
+/** Камера редактора карт: пока лаунчер обновляет maps/_edcam (x y z yaw pitch fov), настоящая камера игры смотрит оттуда,
+ *  а родной контроллер камеры выключен. Нет свежего файла — камера возвращается игре. */
+bool g_edCam = false;
+void* g_edFovSet = nullptr;
+float g_edOldFov = 60.f;
+float g_edPose[6] = {0, 0, 0, 0, 0, 60.f};
+long long g_edStamp = 0;
+
+void ed_cam_tick() {
+    if (g_rpCamMode != 0) return;   // идёт реплей со своей камерой
+    struct stat sb;
+    bool fresh = false;
+    if (stat((g_mapsDir + "/_edcam").c_str(), &sb) == 0) {
+        struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+        double age = (double)(ts.tv_sec - sb.st_mtim.tv_sec) + (double)(ts.tv_nsec - sb.st_mtim.tv_nsec) / 1e9;
+        fresh = age < 1.5;
+        long long stamp = (long long)sb.st_mtim.tv_sec * 1000000000LL + sb.st_mtim.tv_nsec;
+        if (fresh && stamp != g_edStamp) {
+            g_edStamp = stamp;
+            if (FILE* f = fopen((g_mapsDir + "/_edcam").c_str(), "r")) {
+                float v[6];
+                if (fscanf(f, "%f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6) memcpy(g_edPose, v, sizeof v);
+                fclose(f);
+            }
+        }
+    }
+    if (!fresh) {
+        if (g_edCam) {
+            g_edCam = false; rp_cam_release(true);
+            void* cm = F.cam_main ? inv(F.cam_main, nullptr) : nullptr;
+            if (g_edFovSet && cm) { float fv = g_edOldFov; void* a[1] = {&fv}; inv(g_edFovSet, cm, a); }
+            logf_("камера редактора: возвращена игре");
+        }
+        return;
+    }
+    static void *camK, *setFov, *getFov; static bool init = false; static float oldFov = 60.f;
+    if (!init) {
+        init = true;
+        camK = bearite_find_class("UnityEngine", "Camera");
+        setFov = camK ? bearite_il2.class_get_method_from_name(camK, "set_fieldOfView", 1) : nullptr;
+        getFov = camK ? bearite_il2.class_get_method_from_name(camK, "get_fieldOfView", 0) : nullptr;
+    }
+    void* cam = F.cam_main ? inv(F.cam_main, nullptr) : nullptr;
+    void* tr = cam && F.get_transform ? inv(F.get_transform, cam) : nullptr;
+    if (!tr || !F.set_position || !F.set_euler) return;
+    if (!g_edCam) {
+        g_edCam = true;
+        rp_cam_hold();
+        if (getFov) if (void* fv = inv(getFov, cam)) g_edOldFov = *(const float*)obj_unbox(fv);
+        g_edFovSet = setFov;
+        logf_("камера редактора: взята у игры");
+    }
+    V3 pos{g_edPose[0], g_edPose[1], g_edPose[2]};
+    { void* a[1] = {&pos}; inv(F.set_position, tr, a); }
+    V3 eu{g_edPose[4], g_edPose[3], 0.f};
+    { void* a[1] = {&eu}; inv(F.set_euler, tr, a); }
+    if (setFov) { float fov = g_edPose[5]; void* a[1] = {&fov}; inv(setFov, cam, a); }
+}
+
 // ---- сеанс просмотра, файлы, команды
 
 void rp_end_session(bool alive) {
@@ -3456,6 +3515,7 @@ void on_tick() {
     if (g_engineOk && !g_dirty) {  // анимации двигаем каждый кадр, а не раз в 100 мс вместе с остальным тиком
         t_busy = true;
         try { anim_tick(now); } catch (...) {}
+        try { ed_cam_tick(); } catch (...) {}
         t_busy = false;
     }
     if (now - g_lastTick < 100) return;

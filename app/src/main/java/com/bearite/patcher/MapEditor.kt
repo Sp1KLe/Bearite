@@ -43,6 +43,8 @@ class MapEditor(
     private lateinit var snapBtn: TextView
     private lateinit var sceneBtn: TextView
     private lateinit var realBtn: TextView
+    private var rootLayout: LinearLayout? = null
+    private lateinit var gameBtn: TextView
     private var sceneAskedAt = 0L
     private lateinit var titleView: TextView
 
@@ -74,7 +76,9 @@ class MapEditor(
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             decorView.systemUiVisibility = act.window.decorView.systemUiVisibility
         }
-        dlg.setOnDismissListener { sceneAskedAt = -1L; onClose() }
+        dlg.setOnDismissListener { sceneAskedAt = -1L; vp.onCamera = null; store.clearEdCam(); onClose() }
+        vp.onCamera = { store.writeEdCam(it) }
+        setGameView(true)
         loadScene(auto = true)
         refreshTree()
         showInspector()
@@ -85,6 +89,7 @@ class MapEditor(
 
     private fun buildRoot(): View {
         val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(GameUi.BG) }
+        rootLayout = root
         root.addView(toolbar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
         val wide = act.resources.displayMetrics.widthPixels > act.resources.displayMetrics.heightPixels
         if (wide) {
@@ -178,6 +183,8 @@ class MapEditor(
             paintTools(); vp.invalidate()
         }
         tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        gameBtn = ui.pill("Игровой вид", sizeSp = 13f) { setGameView(!vp.gameView) }
+        tools.addView(gameBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         realBtn = ui.pill("Реальный вид", sizeSp = 13f) { toggleRealView() }
         tools.addView(realBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
@@ -194,9 +201,27 @@ class MapEditor(
 
     private var viewStamp = 0L
 
+    /** Игровой вид: окно прозрачное, мир рисует сама игра настоящей камерой, редактор рисует только рамки и манипуляторы. */
+    private fun setGameView(on: Boolean) {
+        if (on && vp.realView) toggleRealView()
+        vp.gameView = on
+        rootLayout?.setBackgroundColor(if (on) android.graphics.Color.TRANSPARENT else GameUi.BG)
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(if (on) android.graphics.Color.TRANSPARENT else GameUi.BG))
+            if (on) clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
+        if (!on) store.clearEdCam()
+        if (::gameBtn.isInitialized) {
+            gameBtn.alpha = if (on) 1f else 0.7f
+            gameBtn.text = if (on) "■ Игровой вид" else "Игровой вид"
+        }
+        vp.invalidate()
+    }
+
     /** Реальная картинка игры из камеры редактора: мод рендерит её по запросу, редактор подхватывает файл. */
     private fun toggleRealView() {
         val on = !vp.realView
+        if (on && vp.gameView) setGameView(false)
         vp.realView = on
         realBtn.alpha = if (on) 1f else 0.7f
         realBtn.text = if (on) "■ Реальный вид" else "Реальный вид"
