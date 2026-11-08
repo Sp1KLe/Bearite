@@ -2394,6 +2394,86 @@ void dump_scene() {
     logf_("сцена для редактора: рендереров %d из %d, с текстурой %d, текстур выгружено сейчас %d, всего %d", n, (int)cnt, withTex, exported, (int)texIdx.size());
 }
 
+/** «Реальный вид» для редактора карт: рендерим настоящую сцену игры из камеры редактора (Camera.main на один кадр переставляется и возвращается) в maps/_view.jpg. */
+void render_view(float px, float py, float pz, float pitch, float yaw, float fov, int w, int h) {
+    static bool init = false;
+    static void *camK, *getFov, *setFov, *getTT, *setTT, *render, *getRot, *setRot;
+    static void *rtK, *getTmp, *relTmp, *setActive, *getActive, *readPx, *ctor2, *encode;
+    if (!init) {
+        init = true;
+        camK = bearite_find_class("UnityEngine", "Camera");
+        void* trK = bearite_find_class("UnityEngine", "Transform");
+        void* icK = bearite_find_class("UnityEngine", "ImageConversion");
+        rtK = bearite_find_class("UnityEngine", "RenderTexture");
+        getFov = sc_method(camK, "get_fieldOfView", 0); setFov = sc_method(camK, "set_fieldOfView", 1);
+        getTT = sc_method(camK, "get_targetTexture", 0); setTT = sc_method(camK, "set_targetTexture", 1);
+        render = sc_method(camK, "Render", 0);
+        getRot = sc_method(trK, "get_rotation", 0); setRot = sc_method(trK, "set_rotation", 1);
+        getTmp = rtK ? find_method_types(rtK, "GetTemporary", {"Int32", "Int32", "Int32"}) : nullptr;
+        relTmp = rtK ? find_method_types(rtK, "ReleaseTemporary", {"RenderTexture"}) : nullptr;
+        setActive = rtK ? find_method_types(rtK, "set_active", {"RenderTexture"}) : nullptr;
+        getActive = sc_method(rtK, "get_active", 0);
+        readPx = F.tex2d ? find_method_types(F.tex2d, "ReadPixels", {"Rect", "Int32", "Int32"}) : nullptr;
+        ctor2 = F.tex2d ? find_method_types(F.tex2d, ".ctor", {"Int32", "Int32"}) : nullptr;
+        encode = icK ? find_method_types(icK, "EncodeToJPG", {"Texture2D", "Int32"}) : nullptr;
+        logf_("реальный вид: fov=%d/%d tt=%d/%d render=%d rot=%d/%d tmp=%d rel=%d act=%d/%d read=%d ctor=%d jpg=%d", getFov != 0, setFov != 0, getTT != 0, setTT != 0, render != 0,
+              getRot != 0, setRot != 0, getTmp != 0, relTmp != 0, setActive != 0, getActive != 0, readPx != 0, ctor2 != 0, encode != 0);
+    }
+    if (!F.cam_main || !F.get_transform || !F.get_position || !F.set_position || !F.set_euler || !getFov || !setFov || !getTT || !setTT || !render || !getRot || !setRot ||
+        !getTmp || !relTmp || !setActive || !getActive || !readPx || !ctor2 || !encode || !obj_new || !F.tex2d) return;
+    if (w < 16 || h < 16 || w > 1280 || h > 1280) return;
+    void* cam = inv(F.cam_main, nullptr);
+    void* tr = cam ? inv(F.get_transform, cam) : nullptr;
+    if (!tr) return;
+    // запоминаем состояние игровой камеры
+    V3 oldPos{}; float oldRot[4] = {0, 0, 0, 1}; float oldFov = 60.f;
+    void* pv = inv(F.get_position, tr); if (!pv) return;
+    memcpy(&oldPos, obj_unbox(pv), sizeof oldPos);
+    if (void* r = inv(getRot, tr)) memcpy(oldRot, obj_unbox(r), sizeof oldRot);
+    if (void* r = inv(getFov, cam)) oldFov = *(const float*)obj_unbox(r);
+    void* oldTT = inv(getTT, cam);
+    int ww = w, hh = h, depth = 24;
+    void* ga[3] = {&ww, &hh, &depth};
+    void* rt = inv(getTmp, nullptr, ga);
+    if (!rt) return;
+    V3 np{px, py, pz}, eu{pitch, yaw, 0.f};
+    { void* a[1] = {&np}; inv(F.set_position, tr, a); }
+    { void* a[1] = {&eu}; inv(F.set_euler, tr, a); }
+    { void* a[1] = {&fov}; inv(setFov, cam, a); }
+    { void* a[1] = {rt}; inv(setTT, cam, a); }
+    bool ok1 = true;
+    inv(render, cam, nullptr, &ok1);
+    { void* a[1] = {oldTT}; inv(setTT, cam, a); }
+    { void* a[1] = {&oldPos}; inv(F.set_position, tr, a); }
+    { void* a[1] = {oldRot}; inv(setRot, tr, a); }
+    { void* a[1] = {&oldFov}; inv(setFov, cam, a); }
+    void* prev = inv(getActive, nullptr);
+    { void* a[1] = {rt}; inv(setActive, nullptr, a); }
+    bool ok = false;
+    void* t2 = obj_new(F.tex2d);
+    void* bytes = nullptr;
+    if (ok1 && t2) {
+        void* ca[2] = {&ww, &hh};
+        inv(ctor2, t2, ca, &ok);
+        if (ok) {
+            struct { float x, y, w, h; } rc{0.f, 0.f, (float)ww, (float)hh};
+            int z = 0;
+            void* pa[3] = {&rc, &z, &z};
+            inv(readPx, t2, pa, &ok);
+            int q = 72;
+            if (ok) { void* ea[2] = {t2, &q}; bytes = inv(encode, nullptr, ea); }
+        }
+    }
+    { void* a[1] = {prev}; inv(setActive, nullptr, a); }
+    { void* a[1] = {rt}; inv(relTmp, nullptr, a); }
+    if (t2 && F.destroy) { void* da[1] = {t2}; inv(F.destroy, nullptr, da); }
+    if (!bytes) { logf_("реальный вид: не удалось получить картинку"); return; }
+    uintptr_t n = arr_len(bytes);
+    if (n < 16 || n > 3000000) return;
+    std::string path = g_mapsDir + "/_view.jpg", tmp = g_mapsDir + "/.view.tmp";
+    if (FILE* fp = fopen(tmp.c_str(), "wb")) { fwrite(arr_elem(bytes, 1, 0), 1, n, fp); fclose(fp); rename(tmp.c_str(), path.c_str()); }
+}
+
 void cmd_poll() {
     std::string path = g_mapsDir + "/_cmd";
     FILE* f = fopen(path.c_str(), "r");
@@ -2413,6 +2493,10 @@ void cmd_poll() {
         if (parts.empty()) continue;
         if (parts[0] == "nick" && parts.size() >= 2) { photon_nick(parts[1]); continue; }
         if (parts[0] == "scene") { dump_scene(); continue; }
+        if (parts[0] == "view" && parts.size() >= 8) {
+            render_view(num(parts[1], 0), num(parts[2], 0), num(parts[3], 0), num(parts[4], 0), num(parts[5], 0), num(parts[6], 60), (int)num(parts[7], 0), (int)num(parts[8 < parts.size() ? 8 : 7], 0));
+            continue;
+        }
         if (parts[0] == "rp" && parts.size() >= 2) { rp_command(parts); continue; }
         if (parts[0] == "enter" && parts.size() >= 2) {
             if (const MapSpec* t = find_spec(parts[1])) {

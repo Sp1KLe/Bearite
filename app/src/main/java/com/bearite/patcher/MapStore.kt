@@ -184,6 +184,18 @@ class MapStore(private val dir: File) {
         try { val t = File(dir, "_cmd.tmp"); t.writeText("scene\n"); t.renameTo(File(dir, "_cmd")) } catch (_: Throwable) {}
     }
 
+    /** Просит мод отрендерить реальную сцену игры из камеры редактора (maps/_view.jpg). Координаты — мировые. */
+    fun requestView(px: Float, py: Float, pz: Float, pitch: Float, yaw: Float, fov: Float, w: Int, h: Int) {
+        try {
+            val f = { v: Float -> String.format(java.util.Locale.US, "%.3f", v) }
+            val t = File(dir, "_cmd.tmp")
+            t.writeText("view\t${f(px)}\t${f(py)}\t${f(pz)}\t${f(pitch)}\t${f(yaw)}\t${f(fov)}\t$w\t$h\n")
+            t.renameTo(File(dir, "_cmd"))
+        } catch (_: Throwable) {}
+    }
+
+    fun viewFile(): File = File(dir, "_view.jpg")
+
     /** Время последней записи сцены или 0. */
     fun sceneStamp(): Long = File(dir, "_scene").let { if (it.isFile) it.lastModified() else 0L }
 

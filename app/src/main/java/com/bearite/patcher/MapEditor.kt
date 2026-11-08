@@ -1,5 +1,6 @@
 package com.bearite.patcher
 
+import android.graphics.BitmapFactory
 import kotlin.math.abs
 import android.app.Activity
 import android.app.Dialog
@@ -41,6 +42,7 @@ class MapEditor(
     private lateinit var animBtn: TextView
     private lateinit var snapBtn: TextView
     private lateinit var sceneBtn: TextView
+    private lateinit var realBtn: TextView
     private var sceneAskedAt = 0L
     private lateinit var titleView: TextView
 
@@ -176,6 +178,8 @@ class MapEditor(
             paintTools(); vp.invalidate()
         }
         tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        realBtn = ui.pill("Реальный вид", sizeSp = 13f) { toggleRealView() }
+        tools.addView(realBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         animBtn = ui.pill("▶ Анимация", sizeSp = 13f) { vp.animate = !vp.animate; paintTools() }
         tools.addView(animBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
@@ -186,6 +190,34 @@ class MapEditor(
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         paintTools()
         return bar
+    }
+
+    private var viewStamp = 0L
+
+    /** Реальная картинка игры из камеры редактора: мод рендерит её по запросу, редактор подхватывает файл. */
+    private fun toggleRealView() {
+        val on = !vp.realView
+        vp.realView = on
+        realBtn.alpha = if (on) 1f else 0.7f
+        realBtn.text = if (on) "■ Реальный вид" else "Реальный вид"
+        if (!on) return
+        viewStamp = store.viewFile().let { if (it.isFile) it.lastModified() else 0L }
+        vp.onViewNeeded = { p -> store.requestView(p[0], p[1], p[2], p[3], p[4], p[5], p[6].toInt(), p[7].toInt()) }
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        var waited = 0
+        h.post(object : Runnable {
+            override fun run() {
+                if (!vp.realView || !dlg.isShowing) return
+                val f = store.viewFile()
+                if (f.isFile && f.lastModified() != viewStamp) {
+                    viewStamp = f.lastModified()
+                    try { BitmapFactory.decodeFile(f.path)?.let { vp.viewImage = it; vp.invalidate() } } catch (_: Throwable) {}
+                    waited = 0
+                } else if (vp.viewImage == null && ++waited == 40) toast("Игра не отдаёт картинку. Мир остаётся блоками; пришли лог, если так и должно работать")
+                h.postDelayed(this, 120)
+            }
+        })
+        vp.invalidate()
     }
 
     private fun paintTools() {

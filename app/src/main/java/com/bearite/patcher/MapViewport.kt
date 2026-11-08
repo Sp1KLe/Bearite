@@ -282,6 +282,30 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         out[6] = -sy * a00 + cy * a20; out[7] = -sy * a01 + cy * a21; out[8] = -sy * a02 + cy * a22
     }
 
+    // «Реальный вид»: настоящая картинка мира из игры вместо блоков
+    var realView = false
+        set(v) { field = v; lastReqAt = 0L; lastSig = ""; invalidate() }
+    var viewImage: Bitmap? = null
+    /** Мировые параметры камеры: x y z, pitch, yaw (градусы Unity), fov, ширина, высота картинки. */
+    var onViewNeeded: ((FloatArray) -> Unit)? = null
+    private var lastReqAt = 0L
+    private var lastSig = ""
+    private val viewSrc = android.graphics.Rect()
+    private val viewDst = android.graphics.RectF()
+    private val viewPaint = Paint().apply { isFilterBitmap = true }
+
+    private fun requestViewIfMoved() {
+        val sig = "%.2f %.2f %.2f %.3f %.3f %.3f %d".format(ex, ey, ez, fx, fy, fz, width)
+        val now = System.currentTimeMillis()
+        if (sig == lastSig || now - lastReqAt < 300) { if (sig != lastSig) postInvalidateDelayed(320); return }
+        lastSig = sig; lastReqAt = now
+        val s = if (map.scale == 0.0) 1f else map.scale.toFloat()
+        val k = 640f / max(width, height)
+        val yaw = Math.toDegrees(Math.atan2(fx.toDouble(), fz.toDouble())).toFloat()
+        val pitch = Math.toDegrees(Math.asin(fy.toDouble().coerceIn(-1.0, 1.0))).toFloat() * -1f
+        onViewNeeded?.invoke(floatArrayOf(ex * s + map.ox.toFloat(), ey * s + map.oy.toFloat(), ez * s + map.oz.toFloat(), pitch, yaw, 60f, (width * k).toInt(), (height * k).toInt()))
+    }
+
     private val m9 = FloatArray(9)
     private var bgShader: Shader? = null
     private var bgH = 0
@@ -301,8 +325,14 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             bgPaint.shader = bgShader
             c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
         }
+        val vi = viewImage
+        if (realView && vi != null) {
+            viewSrc.set(0, 0, vi.width, vi.height); viewDst.set(0f, 0f, width.toFloat(), height.toFloat())
+            c.drawBitmap(vi, viewSrc, viewDst, viewPaint)
+        }
+        if (realView) requestViewIfMoved()
         drawGrid(c)
-        drawScene(c)
+        if (!(realView && vi != null)) drawScene(c)
         drawObjects(c)
         drawCameraMarker(c)
         drawSpawn(c)
