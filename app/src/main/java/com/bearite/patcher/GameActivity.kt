@@ -183,6 +183,7 @@ class GameActivity : Activity() {
             BLog.i("APK: " + apks.joinToString { File(it).name + " " + File(it).length() / 1024 + "K" })
             val dir = info.nativeLibraryDir?.let { File(it) }
             val libs = dir?.listFiles()?.sortedBy { it.name }
+            Thread { GameDataProbe.run(apks) }.start()
             BLog.i("lib в ${dir?.path}: " + (libs?.joinToString { it.name + " " + it.length() / 1024 + "K" } ?: "нет"))
         } catch (t: Throwable) {
             BLog.e("диагностика игры не удалась", t)
