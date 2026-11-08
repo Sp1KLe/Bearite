@@ -20,7 +20,7 @@ import kotlin.math.sqrt
  * Игра только отдаёт данные сцены (меши, матрицы, материалы), рисует их сам редактор, поэтому качество
  * одинаковое в покое и при движении камеры. Объекты карты, сетка и манипуляторы рисует поверх MapViewport.
  */
-class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(ctx), GLSurfaceView.Renderer {
+class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTexFile: (String) -> File?) : GLSurfaceView(ctx), GLSurfaceView.Renderer {
 
     /** ex ey ez, r(3), u(3), f(3), focal, w, h, ox oy oz scale */
     @Volatile private var cam: FloatArray? = null
@@ -38,6 +38,11 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
     }
 
     @Volatile private var boxes: List<MapStore.SceneInst>? = null
+    @Volatile private var objs: List<ObjDraw> = emptyList()
+    private val ownTex = HashMap<String, Int>()
+    private val primGpu = HashMap<String, GpuMesh?>()
+
+    fun setObjects(l: List<ObjDraw>) { objs = l; requestRender() }
 
     /** Крупные объекты без читаемой геометрии (здания, земля) показываем простым блоком по их размерам: ориентир, пока форму взять нельзя. */
     fun setData(m: List<MapStore.SceneMesh>?, i: Map<Int, MapStore.SceneInst>?, scene: FloatArray? = null) {
@@ -71,6 +76,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
     private var prog = 0
     private var skyProg = 0
     private var uMvp = 0; private var uMv = 0; private var uCol = 0; private var uSt = 0; private var uUseTex = 0; private var uTex = 0
+    private var uLocalUv = 0; private var uUvRep = 0; private var uUvScale = 0
     private var skyTop = 0; private var skyBot = 0
     private val gpu = HashMap<Int, GpuMesh?>()
     private val texIds = HashMap<Int, Int>()   // номер текстуры -> id GL (0 — не вышло)
@@ -97,22 +103,31 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
             layout(location=0) in vec3 aPos;
             layout(location=1) in vec2 aUv;
             uniform mat4 uMvp; uniform mat4 uMv; uniform vec4 uSt;
-            out vec2 vUv; out vec3 vView;
+            out vec2 vUv; out vec3 vView; out vec3 vLocal;
             void main() {
                 vec4 p = vec4(aPos, 1.0);
                 gl_Position = uMvp * p;
                 vView = (uMv * p).xyz;
+                vLocal = aPos;
                 vUv = aUv * uSt.xy + uSt.zw;
             }""",
             """#version 300 es
             precision mediump float;
-            in vec2 vUv; in vec3 vView;
-            uniform sampler2D uTex; uniform vec4 uCol; uniform float uUseTex;
+            in vec2 vUv; in vec3 vView; in vec3 vLocal;
+            uniform sampler2D uTex; uniform vec4 uCol; uniform float uUseTex; uniform float uLocalUv; uniform vec2 uUvRep; uniform float uUvScale;
             out vec4 o;
             void main() {
                 vec4 c = uCol;
                 if (uUseTex > 0.5) {
-                    vec4 t = texture(uTex, vec2(vUv.x, 1.0 - vUv.y));
+                    vec2 uv = vUv;
+                    if (uLocalUv > 0.5) {
+                        // свои объекты: плоская проекция по доминирующей оси грани в осях фигуры
+                        vec3 ln = abs(cross(dFdx(vLocal), dFdy(vLocal)));
+                        vec3 q = vLocal * uUvScale + 0.5;
+                        if (ln.x >= ln.y && ln.x >= ln.z) uv = q.zy; else if (ln.y >= ln.z) uv = q.xz; else uv = q.xy;
+                        uv *= uUvRep;
+                    }
+                    vec4 t = texture(uTex, vec2(uv.x, 1.0 - uv.y));
                     // вырезные материалы (листва, плющ, тени-пятна): прозрачные пиксели текстуры не рисуем, иначе они чёрные
                     if (uCol.a >= 0.999) { if (t.a < 0.4) discard; } else c.a *= t.a;
                     c.rgb *= t.rgb;
@@ -128,7 +143,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         )
         uMvp = G.glGetUniformLocation(prog, "uMvp"); uMv = G.glGetUniformLocation(prog, "uMv")
         uCol = G.glGetUniformLocation(prog, "uCol"); uSt = G.glGetUniformLocation(prog, "uSt")
-        uUseTex = G.glGetUniformLocation(prog, "uUseTex"); uTex = G.glGetUniformLocation(prog, "uTex")
+        uUseTex = G.glGetUniformLocation(prog, "uUseTex"); uLocalUv = G.glGetUniformLocation(prog, "uLocalUv"); uUvRep = G.glGetUniformLocation(prog, "uUvRep"); uUvScale = G.glGetUniformLocation(prog, "uUvScale"); uTex = G.glGetUniformLocation(prog, "uTex")
         skyProg = link(
             """#version 300 es
             layout(location=0) in vec2 aP; out float vY;
@@ -143,7 +158,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         G.glBindBuffer(G.GL_ARRAY_BUFFER, quadBuf)
         G.glBufferData(G.GL_ARRAY_BUFFER, q.size * 4, ByteBuffer.allocateDirect(q.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(q).also { it.position(0) }, G.GL_STATIC_DRAW)
         // контекст пересоздан: все старые ресурсы недействительны
-        gpu.clear(); texIds.clear(); seenVer = -1
+        gpu.clear(); texIds.clear(); ownTex.clear(); primGpu.clear(); seenVer = -1
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) { G.glViewport(0, 0, width, height) }
@@ -203,6 +218,67 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
     }
 
     private var loadedThisFrame = 0
+
+    private fun loadFile(f: File?): Int {
+        if (f == null) return 0
+        var id = 0
+        try {
+            val o = BitmapFactory.Options(); o.inJustDecodeBounds = true
+            BitmapFactory.decodeFile(f.path, o)
+            var ss = 1
+            while (o.outWidth / ss > 1024 || o.outHeight / ss > 1024) ss *= 2
+            val o2 = BitmapFactory.Options(); o2.inSampleSize = ss
+            val bmp = BitmapFactory.decodeFile(f.path, o2)
+            if (bmp != null) {
+                val t = IntArray(1); G.glGenTextures(1, t, 0); id = t[0]
+                G.glBindTexture(G.GL_TEXTURE_2D, id)
+                GLUtils.texImage2D(G.GL_TEXTURE_2D, 0, bmp, 0)
+                G.glGenerateMipmap(G.GL_TEXTURE_2D)
+                G.glTexParameteri(G.GL_TEXTURE_2D, G.GL_TEXTURE_MIN_FILTER, G.GL_LINEAR_MIPMAP_LINEAR)
+                G.glTexParameteri(G.GL_TEXTURE_2D, G.GL_TEXTURE_MAG_FILTER, G.GL_LINEAR)
+                G.glTexParameteri(G.GL_TEXTURE_2D, G.GL_TEXTURE_WRAP_S, G.GL_REPEAT)
+                G.glTexParameteri(G.GL_TEXTURE_2D, G.GL_TEXTURE_WRAP_T, G.GL_REPEAT)
+                bmp.recycle()
+            }
+        } catch (_: Throwable) { id = 0 }
+        return id
+    }
+
+    private val oMv = FloatArray(16)
+    private val oMvp = FloatArray(16)
+    private val oModel = FloatArray(16)
+
+    /** Свои объекты карты: те же шейдер и буфер глубины, что у моделей игры, поэтому перекрытия считаются правильно. */
+    private fun drawObjects() {
+        val l = objs
+        if (l.isEmpty()) return
+        for (ob in l) {
+            val gm = primGpu.getOrPut(ob.shape) {
+                val pm = PrimMeshes.get(ob.shape)
+                upload(-10 - primGpu.size, MapStore.SceneMesh(pm.v, FloatArray(pm.v.size / 3 * 2), pm.t))
+            } ?: continue
+            for (k in 0 until 16) oModel[k] = ob.model[k]
+            mul(view, oModel, oMv); mul(proj, oMv, oMvp)
+            G.glUniformMatrix4fv(uMvp, 1, false, oMvp, 0)
+            G.glUniformMatrix4fv(uMv, 1, false, oMv, 0)
+            G.glBindBuffer(G.GL_ARRAY_BUFFER, gm.vbo); G.glBindBuffer(G.GL_ELEMENT_ARRAY_BUFFER, gm.ibo)
+            G.glVertexAttribPointer(0, 3, G.GL_FLOAT, false, 20, 0)
+            G.glVertexAttribPointer(1, 2, G.GL_FLOAT, false, 20, 12)
+            var tid = 0
+            if (ob.tex.isNotEmpty()) {
+                tid = ownTex[ob.tex] ?: loadFile(ownTexFile(ob.tex)).also { ownTex[ob.tex] = it }
+            }
+            val r = ((ob.color shr 16) and 255) / 255f; val g = ((ob.color shr 8) and 255) / 255f; val b = (ob.color and 255) / 255f
+            if (tid != 0) { G.glBindTexture(G.GL_TEXTURE_2D, tid); G.glUniform1f(uUseTex, 1f) } else G.glUniform1f(uUseTex, 0f)
+            G.glUniform1f(uLocalUv, 1f)
+            G.glUniform1f(uUvScale, if (ob.shape == "plane") 0.1f else 1f)
+            G.glUniform2f(uUvRep, ob.tu, ob.tv)
+            G.glUniform4f(uCol, r, g, b, 1f)
+            G.glUniform4f(uSt, 1f, 1f, 0f, 0f)
+            G.glDrawElements(G.GL_TRIANGLES, PrimMeshes.get(ob.shape).t.size, G.GL_UNSIGNED_SHORT, 0)
+        }
+        G.glUniform1f(uLocalUv, 0f)
+    }
     private val mvp = FloatArray(16)
     private val mv = FloatArray(16)
     private val model = FloatArray(16)
@@ -224,7 +300,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
     override fun onDrawFrame(gl: GL10?) {
         loadedThisFrame = 0
         val c = cam
-        val ms = meshes; val ins = insts
+        val ms0 = meshes; val ins0 = insts
         if (seenVer != dataVer) {
             seenVer = dataVer
             for (g in gpu.values) if (g != null) G.glDeleteBuffers(2, intArrayOf(g.vbo, g.ibo), 0)
@@ -242,7 +318,9 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         G.glEnableVertexAttribArray(0); G.glVertexAttribPointer(0, 2, G.GL_FLOAT, false, 8, 0)
         G.glDrawArrays(G.GL_TRIANGLE_STRIP, 0, 4)
         G.glDisableVertexAttribArray(0)
-        if (c == null || ms == null || ins == null || ins.isEmpty()) return
+        if (c == null) return
+        val ms: List<MapStore.SceneMesh> = ms0 ?: emptyList()
+        val ins: Map<Int, MapStore.SceneInst> = ins0 ?: emptyMap()
 
         val ex = c[0]; val ey = c[1]; val ez = c[2]
         val focal = c[12]; val w = c[13]; val h = c[14]
@@ -299,6 +377,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?) : GLSurfaceView(c
         G.glDisable(G.GL_BLEND)
         G.glDepthMask(true)
         for (it in opaque) drawItem(it, false)
+        drawObjects()
         // прозрачные подмеши: от дальних к ближним, без записи глубины
         G.glEnable(G.GL_BLEND)
         G.glBlendFunc(G.GL_SRC_ALPHA, G.GL_ONE_MINUS_SRC_ALPHA)

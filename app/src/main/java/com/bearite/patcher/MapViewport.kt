@@ -25,6 +25,9 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** Заготовки сеток для примитивов Unity (размеры как у GameObject.CreatePrimitive). */
+/** Объект карты для слоя OpenGL: модель в координатах редактора (по столбцам), оттенок, своя текстура и повторы. */
+class ObjDraw(val shape: String, val model: FloatArray, val color: Int, val tex: String, val tu: Float, val tv: Float)
+
 object PrimMeshes {
     class Mesh(val v: FloatArray, val t: IntArray, val sign: FloatArray, val doubleSided: Boolean)
 
@@ -248,6 +251,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     var gameView = false
         set(v) { field = v; invalidate() }
     var onCamera: ((FloatArray) -> Unit)? = null
+    var onObjects: ((List<ObjDraw>) -> Unit)? = null
     private var pcx = 0f
     private var pcy = 0f
 
@@ -655,6 +659,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val lx = 0.45f; val ly = 0.8f; val lz = -0.4f
         val ll = sqrt(lx * lx + ly * ly + lz * lz)
         val p = FloatArray(3)
+        val glList = if (gameView) ArrayList<ObjDraw>() else null
         for ((oi, o) in map.objects.withIndex()) {
             val mesh = PrimMeshes.get(o.shape)
             // предпросмотр анимации: положение объекта в текущий момент
@@ -663,6 +668,16 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             if (anim) rotXYZ(ps[3], ps[4], ps[5], m9) else rot(o, m9)
             val sxx = (if (anim) ps[6] else o.sx).toFloat(); val syy = (if (anim) ps[7] else o.sy).toFloat(); val szz = (if (anim) ps[8] else o.sz).toFloat()
             val opx = (if (anim) ps[0] else o.x).toFloat(); val opy = (if (anim) ps[1] else o.y).toFloat(); val opz = (if (anim) ps[2] else o.z).toFloat()
+            if (glList != null) {
+                // объекты рисует слой OpenGL вместе с моделями игры (общий буфер глубины): здесь только собираем их позы
+                val md = FloatArray(16)
+                md[0] = m9[0] * sxx; md[1] = m9[3] * sxx; md[2] = m9[6] * sxx
+                md[4] = m9[1] * syy; md[5] = m9[4] * syy; md[6] = m9[7] * syy
+                md[8] = m9[2] * szz; md[9] = m9[5] * szz; md[10] = m9[8] * szz
+                md[12] = opx; md[13] = opy; md[14] = opz; md[15] = 1f
+                glList.add(ObjDraw(o.shape, md, o.color, o.tex, o.tu.toFloat(), o.tv.toFloat()))
+                continue
+            }
             val nv = mesh.v.size / 3
             // мир (vtmp[i*6..2]) и экран (vtmp[i*6+3..5]; глубина < 0 → не виден)
             for (i in 0 until nv) {
@@ -729,6 +744,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 order[i] = (java.lang.Float.floatToIntBits(depth).toLong() shl 32) or i.toLong()
             }
         }
+        glList?.let { onObjects?.invoke(it) }
         java.util.Arrays.sort(order, 0, triCount)
         for (k in 0 until triCount) sortedIdx[k] = (order[k] and 0xFFFFFFFFL).toInt()
         // рисуем от дальних к ближним

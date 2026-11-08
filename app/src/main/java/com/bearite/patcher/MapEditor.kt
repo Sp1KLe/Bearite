@@ -34,7 +34,7 @@ class MapEditor(
 ) {
     private val dlg = Dialog(act, android.R.style.Theme_Material_NoActionBar_Fullscreen)
     private val vp = MapViewport(act, map)
-    private val gl = MapGL(act) { store.sceneTexFile(it) }
+    private val gl = MapGL(act, { store.sceneTexFile(it) }, { store.textureFile(it) })
     private val vpHost = android.widget.FrameLayout(act).apply {
         addView(gl, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(vp, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -84,6 +84,7 @@ class MapEditor(
         }
         dlg.setOnDismissListener { ui.flat = false; sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
         vp.onCamera = { gl.setCamera(it) }
+        vp.onObjects = { gl.setObjects(it) }
         setGameView(true)
         loadScene(auto = true)
         refreshTree()
