@@ -201,6 +201,49 @@ class MapStore(private val dir: File) {
         } catch (_: Throwable) { null }
     }
 
+    class SceneMesh(val v: FloatArray, val uv: FloatArray, val idx: IntArray)
+    class SceneInst(val mesh: Int, val m: FloatArray)
+
+    /** Настоящая геометрия объектов мира (maps/_meshes), если игра оставила её читаемой. */
+    fun readMeshes(): List<SceneMesh>? {
+        val f = File(dir, "_meshes")
+        if (!f.isFile) return null
+        return try {
+            val bb = java.nio.ByteBuffer.wrap(f.readBytes()).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            val cnt = bb.getInt()
+            val out = ArrayList<SceneMesh>(cnt)
+            for (k in 0 until cnt) {
+                val nv = bb.getInt(); val ni = bb.getInt()
+                if (nv < 0 || ni < 0 || nv > 40000 || ni > 80000) return null
+                val v = FloatArray(nv * 3); bb.asFloatBuffer().get(v); bb.position(bb.position() + nv * 12)
+                val uv = FloatArray(nv * 2); bb.asFloatBuffer().get(uv); bb.position(bb.position() + nv * 8)
+                val ix = IntArray(ni); bb.asIntBuffer().get(ix); bb.position(bb.position() + ni * 4)
+                var ok = true
+                for (i in ix) if (i < 0 || i >= nv) { ok = false; break }
+                out.add(if (ok) SceneMesh(v, uv, ix) else SceneMesh(FloatArray(0), FloatArray(0), IntArray(0)))
+            }
+            out
+        } catch (_: Throwable) { null }
+    }
+
+    /** Какой объект сцены (номер строки в _scene) каким мешем нарисован и его матрица (16 чисел, по столбцам). */
+    fun readInstances(): Map<Int, SceneInst> {
+        val f = File(dir, "_scene_inst")
+        val out = HashMap<Int, SceneInst>()
+        if (!f.isFile) return out
+        try {
+            f.forEachLine { l ->
+                val p = l.trim().split(' ')
+                if (p.size == 18) {
+                    val j = p[0].toIntOrNull(); val mi = p[1].toIntOrNull()
+                    val m = FloatArray(16) { p[2 + it].toFloatOrNull() ?: 0f }
+                    if (j != null && mi != null && mi >= 0) out[j] = SceneInst(mi, m)
+                }
+            }
+        } catch (_: Throwable) {}
+        return out
+    }
+
     /** Текстура материала мира игры (выгружает нативный мод в maps/scene_tex/N.png). */
     fun sceneTexFile(idx: Int): File? = File(File(dir, "scene_tex"), "$idx.png").takeIf { it.isFile }
 

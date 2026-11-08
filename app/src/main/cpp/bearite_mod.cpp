@@ -2234,6 +2234,45 @@ bool scene_export_tex(void* tex, int idx) {
 }
 
 /** Геометрия сцены для редактора карт: maps/_scene = «центр x y z, полуразмеры x y z» (мировые координаты) каждого включённого рендерера. */
+/** Меши сцены для редактора: геометрия (если игра оставила её читаемой) копится в blob'ах и пишется в maps/_meshes. */
+struct MeshApi {
+    bool init = false;
+    void *compGet = nullptr, *tMF = nullptr, *mfShared = nullptr, *isReadable = nullptr, *verts = nullptr, *tris = nullptr, *uv = nullptr, *l2w = nullptr;
+};
+std::vector<std::string> g_meshBlobs;
+std::map<int, int> g_meshIdx;      // id меша игры -> номер blob'а (-1 = нечитаем или слишком большой)
+size_t g_meshBytes = 0;
+int g_meshBad = 0, g_meshBig = 0;
+
+int mesh_blob(MeshApi& M, void* mesh) {
+    int id = inst_id(mesh);
+    auto it = g_meshIdx.find(id);
+    if (it != g_meshIdx.end()) return it->second;
+    int res = -1;
+    do {
+        if (M.isReadable) { void* r = inv(M.isReadable, mesh); if (!r || !*(const uint8_t*)obj_unbox(r)) { ++g_meshBad; break; } }
+        bool ok = true;
+        void* va = inv(M.verts, mesh, nullptr, &ok);
+        if (!ok || !va) { ++g_meshBad; break; }
+        void* ta = inv(M.tris, mesh, nullptr, &ok);
+        if (!ok || !ta) { ++g_meshBad; break; }
+        void* ua = M.uv ? inv(M.uv, mesh, nullptr, &ok) : nullptr;
+        uintptr_t nv = arr_len(va), ni = arr_len(ta), nu = ua ? arr_len(ua) : 0;
+        if (nv < 3 || ni < 3 || nv > 20000 || ni > 40000 || g_meshBytes > 48u * 1024 * 1024) { ++g_meshBig; break; }
+        std::string b;
+        int32_t h[2] = {(int32_t)nv, (int32_t)ni};
+        b.append((const char*)h, 8);
+        b.append((const char*)arr_elem(va, 12, 0), nv * 12);
+        if (nu == nv) b.append((const char*)arr_elem(ua, 8, 0), nv * 8); else b.append(nv * 8, '\0');
+        b.append((const char*)arr_elem(ta, 4, 0), ni * 4);
+        g_meshBytes += b.size();
+        g_meshBlobs.push_back(std::move(b));
+        res = (int)g_meshBlobs.size() - 1;
+    } while (false);
+    g_meshIdx[id] = res;
+    return res;
+}
+
 void dump_scene() {
     if (!F.type_renderer || !F.rend_bounds) { logf_("сцена для редактора: у игры нет Renderer.bounds"); return; }
     void* arr = find_objects(F.type_renderer);
@@ -2246,6 +2285,27 @@ void dump_scene() {
     static void* getTex = F.mat_class ? find_method_types(F.mat_class, "GetTexture", {"String"}) : nullptr;
     static std::map<int, int> texIdx;       // id текстуры игры -> номер файла scene_tex/N.png (0 = не вышло)
     static int texNext = 1;
+    static MeshApi M;
+    if (!M.init) {
+        M.init = true;
+        void* compK = bearite_find_class("UnityEngine", "Component");
+        void* mfK = bearite_find_class("UnityEngine", "MeshFilter");
+        void* meshK = bearite_find_class("UnityEngine", "Mesh");
+        void* trK = bearite_find_class("UnityEngine", "Transform");
+        M.compGet = compK ? find_method_types(compK, "GetComponent", {"Type"}) : nullptr;
+        M.tMF = type_of("UnityEngine", "MeshFilter");
+        M.mfShared = sc_method(mfK, "get_sharedMesh", 0);
+        M.isReadable = sc_method(meshK, "get_isReadable", 0);
+        M.verts = sc_method(meshK, "get_vertices", 0);
+        M.tris = sc_method(meshK, "get_triangles", 0);
+        M.uv = sc_method(meshK, "get_uv", 0);
+        M.l2w = sc_method(trK, "get_localToWorldMatrix", 0);
+        logf_("меши сцены: GetComponent=%d MeshFilter=%d sharedMesh=%d isReadable=%d vertices=%d triangles=%d uv=%d l2w=%d", M.compGet != 0, M.tMF != 0, M.mfShared != 0,
+              M.isReadable != 0, M.verts != 0, M.tris != 0, M.uv != 0, M.l2w != 0);
+    }
+    bool meshOk = M.compGet && M.tMF && M.mfShared && M.verts && M.tris && M.l2w;
+    std::string inst;
+    int withMesh = 0;
     std::map<int, SceneMat> mats;
     bool oc = g_crumbs;
     g_crumbs = false;
@@ -2295,6 +2355,23 @@ void dump_scene() {
             }
         }
         if (sm.tex) ++withTex;
+        if (meshOk) {
+            void* ta[1] = {M.tMF};
+            void* mf = inv(M.compGet, o, ta);
+            void* mesh = mf ? inv(M.mfShared, mf) : nullptr;
+            int mi = mesh ? mesh_blob(M, mesh) : -1;
+            void* tr2 = F.get_transform ? inv(F.get_transform, o) : nullptr;
+            void* mv = (mi >= 0 && tr2) ? inv(M.l2w, tr2) : nullptr;
+            if (mv) {
+                float m[16];
+                memcpy(m, obj_unbox(mv), sizeof m);
+                char il[400];
+                int k = snprintf(il, sizeof il, "%d %d", n, mi);
+                for (int q = 0; q < 16 && k < (int)sizeof il - 20; ++q) k += snprintf(il + k, sizeof il - k, " %.5g", m[q]);
+                inst += il; inst += '\n';
+                ++withMesh;
+            }
+        }
         char line[200];
         snprintf(line, sizeof line, "%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %d\n", f[0], f[1], f[2], f[3], f[4], f[5], sm.c[0], sm.c[1], sm.c[2], sm.tex);
         out += line;
@@ -2303,6 +2380,17 @@ void dump_scene() {
     g_crumbs = oc;
     std::string path = g_mapsDir + "/_scene", tmp = g_mapsDir + "/.scene.tmp";
     if (FILE* fp = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), fp); fclose(fp); rename(tmp.c_str(), path.c_str()); }
+    if (meshOk) {
+        std::string mt = g_mapsDir + "/_meshes", mtmp = g_mapsDir + "/.meshes.tmp", it2 = g_mapsDir + "/_scene_inst", itmp = g_mapsDir + "/.scene_inst.tmp";
+        if (FILE* fp = fopen(mtmp.c_str(), "wb")) {
+            int32_t cntb = (int32_t)g_meshBlobs.size();
+            fwrite(&cntb, 4, 1, fp);
+            for (const auto& b : g_meshBlobs) fwrite(b.data(), 1, b.size(), fp);
+            fclose(fp); rename(mtmp.c_str(), mt.c_str());
+        }
+        if (FILE* fp = fopen(itmp.c_str(), "w")) { fputs(inst.c_str(), fp); fclose(fp); rename(itmp.c_str(), it2.c_str()); }
+        logf_("меши сцены: у %d объектов есть геометрия, уникальных мешей %d (нечитаемых %d, слишком больших %d), %d КБ", withMesh, (int)g_meshBlobs.size(), g_meshBad, g_meshBig, (int)(g_meshBytes / 1024));
+    }
     logf_("сцена для редактора: рендереров %d из %d, с текстурой %d, текстур выгружено сейчас %d, всего %d", n, (int)cnt, withTex, exported, (int)texIdx.size());
 }
 

@@ -114,6 +114,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     var texFile: ((String) -> java.io.File?)? = null
     /** Геометрия сцены игры (мировые координаты, по 10 чисел: центр, полуразмеры, цвет, номер текстуры): рисуется закрашенными блоками под объектами карты. */
     var scene: FloatArray? = null
+    var sceneMeshes: List<MapStore.SceneMesh>? = null
+    var sceneInst: Map<Int, MapStore.SceneInst>? = null
     /** Текстуры материалов мира игры по номеру (maps/scene_tex/N.png). */
     var sceneTexFile: ((Int) -> java.io.File?)? = null
     var showScene = true
@@ -333,17 +335,19 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private val sp4 = Array(4) { FloatArray(3) }
     private val qpath = Path()
 
-    private fun sceneTex(i: Int): Tex? {
-        if (sceneTexCache.containsKey(i)) return sceneTexCache[i]
+    private fun sceneTex(i: Int, fine: Boolean = false): Tex? {
+        val ck = if (fine) i + 1_000_000 else i
+        val lim = if (fine) 128 else 48
+        if (sceneTexCache.containsKey(ck)) return sceneTexCache[ck]
         val t: Tex? = try {
             val f = sceneTexFile?.invoke(i)
             var bmp = if (f == null) null else BitmapFactory.decodeFile(f.path)
             // уменьшаем «как мип-карты»: без этого мелкие текстуры (трава, кирпич) на расстоянии рябят шумом
-            while (bmp != null && (bmp.width > 48 || bmp.height > 48) && bmp.width > 2 && bmp.height > 2)
+            while (bmp != null && (bmp.width > lim || bmp.height > lim) && bmp.width > 2 && bmp.height > 2)
                 bmp = Bitmap.createScaledBitmap(bmp, maxOf(2, bmp.width / 2), maxOf(2, bmp.height / 2), true)
             if (bmp == null) null else Tex(bmp, BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT))
         } catch (_: Throwable) { null }
-        sceneTexCache[i] = t
+        sceneTexCache[ck] = t
         return t
     }
 
@@ -369,7 +373,26 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             key[j] = sqrt(dx * dx + dy * dy + dz * dz) + 2f * big
         }
         val order = idx.sortedByDescending { key[it] }
+        // настоящие модели рисуем у самых близких объектов (бюджет треугольников), остальные — блоками
+        val meshes = sceneMeshes; val insts = sceneInst
+        val meshSet = HashSet<Int>()
+        if (meshes != null && insts != null && insts.isNotEmpty()) {
+            var budget = 9000
+            for (j in idx.sortedBy { dd[it] }) {
+                val ins = insts[j] ?: continue
+                val me = meshes.getOrNull(ins.mesh) ?: continue
+                val cost = me.idx.size / 3
+                if (cost == 0 || cost > budget) continue
+                budget -= cost; meshSet.add(j)
+                if (budget < 60) break
+            }
+        }
         for (j in order) {
+            if (j in meshSet) {
+                val ins = insts!![j]!!
+                drawMeshInst(c, meshes!![ins.mesh], ins.m, sc[j * 10 + 6], sc[j * 10 + 7], sc[j * 10 + 8], sceneTex(sc[j * 10 + 9].toInt(), true), ox, oy, oz, s)
+                continue
+            }
             val cx = (sc[j * 10] - ox) / s; val cy = (sc[j * 10 + 1] - oy) / s; val cz = (sc[j * 10 + 2] - oz) / s
             val hx = sc[j * 10 + 3] / s; val hy = sc[j * 10 + 4] / s; val hz = sc[j * 10 + 5] / s
             var cr = sc[j * 10 + 6]; var cg = sc[j * 10 + 7]; var cb = sc[j * 10 + 8]
@@ -413,6 +436,76 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 fill.color = mul
                 c.drawPath(qpath, fill)
             }
+        }
+        texPaint.shader = null
+        texPaint.colorFilter = null
+    }
+
+    private var mbuf = FloatArray(0)
+    private val mpath = Path()
+    private val msrc = FloatArray(6)
+    private val mdst = FloatArray(6)
+
+    /** Настоящая модель объекта мира: треугольники с текстурой по UV, плоская подсветка, отсечение задних граней. */
+    private fun drawMeshInst(c: Canvas, me: MapStore.SceneMesh, m: FloatArray, cr0: Float, cg0: Float, cb0: Float, tex: Tex?, ox: Float, oy: Float, oz: Float, s: Float) {
+        val nv = me.v.size / 3
+        if (nv < 3) return
+        if (mbuf.size < nv * 6) mbuf = FloatArray(nv * 6)
+        var cr = cr0; var cg = cg0; var cb = cb0
+        if (cr + cg + cb < 0.3f) { cr = 0.6f; cg = 0.6f; cb = 0.6f }
+        // вершины: мир (карта) в mbuf[i*6..2], экран в mbuf[i*6+3..5]
+        for (i in 0 until nv) {
+            val x = me.v[i * 3]; val y = me.v[i * 3 + 1]; val z = me.v[i * 3 + 2]
+            val wx = (m[0] * x + m[4] * y + m[8] * z + m[12] - ox) / s
+            val wy = (m[1] * x + m[5] * y + m[9] * z + m[13] - oy) / s
+            val wz = (m[2] * x + m[6] * y + m[10] * z + m[14] - oz) / s
+            mbuf[i * 6] = wx; mbuf[i * 6 + 1] = wy; mbuf[i * 6 + 2] = wz
+            if (proj(wx, wy, wz, sp)) { mbuf[i * 6 + 3] = sp[0]; mbuf[i * 6 + 4] = sp[1]; mbuf[i * 6 + 5] = sp[2] } else mbuf[i * 6 + 5] = -1f
+        }
+        // зеркальные масштабы переворачивают порядок вершин
+        val det = m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2])
+        val flip = det < 0f
+        val lx = 0.45f; val ly = 0.8f; val lz = -0.4f
+        val ll = sqrt(lx * lx + ly * ly + lz * lz)
+        val ix = me.idx
+        var t = 0
+        while (t + 2 < ix.size) {
+            val a = ix[t]; val b = if (flip) ix[t + 2] else ix[t + 1]; val cc = if (flip) ix[t + 1] else ix[t + 2]
+            t += 3
+            if (mbuf[a * 6 + 5] < 0f || mbuf[b * 6 + 5] < 0f || mbuf[cc * 6 + 5] < 0f) continue
+            val ax = mbuf[a * 6 + 3]; val ay = mbuf[a * 6 + 4]; val bx = mbuf[b * 6 + 3]; val by = mbuf[b * 6 + 4]; val cx = mbuf[cc * 6 + 3]; val cy = mbuf[cc * 6 + 4]
+            val area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            if (abs(area) < 1.2f) continue
+            if (max(max(ax, bx), cx) < 0 || min(min(ax, bx), cx) > width || max(max(ay, by), cy) < 0 || min(min(ay, by), cy) > height) continue
+            // нормаль по правилу Unity (левая система): лицевая сторона смотрит на камеру
+            val ux = mbuf[b * 6] - mbuf[a * 6]; val uy = mbuf[b * 6 + 1] - mbuf[a * 6 + 1]; val uz = mbuf[b * 6 + 2] - mbuf[a * 6 + 2]
+            val vx = mbuf[cc * 6] - mbuf[a * 6]; val vy = mbuf[cc * 6 + 1] - mbuf[a * 6 + 1]; val vz = mbuf[cc * 6 + 2] - mbuf[a * 6 + 2]
+            var nx = uy * vz - uz * vy; var ny = uz * vx - ux * vz; var nz = ux * vy - uy * vx
+            val nl = sqrt(nx * nx + ny * ny + nz * nz)
+            if (nl < 1e-9f) continue
+            nx /= nl; ny /= nl; nz /= nl
+            val facing = nx * (ex - mbuf[a * 6]) + ny * (ey - mbuf[a * 6 + 1]) + nz * (ez - mbuf[a * 6 + 2])
+            if (facing < 0f) continue
+            val k = 0.5f + 0.5f * max(0f, (nx * lx + ny * ly + nz * lz) / ll)
+            val qk = (Math.round(k * 8f) / 8f)
+            val mul = Color.rgb(min(255, (cr * qk * 255).toInt()), min(255, (cg * qk * 255).toInt()), min(255, (cb * qk * 255).toInt()))
+            mpath.rewind(); mpath.moveTo(ax, ay); mpath.lineTo(bx, by); mpath.lineTo(cx, cy); mpath.close()
+            if (tex != null) {
+                val tw = tex.bmp.width.toFloat(); val th = tex.bmp.height.toFloat()
+                msrc[0] = me.uv[a * 2] * tw; msrc[1] = (1f - me.uv[a * 2 + 1]) * th
+                msrc[2] = me.uv[b * 2] * tw; msrc[3] = (1f - me.uv[b * 2 + 1]) * th
+                msrc[4] = me.uv[cc * 2] * tw; msrc[5] = (1f - me.uv[cc * 2 + 1]) * th
+                mdst[0] = ax; mdst[1] = ay; mdst[2] = bx; mdst[3] = by; mdst[4] = cx; mdst[5] = cy
+                if (texMatrix.setPolyToPoly(msrc, 0, mdst, 0, 3)) {
+                    tex.shader.setLocalMatrix(texMatrix)
+                    texPaint.shader = tex.shader
+                    texPaint.colorFilter = sceneFilters.getOrPut(mul) { LightingColorFilter(mul, 0) }
+                    c.drawPath(mpath, texPaint)
+                    continue
+                }
+            }
+            fill.color = mul
+            c.drawPath(mpath, fill)
         }
         texPaint.shader = null
         texPaint.colorFilter = null
