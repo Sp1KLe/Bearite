@@ -2195,7 +2195,7 @@ bool scene_export_tex(void* tex, int idx) {
     if (!wv || !hv) return false;
     int w = *(const int*)obj_unbox(wv), h = *(const int*)obj_unbox(hv);
     if (w < 1 || h < 1) return false;
-    int sw = w < 128 ? w : 128, sh = h < 128 ? h : 128;
+    int sw = w < 512 ? w : 512, sh = h < 512 ? h : 512;
     void* ga[2] = {&sw, &sh};
     void* rt = inv(getTmp, nullptr, ga);
     if (!rt) return false;
