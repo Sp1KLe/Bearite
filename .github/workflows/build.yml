@@ -99,15 +99,3 @@ jobs:
           name: Bearite-debug
           path: |
             app/build/outputs/apk/debug/*.apk
-
-      # постоянная ссылка: релиз «latest» пересоздаётся при каждой сборке на main, APK всегда один и самый свежий
-      - name: Publish latest APK
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp app/build/outputs/apk/debug/*.apk Bearite-debug.apk
-          gh release delete latest --cleanup-tag -y || true
-          gh release create latest Bearite-debug.apk --target "$GITHUB_SHA" \
-            --title "Bearite: последняя сборка" \
-            --notes "Коммит ${GITHUB_SHA::7}. Этот релиз заменяется при каждой сборке. Прямая ссылка: https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/Bearite-debug.apk"
