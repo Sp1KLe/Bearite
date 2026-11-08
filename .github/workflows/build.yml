@@ -44,9 +44,28 @@ jobs:
           fi
           exit "$rc"
 
+      # Gradle ставим сами и с повторами: setup-gradle падал на скачивании (HTTP 503/504 у services.gradle.org).
+      # 8.14.3 — последняя ветка 8.x, с которой работает наш Android Gradle Plugin 8.2.2 (Gradle 9 его не поддерживает)
+      - name: Install Gradle 8.14.3 (with retries)
+        run: |
+          set -e
+          V=8.14.3
+          mkdir -p "$HOME/gradle-dist"
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            for url in \
+              "https://github.com/gradle/gradle-distributions/releases/download/v${V}/gradle-${V}-bin.zip" \
+              "https://services.gradle.org/distributions/gradle-${V}-bin.zip"; do
+              if curl -fsSL --retry 3 --retry-all-errors --connect-timeout 20 -o "$HOME/gradle-dist/g.zip" "$url" && unzip -tq "$HOME/gradle-dist/g.zip" > /dev/null; then ok=1; break 2; fi
+              echo "не вышло: $url (попытка $attempt)"
+            done
+            sleep $((attempt * 5))
+          done
+          [ "$ok" = 1 ] || { echo "::error::Не удалось скачать Gradle ${V}"; exit 1; }
+          unzip -q "$HOME/gradle-dist/g.zip" -d "$HOME/gradle-dist"
+          echo "$HOME/gradle-dist/gradle-${V}/bin" >> "$GITHUB_PATH"
+
       - uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: "8.5"
 
       - name: Build debug APK
         run: |
