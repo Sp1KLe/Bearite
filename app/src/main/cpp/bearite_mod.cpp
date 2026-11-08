@@ -2162,7 +2162,7 @@ void rp_command(const std::vector<std::string>& p);  // реплей: опред
 // ---- материалы сцены для редактора карт: цвет и текстура (копия в PNG через RenderTexture, оригиналы не читаются)
 void* sc_method(void* k, const char* n, int argc) { return k ? bearite_il2.class_get_method_from_name(k, n, argc) : nullptr; }
 
-struct SceneMat { float c[3]; int tex; float a = 1.f; };
+struct SceneMat { float c[3]; int tex; float a = 1.f; float st[4] = {1.f, 1.f, 0.f, 0.f}; };
 /** Номер текстуры + 1000 × процент прозрачности (так прозрачность едет в старом формате файла). */
 static int scene_enc(const SceneMat& m) { int t = (int)((1.f - m.a) * 100.f + 0.5f); if (t < 0) t = 0; if (t > 99) t = 99; return m.tex + 1000 * t; }
 
@@ -2304,6 +2304,8 @@ void dump_scene() {
     static void* getShared = rdK ? bearite_il2.class_get_method_from_name(rdK, "get_sharedMaterial", 0) : nullptr;
     static void* getCol = F.mat_class ? find_method_types(F.mat_class, "GetColor", {"String"}) : nullptr;
     static void* getTex = F.mat_class ? find_method_types(F.mat_class, "GetTexture", {"String"}) : nullptr;
+    static void* getScl = F.mat_class ? find_method_types(F.mat_class, "GetTextureScale", {"String"}) : nullptr;
+    static void* getOfs = F.mat_class ? find_method_types(F.mat_class, "GetTextureOffset", {"String"}) : nullptr;
     static void* getQueue = F.mat_class ? bearite_il2.class_get_method_from_name(F.mat_class, "get_renderQueue", 0) : nullptr;
     static std::map<int, int> texIdx;       // id текстуры игры -> номер файла scene_tex/N.png (0 = не вышло)
     static int texNext = 1;
@@ -2366,6 +2368,8 @@ void dump_scene() {
                     ti = texIdx.emplace(tid, idx).first;
                 }
                 sm.tex = ti->second;
+                if (getScl) if (void* v = inv(getScl, mat, a)) memcpy(sm.st, obj_unbox(v), 8);
+                if (getOfs) if (void* v = inv(getOfs, mat, a)) memcpy(sm.st + 2, obj_unbox(v), 8);
             }
         }
         mats[mid] = sm;
@@ -2399,7 +2403,7 @@ void dump_scene() {
             if (mv) {
                 float m[16];
                 memcpy(m, obj_unbox(mv), sizeof m);
-                char il[1000];
+                char il[1600];
                 int k = snprintf(il, sizeof il, "%d %d", n, mi);
                 for (int q = 0; q < 16 && k < (int)sizeof il - 20; ++q) k += snprintf(il + k, sizeof il - k, " %.5g", m[q]);
                 // материалы подмешей: r g b номер_текстуры
@@ -2407,10 +2411,10 @@ void dump_scene() {
                 if (nsub > 0 && M.sharedMats) {
                     void* marr = inv(M.sharedMats, o);
                     uintptr_t nm = marr ? arr_len(marr) : 0;
-                    for (int q = 0; q < nsub && k < (int)sizeof il - 70; ++q) {
+                    for (int q = 0; q < nsub && k < (int)sizeof il - 110; ++q) {
                         SceneMat sq = sm;
                         if (nm > 0) { void* mq = *(void**)arr_elem(marr, sizeof(void*), q < (int)nm ? q : nm - 1); if (mq) sq = matInfo(mq); }
-                        k += snprintf(il + k, sizeof il - k, " %.3f %.3f %.3f %d", sq.c[0], sq.c[1], sq.c[2], scene_enc(sq));
+                        k += snprintf(il + k, sizeof il - k, " %.3f %.3f %.3f %d %.4g %.4g %.4g %.4g", sq.c[0], sq.c[1], sq.c[2], scene_enc(sq), sq.st[0], sq.st[1], sq.st[2], sq.st[3]);
                     }
                 }
                 inst += il; inst += '\n';

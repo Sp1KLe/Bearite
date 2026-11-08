@@ -226,7 +226,7 @@ class MapStore(private val dir: File) {
 
     /** subs: пары (начало, число индексов) каждого подмеша; пусто — один материал на всю модель. */
     class SceneMesh(val v: FloatArray, val uv: FloatArray, val idx: IntArray, val subs: IntArray = IntArray(0))
-    /** mats: по 4 числа на подмеш — цвет r g b и номер текстуры. */
+    /** mats: по 8 чисел на подмеш — цвет r g b, номер текстуры (+1000×прозрачность%), тайлинг sx sy и смещение ox oy. */
     class SceneInst(val mesh: Int, val m: FloatArray, val mats: FloatArray = FloatArray(0))
 
     /** Настоящая геометрия объектов мира (maps/_meshes), если игра оставила её читаемой. */

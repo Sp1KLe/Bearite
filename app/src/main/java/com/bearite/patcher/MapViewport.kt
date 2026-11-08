@@ -241,33 +241,20 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         rxx /= rl; rzz /= rl
         rx = rxx; ry = 0f; rz = rzz
         ux = fy * rz - fz * ry; uy = fz * rx - fx * rz; uz = fx * ry - fy * rx
-        if (gameView && rootView.height > 0) {
-            // настоящая камера игры смотрит на весь экран, а вьюпорт — только его часть: берём центр и фокус всего экрана
-            val loc = IntArray(2); getLocationInWindow(loc)
-            focal = 0.866f * rootView.height
-            pcx = rootView.width / 2f - loc[0]; pcy = rootView.height / 2f - loc[1]
-        } else { focal = 0.866f * height; pcx = width / 2f; pcy = height / 2f }
+        focal = 0.866f * height; pcx = width / 2f; pcy = height / 2f
     }
 
-    // игровая камера: редактор отдаёт позу, мод ставит её настоящей камере игры, мир рисует сама игра
+    // слой мира (OpenGL) лежит под этим видом: сюда отдаём позу камеры на каждый кадр, фон не рисуем
     var gameView = false
-        set(v) { field = v; lastCamSent = 0L; invalidate() }
+        set(v) { field = v; invalidate() }
     var onCamera: ((FloatArray) -> Unit)? = null
     private var pcx = 0f
     private var pcy = 0f
-    private var lastCamSent = 0L
-    private var lastCamSig = ""
 
     private fun sendCam() {
-        val now = System.currentTimeMillis()
-        val sig = "%.3f %.3f %.3f %.4f %.4f %.4f".format(ex, ey, ez, fx, fy, fz)
-        if (sig == lastCamSig && now - lastCamSent < 500) { postInvalidateDelayed(520); return }
-        lastCamSig = sig; lastCamSent = now
         val sc = if (map.scale == 0.0) 1f else map.scale.toFloat()
-        val yaw = Math.toDegrees(Math.atan2(fx.toDouble(), fz.toDouble())).toFloat()
-        val pitch = -Math.toDegrees(Math.asin(fy.toDouble().coerceIn(-1.0, 1.0))).toFloat()
-        onCamera?.invoke(floatArrayOf(ex * sc + map.ox.toFloat(), ey * sc + map.oy.toFloat(), ez * sc + map.oz.toFloat(), yaw, pitch, 60f))
-        postInvalidateDelayed(520)  // сердцебиение: пока редактор открыт, мод держит камеру
+        onCamera?.invoke(floatArrayOf(ex, ey, ez, rx, ry, rz, ux, uy, uz, fx, fy, fz, focal, width.toFloat(), height.toFloat(),
+            map.ox.toFloat(), map.oy.toFloat(), map.oz.toFloat(), sc))
     }
 
     /** Мировая точка → экран. out: x, y, глубина. false, если точка за камерой. */
@@ -350,7 +337,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         if (animate) postInvalidateOnAnimation()
         updateBasis()
         if (gameView) {
-            sendCam()   // фон не рисуем: сквозь прозрачное окно виден настоящий мир игры
+            sendCam()   // фон не рисуем: под видом лежит слой мира (OpenGL)
+            drawGrid(c)
         } else {
             if (map.world) {
                 val sk = map.sky
@@ -380,19 +368,27 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     }
 
     private fun drawGrid(c: Canvas) {
-        val n = 30
+        // сетка растёт вместе с постройкой: границы по объектам карты, шаг подбирается так, чтобы линий было не больше ~80
+        var ext = 20f
+        for (o in map.objects) {
+            val r = maxOf(abs(o.x), abs(o.z)).toFloat() + maxOf(o.sx, o.sz).toFloat() / 2f
+            if (r > ext) ext = r
+        }
+        val step = when { ext <= 40f -> 1f; ext <= 120f -> 5f; ext <= 400f -> 10f; ext <= 1200f -> 50f; else -> 100f }
+        val n = (Math.ceil((ext * 1.15f / step).toDouble()).toInt() + 1)
+        val e = n * step
         line.strokeWidth = 1f
         for (i in -n..n) {
             val major = i % 5 == 0
             line.color = if (major) 0x55FFFFFF else 0x22FFFFFF
             if (i != 0) {
-                seg(c, i.toFloat(), 0f, -n.toFloat(), i.toFloat(), 0f, n.toFloat())
-                seg(c, -n.toFloat(), 0f, i.toFloat(), n.toFloat(), 0f, i.toFloat())
+                seg(c, i * step, 0f, -e, i * step, 0f, e)
+                seg(c, -e, 0f, i * step, e, 0f, i * step)
             }
         }
         line.strokeWidth = 1.6f * d
-        line.color = 0xCCEB4C5F.toInt(); seg(c, -n.toFloat(), 0f, 0f, n.toFloat(), 0f, 0f)
-        line.color = 0xCC4C86EB.toInt(); seg(c, 0f, 0f, -n.toFloat(), 0f, 0f, n.toFloat())
+        line.color = 0xCCEB4C5F.toInt(); seg(c, -e, 0f, 0f, e, 0f, 0f)
+        line.color = 0xCC4C86EB.toInt(); seg(c, 0f, 0f, -e, 0f, 0f, e)
         line.color = 0xCC7EC14A.toInt(); seg(c, 0f, 0f, 0f, 0f, 6f, 0f)
     }
 
@@ -545,7 +541,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             val to = if (me.subs.isEmpty()) ix.size else from + me.subs[sub * 2 + 1]
             // материал этого подмеша
             var cr = cr0; var cg = cg0; var cb = cb0; var ti = texIdx0
-            if (ins.mats.size >= sub * 4 + 4) { cr = ins.mats[sub * 4]; cg = ins.mats[sub * 4 + 1]; cb = ins.mats[sub * 4 + 2]; ti = ins.mats[sub * 4 + 3].toInt() }
+            if (ins.mats.size >= sub * 8 + 8) { cr = ins.mats[sub * 8]; cg = ins.mats[sub * 8 + 1]; cb = ins.mats[sub * 8 + 2]; ti = ins.mats[sub * 8 + 3].toInt() }
             if (cr + cg + cb < 0.3f) { cr = 0.6f; cg = 0.6f; cb = 0.6f }
             val alpha255 = ((1f - (ti / 1000) / 100f) * 255f).toInt().coerceIn(0, 255)
             ti %= 1000

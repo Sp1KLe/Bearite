@@ -34,6 +34,11 @@ class MapEditor(
 ) {
     private val dlg = Dialog(act, android.R.style.Theme_Material_NoActionBar_Fullscreen)
     private val vp = MapViewport(act, map)
+    private val gl = MapGL(act) { store.sceneTexFile(it) }
+    private val vpHost = android.widget.FrameLayout(act).apply {
+        addView(gl, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(vp, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
     private val tree = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
     private val inspector = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
     private val toolBtns = HashMap<MapViewport.Tool, TextView>()
@@ -76,8 +81,8 @@ class MapEditor(
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             decorView.systemUiVisibility = act.window.decorView.systemUiVisibility
         }
-        dlg.setOnDismissListener { sceneAskedAt = -1L; vp.onCamera = null; store.clearEdCam(); onClose() }
-        vp.onCamera = { store.writeEdCam(it) }
+        dlg.setOnDismissListener { sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
+        vp.onCamera = { gl.setCamera(it) }
         setGameView(true)
         loadScene(auto = true)
         refreshTree()
@@ -95,11 +100,11 @@ class MapEditor(
         if (wide) {
             val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
             body.addView(dock("Сцена", tree, true), LinearLayout.LayoutParams(dp(210), ViewGroup.LayoutParams.MATCH_PARENT))
-            body.addView(vp, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            body.addView(vpHost, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             body.addView(dock("Инспектор", inspector, false), LinearLayout.LayoutParams(dp(270), ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         } else {
-            root.addView(vp, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f))
+            root.addView(vpHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f))
             val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(GameUi.SURFACE) }
             val treeDock = dock("Сцена", tree, true)
             val insDock = dock("Инспектор", inspector, false)
@@ -183,10 +188,9 @@ class MapEditor(
             paintTools(); vp.invalidate()
         }
         tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
-        gameBtn = ui.pill("Игровой вид", sizeSp = 13f) { setGameView(!vp.gameView) }
+        gameBtn = ui.pill("Модели", sizeSp = 13f) { setGameView(!vp.gameView) }
         tools.addView(gameBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
-        realBtn = ui.pill("Реальный вид", sizeSp = 13f) { toggleRealView() }
-        tools.addView(realBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        realBtn = ui.pill("", sizeSp = 13f) {}  // устарело: рендер игры больше не используется
         tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         animBtn = ui.pill("▶ Анимация", sizeSp = 13f) { vp.animate = !vp.animate; paintTools() }
         tools.addView(animBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
@@ -201,19 +205,15 @@ class MapEditor(
 
     private var viewStamp = 0L
 
-    /** Игровой вид: окно прозрачное, мир рисует сама игра настоящей камерой, редактор рисует только рамки и манипуляторы. */
+    /** Вид мира: под прозрачным видом лежит слой OpenGL с настоящими моделями и текстурами игры. */
     private fun setGameView(on: Boolean) {
         if (on && vp.realView) toggleRealView()
         vp.gameView = on
-        rootLayout?.setBackgroundColor(if (on) android.graphics.Color.TRANSPARENT else GameUi.BG)
-        dlg.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(if (on) android.graphics.Color.TRANSPARENT else GameUi.BG))
-            if (on) clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        }
-        if (!on) store.clearEdCam()
+        gl.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) gl.onResume() else gl.onPause()
         if (::gameBtn.isInitialized) {
             gameBtn.alpha = if (on) 1f else 0.7f
-            gameBtn.text = if (on) "■ Игровой вид" else "Игровой вид"
+            gameBtn.text = if (on) "■ Модели" else "Модели"
         }
         vp.invalidate()
     }
@@ -440,7 +440,7 @@ class MapEditor(
                     vp.scene = sc; vp.invalidate()
                     Thread {
                         val me = store.readMeshes(); val ins = store.readInstances()
-                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; vp.invalidate() }
+                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; gl.setData(me, ins); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return
