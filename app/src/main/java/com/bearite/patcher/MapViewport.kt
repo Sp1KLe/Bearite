@@ -415,8 +415,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         // настоящие модели рисуем у самых близких объектов (бюджет треугольников), остальные — блоками
         val meshes = sceneMeshes; val insts = sceneInst
         val meshSet = HashSet<Int>()
-        if (!fast && meshes != null && insts != null && insts.isNotEmpty()) {
-            var budget = 9000
+        if (meshes != null && insts != null && insts.isNotEmpty()) {
+            var budget = if (fast) 4500 else 9000
             for (j in idx.sortedBy { dd[it] }) {
                 val ins = insts[j] ?: continue
                 val me = meshes.getOrNull(ins.mesh) ?: continue
@@ -429,14 +429,16 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         for (j in order) {
             if (j in meshSet) {
                 val ins = insts!![j]!!
-                drawMeshInst(c, meshes!![ins.mesh], ins, sc[j * 10 + 6], sc[j * 10 + 7], sc[j * 10 + 8], sc[j * 10 + 9].toInt(), ox, oy, oz, s)
+                drawMeshInst(c, meshes!![ins.mesh], ins, sc[j * 10 + 6], sc[j * 10 + 7], sc[j * 10 + 8], sc[j * 10 + 9].toInt(), ox, oy, oz, s, fast)
                 continue
             }
             val cx = (sc[j * 10] - ox) / s; val cy = (sc[j * 10 + 1] - oy) / s; val cz = (sc[j * 10 + 2] - oz) / s
             val hx = sc[j * 10 + 3] / s; val hy = sc[j * 10 + 4] / s; val hz = sc[j * 10 + 5] / s
             var cr = sc[j * 10 + 6]; var cg = sc[j * 10 + 7]; var cb = sc[j * 10 + 8]
             if (cr + cg + cb < 0.3f) { cr = 0.55f; cg = 0.55f; cb = 0.55f }
-            val avgTex0 = sceneTex(sc[j * 10 + 9].toInt())
+            val tv = sc[j * 10 + 9].toInt()
+            val alpha255 = ((1f - (tv / 1000) / 100f) * 255f).toInt().coerceIn(0, 255)
+            val avgTex0 = sceneTex(tv % 1000)
             val tex: Tex? = avgTex0.takeIf { false }
             val avgTex = avgTex0
             if (avgTex != null) { cr *= Color.red(avgTex.avg) / 255f; cg *= Color.green(avgTex.avg) / 255f; cb *= Color.blue(avgTex.avg) / 255f }
@@ -461,7 +463,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 if (maxX < 0 || minX > width || maxY < 0 || minY > height || (maxX - minX < 1.5f && maxY - minY < 1.5f)) continue
                 qpath.rewind()
                 qpath.moveTo(sp4[0][0], sp4[0][1]); qpath.lineTo(sp4[1][0], sp4[1][1]); qpath.lineTo(sp4[2][0], sp4[2][1]); qpath.lineTo(sp4[3][0], sp4[3][1]); qpath.close()
-                val mul = Color.rgb(min(255, (cr * k * 255).toInt()), min(255, (cg * k * 255).toInt()), min(255, (cb * k * 255).toInt()))
+                val mul = Color.argb(alpha255, min(255, (cr * k * 255).toInt()), min(255, (cg * k * 255).toInt()), min(255, (cb * k * 255).toInt()))
                 if (tex != null) {
                     val tu = max(1f, min(8f, Math.round(wa).toFloat())); val tv = max(1f, min(8f, Math.round(wb).toFloat()))
                     val bw = tex.bmp.width * tu; val bh = tex.bmp.height * tv
@@ -489,7 +491,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private val mdst = FloatArray(6)
 
     /** Настоящая модель объекта мира: треугольники с текстурой по UV, плоская подсветка, отсечение задних граней. */
-    private fun drawMeshInst(c: Canvas, me: MapStore.SceneMesh, ins: MapStore.SceneInst, cr0: Float, cg0: Float, cb0: Float, texIdx0: Int, ox: Float, oy: Float, oz: Float, s: Float) {
+    private fun drawMeshInst(c: Canvas, me: MapStore.SceneMesh, ins: MapStore.SceneInst, cr0: Float, cg0: Float, cb0: Float, texIdx0: Int, ox: Float, oy: Float, oz: Float, s: Float, fast: Boolean) {
         val m = ins.m
         val nv = me.v.size / 3
         if (nv < 3) return
@@ -515,7 +517,10 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
             var cr = cr0; var cg = cg0; var cb = cb0; var ti = texIdx0
             if (ins.mats.size >= sub * 4 + 4) { cr = ins.mats[sub * 4]; cg = ins.mats[sub * 4 + 1]; cb = ins.mats[sub * 4 + 2]; ti = ins.mats[sub * 4 + 3].toInt() }
             if (cr + cg + cb < 0.3f) { cr = 0.6f; cg = 0.6f; cb = 0.6f }
+            val alpha255 = ((1f - (ti / 1000) / 100f) * 255f).toInt().coerceIn(0, 255)
+            ti %= 1000
             val tex = sceneTex(ti, true)
+            val tc = if (fast && tex != null) triColors(ins.mesh, sub, ti, me, from, to, tex) else null
             var t = from
             while (t + 2 < to) {
                 val a = ix[t]; val b = if (flip) ix[t + 2] else ix[t + 1]; val cc = if (flip) ix[t + 1] else ix[t + 2]
@@ -535,8 +540,17 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 if (facing < 0f) continue
                 val k = 0.5f + 0.5f * max(0f, (nx * lx + ny * ly + nz * lz) / ll)
                 val qk = (Math.round(k * 8f) / 8f)
-                val mul = Color.rgb(min(255, (cr * qk * 255).toInt()), min(255, (cg * qk * 255).toInt()), min(255, (cb * qk * 255).toInt()))
                 mpath.rewind(); mpath.moveTo(ax, ay); mpath.lineTo(bx, by); mpath.lineTo(cx, cy); mpath.close()
+                if (tc != null) {
+                    // быстрый режим: цвет треугольника берём из текстуры один раз (кэш), без шейдера
+                    val tcol = tc[(t - 3 - from) / 3]
+                    val ta = Color.alpha(tcol)
+                    if (ta < 100) continue
+                    fill.color = Color.argb(alpha255 * ta / 255, min(255, (Color.red(tcol) * cr * qk).toInt()), min(255, (Color.green(tcol) * cg * qk).toInt()), min(255, (Color.blue(tcol) * cb * qk).toInt()))
+                    c.drawPath(mpath, fill)
+                    continue
+                }
+                val mul = Color.argb(alpha255, min(255, (cr * qk * 255).toInt()), min(255, (cg * qk * 255).toInt()), min(255, (cb * qk * 255).toInt()))
                 if (tex != null) {
                     val tw = tex.bmp.width.toFloat(); val th = tex.bmp.height.toFloat()
                     msrc[0] = me.uv[a * 2] * tw; msrc[1] = (1f - me.uv[a * 2 + 1]) * th
@@ -546,7 +560,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                     if (texMatrix.setPolyToPoly(msrc, 0, mdst, 0, 3)) {
                         tex.shader.setLocalMatrix(texMatrix)
                         texPaint.shader = tex.shader
-                        texPaint.colorFilter = sceneFilters.getOrPut(mul) { LightingColorFilter(mul, 0) }
+                        texPaint.colorFilter = sceneFilters.getOrPut(mul or 0xFF000000.toInt()) { LightingColorFilter(mul or 0xFF000000.toInt(), 0) }
+                        texPaint.alpha = alpha255
                         c.drawPath(mpath, texPaint)
                         continue
                     }
@@ -557,6 +572,28 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         }
         texPaint.shader = null
         texPaint.colorFilter = null
+        texPaint.alpha = 255
+    }
+
+    private val triColorCache = HashMap<Long, IntArray>()
+
+    /** Цвет каждого треугольника подмеша: текстура в центре его UV (один раз и в кэш). Нужен для быстрого рисования при движении камеры. */
+    private fun triColors(meshIdx: Int, sub: Int, ti: Int, me: MapStore.SceneMesh, from: Int, to: Int, tex: Tex): IntArray {
+        val key = meshIdx * 1_000_000L + sub * 10_000L + ti
+        triColorCache[key]?.let { return it }
+        val n = (to - from) / 3
+        val out = IntArray(max(n, 0))
+        val bw = tex.bmp.width; val bh = tex.bmp.height
+        for (q in 0 until n) {
+            val a = me.idx[from + q * 3]; val b = me.idx[from + q * 3 + 1]; val cc = me.idx[from + q * 3 + 2]
+            var u = (me.uv[a * 2] + me.uv[b * 2] + me.uv[cc * 2]) / 3f
+            var v = (me.uv[a * 2 + 1] + me.uv[b * 2 + 1] + me.uv[cc * 2 + 1]) / 3f
+            u -= Math.floor(u.toDouble()).toFloat(); v = 1f - (v - Math.floor(v.toDouble()).toFloat())
+            out[q] = tex.bmp.getPixel(min(bw - 1, (u * bw).toInt()), min(bh - 1, (v * bh).toInt()))
+        }
+        if (triColorCache.size > 400) triColorCache.clear()
+        triColorCache[key] = out
+        return out
     }
 
     // кэш мира: во время жестов рисуем упрощённо, когда камера замерла — полную модель один раз в картинку
