@@ -660,7 +660,6 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val ll = sqrt(lx * lx + ly * ly + lz * lz)
         val p = FloatArray(3)
         for ((oi, o) in map.objects.withIndex()) {
-            if (gameView && oi != selected) continue   // остальные объекты уже нарисовала сама игра
             val mesh = PrimMeshes.get(o.shape)
             // предпросмотр анимации: положение объекта в текущий момент
             val anim = animate && o.an.isNotEmpty()
@@ -729,7 +728,6 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                     triCol[i] = Color.rgb(min(255, (Color.red(o.color) * k).toInt()), min(255, (Color.green(o.color) * k).toInt()), min(255, (Color.blue(o.color) * k).toInt()))
                     triTex[i] = 1
                 }
-                if (gameView) { triCol[i] = (triCol[i] and 0x00FFFFFF) or 0x77000000; triTex[i] = 0 }
                 val depth = (vtmp[a * 6 + 5] + vtmp[bb * 6 + 5] + vtmp[cc * 6 + 5]) / 3f
                 // ключ: глубина (положительные float сортируются как целые): ближние первыми
                 order[i] = (java.lang.Float.floatToIntBits(depth).toLong() shl 32) or i.toLong()
