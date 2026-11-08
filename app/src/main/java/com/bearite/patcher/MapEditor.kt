@@ -66,6 +66,7 @@ class MapEditor(
     private fun dp(v: Int) = ui.dp(v)
 
     fun show() {
+        ui.flat = true   // кнопки и переключатели в стиле Material Design 3, пока открыт редактор
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         vp.gameCam = camInMap()
         vp.texAvg = { store.textureAverage(it) }
@@ -76,12 +77,12 @@ class MapEditor(
         vp.onCommit = { commit(); refreshTree() }
         dlg.setContentView(buildRoot())
         dlg.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(GameUi.BG))
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(M3.SURFACE))
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             decorView.systemUiVisibility = act.window.decorView.systemUiVisibility
         }
-        dlg.setOnDismissListener { sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
+        dlg.setOnDismissListener { ui.flat = false; sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
         vp.onCamera = { gl.setCamera(it) }
         setGameView(true)
         loadScene(auto = true)
@@ -93,9 +94,9 @@ class MapEditor(
     // ------------------------------------------------------------------ каркас
 
     private fun buildRoot(): View {
-        val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(GameUi.BG) }
+        val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(M3.SURFACE) }
         rootLayout = root
-        root.addView(toolbar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        root.addView(toolbar(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         val wide = act.resources.displayMetrics.widthPixels > act.resources.displayMetrics.heightPixels
         if (wide) {
             val body = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
@@ -105,7 +106,7 @@ class MapEditor(
             root.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         } else {
             root.addView(vpHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.1f))
-            val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(GameUi.SURFACE) }
+            val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(M3.CONTAINER) }
             val treeDock = dock("Сцена", tree, true)
             val insDock = dock("Инспектор", inspector, false)
             insDock.visibility = View.GONE
@@ -114,10 +115,10 @@ class MapEditor(
             fun pick(first: Boolean) {
                 treeDock.visibility = if (first) View.VISIBLE else View.GONE
                 insDock.visibility = if (first) View.GONE else View.VISIBLE
-                t1.background = if (first) ui.round(GameUi.CREAM, 20) else ui.round(GameUi.SURFACE3, 20, GameUi.LINE_TAN)
-                t2.background = if (!first) ui.round(GameUi.CREAM, 20) else ui.round(GameUi.SURFACE3, 20, GameUi.LINE_TAN)
-                t1.setTextColor(if (first) GameUi.ON_CREAM else GameUi.CREAM)
-                t2.setTextColor(if (!first) GameUi.ON_CREAM else GameUi.CREAM)
+                t1.background = if (first) ui.round(M3.PRIMARY, 20) else ui.round(M3.HIGH, 20, M3.OUTLINE_V)
+                t2.background = if (!first) ui.round(M3.PRIMARY, 20) else ui.round(M3.HIGH, 20, M3.OUTLINE_V)
+                t1.setTextColor(if (first) M3.ON_PRIMARY else M3.ON_SURF)
+                t2.setTextColor(if (!first) M3.ON_PRIMARY else M3.ON_SURF)
             }
             t1.setOnClickListener { pick(true) }
             t2.setOnClickListener { pick(false) }
@@ -132,16 +133,16 @@ class MapEditor(
     }
 
     private fun dock(title: String, content: LinearLayout, left: Boolean): LinearLayout {
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(GameUi.SURFACE) }
+        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(M3.CONTAINER) }
         if (title == "Сцена") {
             val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(4), dp(6), dp(4)) }
-            head.addView(ui.label(title, 14f, GameUi.MUTED), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            head.addView(ui.label(title, 14f, M3.VARIANT), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             head.addView(mini("＋") { addMenu() })
             head.addView(mini("⧉") { duplicateSelected() })
             head.addView(mini("🗑") { deleteSelected() })
             box.addView(head)
         } else {
-            box.addView(ui.label(title, 14f, GameUi.MUTED).apply { setPadding(dp(10), dp(10), dp(10), dp(4)) })
+            box.addView(ui.label(title, 14f, M3.VARIANT).apply { setPadding(dp(10), dp(10), dp(10), dp(4)) })
         }
         val sv = ScrollView(act).apply { isFillViewport = false; addView(content) }
         box.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -151,20 +152,20 @@ class MapEditor(
 
     private fun mini(t: String, onClick: () -> Unit) = ui.label(t, 17f).apply {
         gravity = Gravity.CENTER
-        background = ui.round(GameUi.SURFACE3, 10, GameUi.LINE)
+        background = ui.round(M3.TONAL, 20)
         setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(dp(38), dp(34)).apply { leftMargin = dp(4) }
+        layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(4) }
     }
 
     private fun toolbar(): View {
         val bar = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(GameUi.SURFACE)
+            setBackgroundColor(M3.CONTAINER)
             setPadding(dp(8), 0, dp(8), 0)
         }
         bar.addView(ui.pill("‹ Готово", primary = true, sizeSp = 13f) { dlg.dismiss() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
-        titleView = ui.label(map.name, 14f, GameUi.MUTED).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(10), 0, dp(10), 0) }
+        titleView = ui.label(map.name, 14f, M3.VARIANT).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(10), 0, dp(10), 0) }
         val tools = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         tools.addView(titleView, LinearLayout.LayoutParams(dp(110), ViewGroup.LayoutParams.WRAP_CONTENT))
         tools.addView(ui.pill("＋ Фигуры", primary = true, sizeSp = 13f) { addMenu() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { rightMargin = dp(8) })
@@ -248,8 +249,8 @@ class MapEditor(
     private fun paintTools() {
         for ((t, b) in toolBtns) {
             val on = vp.tool == t
-            b.background = if (on) ui.round(GameUi.CREAM, 20) else ui.round(GameUi.SURFACE3, 20, GameUi.LINE_TAN)
-            b.setTextColor(if (on) GameUi.ON_CREAM else GameUi.CREAM)
+            b.background = if (on) ui.round(M3.PRIMARY, 20) else ui.round(M3.HIGH, 20, M3.OUTLINE_V)
+            b.setTextColor(if (on) M3.ON_PRIMARY else M3.ON_SURF)
         }
         snapBtn.text = if (vp.snap) "Сетка: вкл" else "Сетка: выкл"
         animBtn.text = if (vp.animate) "■ Анимация" else "▶ Анимация"
@@ -315,7 +316,7 @@ class MapEditor(
         map.objects.forEachIndexed { i, o ->
             tree.addView(treeRow(glyph(o.shape), o.name.ifBlank { "объект" }, vp.selected == i, 0xFF000000.toInt() or o.color) { select(i) })
         }
-        if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, GameUi.DIM, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
+        if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, M3.VARIANT, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
     }
 
     private fun glyph(shape: String) = when (shape) { "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; else -> "■" }
@@ -324,12 +325,12 @@ class MapEditor(
         val r = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = ui.round(if (on) 0x44D6B18D else 0x00000000, 10, if (on) GameUi.LINE_TAN else 0)
+            background = ui.round(if (on) 0x33B9C3FF else 0x00000000, 10, if (on) M3.OUTLINE_V else 0)
             setPadding(dp(8), dp(4), dp(8), dp(4))
             setOnClickListener { click() }
         }
         r.addView(ui.label(g, 15f, color), LinearLayout.LayoutParams(dp(22), ViewGroup.LayoutParams.WRAP_CONTENT))
-        r.addView(ui.label(name, 14f, if (on) GameUi.CREAM else GameUi.MUTED, bold = on).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        r.addView(ui.label(name, 14f, if (on) M3.ON_SURF else M3.VARIANT, bold = on).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         r.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(2) }
         return r
     }
@@ -338,26 +339,26 @@ class MapEditor(
     private fun addMenu() {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var dlg: android.app.Dialog? = null
-        col.addView(ui.label("Фигуры", 13f, GameUi.DIM))
+        col.addView(ui.label("Фигуры", 13f, M3.VARIANT))
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         for (sh in MapStore.SHAPES) {
             val tile = LinearLayout(act).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                background = ui.round(GameUi.SURFACE3, 16, GameUi.LINE_TAN)
+                background = ui.round(M3.HIGH, 16, M3.OUTLINE_V)
                 setOnClickListener { dlg?.dismiss(); addObject(sh) }
             }
-            tile.addView(ui.label(glyph(sh), 26f, GameUi.TAN).apply { gravity = Gravity.CENTER })
-            tile.addView(ui.label(MapStore.SHAPE_NAMES[sh] ?: sh, 11f, GameUi.CREAM).apply { gravity = Gravity.CENTER; maxLines = 1 })
+            tile.addView(ui.label(glyph(sh), 26f, M3.PRIMARY).apply { gravity = Gravity.CENTER })
+            tile.addView(ui.label(MapStore.SHAPE_NAMES[sh] ?: sh, 11f, M3.ON_SURF).apply { gravity = Gravity.CENTER; maxLines = 1 })
             row.addView(tile, LinearLayout.LayoutParams(0, dp(78), 1f).apply { rightMargin = dp(6) })
         }
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        col.addView(ui.label("Шаблоны", 13f, GameUi.DIM).apply { setPadding(0, dp(16), 0, 0) })
+        col.addView(ui.label("Шаблоны", 13f, M3.VARIANT).apply { setPadding(0, dp(16), 0, 0) })
         val hints = listOf("один большой пол", "8 ступеней вверх", "пол и четыре стены")
         MapStore.TEMPLATES.forEachIndexed { i, name ->
             val item = LinearLayout(act).apply {
                 orientation = LinearLayout.VERTICAL
-                background = ui.round(GameUi.SURFACE3, 14, GameUi.LINE_TAN)
+                background = ui.round(M3.HIGH, 14, M3.OUTLINE_V)
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 setOnClickListener {
                     dlg?.dismiss()
@@ -366,7 +367,7 @@ class MapEditor(
                 }
             }
             item.addView(ui.label(name, 15f))
-            item.addView(ui.label(hints.getOrElse(i) { "" } + " · ${MapStore.template(i).size} объектов", 12f, GameUi.MUTED, bold = false))
+            item.addView(ui.label(hints.getOrElse(i) { "" } + " · ${MapStore.template(i).size} объектов", 12f, M3.VARIANT, bold = false))
             col.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         }
         dlg = ui.dialog("Фигуры и шаблоны", col, listOf(GameUi.Btn("Закрыть")), widthDp = 460)
@@ -470,7 +471,7 @@ class MapEditor(
     }
 
     private fun section(t: String) = inspector.addView(
-        ui.label(t, 12f, GameUi.DIM).apply { setPadding(dp(4), dp(12), 0, dp(2)) }
+        ui.label(t, 12f, M3.VARIANT).apply { setPadding(dp(4), dp(12), 0, dp(2)) }
     )
 
     /** Три числа X Y Z с цветными подписями осей, как в Godot. */
@@ -490,11 +491,11 @@ class MapEditor(
     private fun numField(cur: Double, key: String, onValue: (Double) -> Unit): EditText {
         val e = EditText(act).apply {
             setText(ui.fmt(cur, 2))
-            setTextColor(GameUi.CREAM)
+            setTextColor(M3.ON_SURF)
             textSize = 12.5f
             typeface = Typeface.DEFAULT_BOLD
             isSingleLine = true
-            background = ui.round(GameUi.BG_DEEP, 10)
+            background = ui.round(M3.CONTAINER, 10)
             setPadding(dp(6), 0, dp(4), 0)
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
@@ -529,7 +530,7 @@ class MapEditor(
         shapeRow.addView(shape, LinearLayout.LayoutParams(0, dp(36), 1f).apply { topMargin = dp(6) })
         shapeRow.addView(ui.togglePill(o.solid, 96, 6) { o.solid = it; commit() }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(6) })
         inspector.addView(shapeRow)
-        inspector.addView(ui.label("Справа: твёрдый — по объекту можно ходить", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(2), 0, 0) })
+        inspector.addView(ui.label("Справа: твёрдый — по объекту можно ходить", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(2), 0, 0) })
 
         vec3("Позиция", arrayOf({ o.x }, { o.y }, { o.z }), arrayOf({ v -> o.x = v }, { v -> o.y = v }, { v -> o.z = v }), "pos")
         vec3("Поворот (градусы)", arrayOf({ o.rx }, { o.ry }, { o.rz }), arrayOf({ v -> o.rx = v }, { v -> o.ry = v }, { v -> o.rz = v }), "rot")
@@ -541,7 +542,7 @@ class MapEditor(
         val hex = ui.textInput(String.format(Locale.US, "%06X", o.color), 0, "RRGGBB") {}
         fun paint() = chips.forEachIndexed { k, v ->
             v.background = ui.round(0xFF000000.toInt() or MapStore.PALETTE[k], 8,
-                if (MapStore.PALETTE[k] == o.color) GameUi.CREAM else GameUi.LINE, if (MapStore.PALETTE[k] == o.color) 3 else 1)
+                if (MapStore.PALETTE[k] == o.color) M3.ON_SURF else M3.OUTLINE_V, if (MapStore.PALETTE[k] == o.color) 3 else 1)
         }
         val grid = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var rowL: LinearLayout? = null
@@ -587,7 +588,7 @@ class MapEditor(
 
     private fun nativeSection(o: MapObj) {
         section("Круг как в Черепахограде")
-        inspector.addView(ui.label("Круг может выглядеть и работать как платформа запуска уровня из игры. Выбери, как использовать родную платформу.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(2), 0, dp(4)) })
+        inspector.addView(ui.label("Круг может выглядеть и работать как платформа запуска уровня из игры. Выбери, как использовать родную платформу.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(2), 0, dp(4)) })
         inspector.addView(ui.pill(
             when { o.bind.isEmpty() -> "Свой простой круг"; o.clone -> "Копия платформы (на месте круга)"; else -> "Занять родную платформу" }, sizeSp = 13f
         ) {
@@ -605,8 +606,8 @@ class MapEditor(
             inspector.addView(ui.label(
                 if (o.clone) "Копия появится на месте этого круга в любой сцене, где есть оригинал (хаб). Оригинал продолжает запускать уровень. У копии выключены скрипты, она только телепортирует. Размер: 3 м = размер оригинала."
                 else "Оригинальная платформа перестанет запускать уровень и будет телепортировать по настройкам ниже. Позиция круга не используется: берётся место платформы.",
-                11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
-            inspector.addView(ui.label("Имя объекта в игре", 12f, GameUi.MUTED).apply { setPadding(dp(4), dp(8), 0, dp(2)) })
+                11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+            inspector.addView(ui.label("Имя объекта в игре", 12f, M3.VARIANT).apply { setPadding(dp(4), dp(8), 0, dp(2)) })
             inspector.addView(ui.textInput(o.bind, 260, "имя объекта в игре") { v -> if (v.trim() != o.bind && v.isNotBlank()) { o.bind = v.trim(); commit("bind") } }
                 .apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)) })
         }
@@ -628,7 +629,7 @@ class MapEditor(
             "@exit" -> "Выход из отдельного мира: игрок возвращается туда, где вошёл в мир."
             else -> "Игрок переносится на точку появления выбранной карты. Если карта это отдельный мир, мир включается сам."
         }
-        inspector.addView(ui.label(hint, 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        inspector.addView(ui.label(hint, 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
         if (o.dest.isEmpty()) {
             vec3("Точка назначения", arrayOf({ o.dx }, { o.dy }, { o.dz }), arrayOf({ v -> o.dx = v }, { v -> o.dy = v }, { v -> o.dz = v }), "dest")
             inspector.addView(ui.pill("Точка в центр обзора", sizeSp = 12f) {
@@ -644,13 +645,13 @@ class MapEditor(
     private fun thumb(id: String?, selected: Boolean, onClick: () -> Unit, onLong: (() -> Unit)? = null): View {
         val size = dp(58)
         val box = FrameLayout(act).apply {
-            background = ui.round(GameUi.SURFACE3, 12, if (selected) GameUi.CREAM else GameUi.LINE_TAN, if (selected) 3 else 1)
+            background = ui.round(M3.HIGH, 12, if (selected) M3.ON_SURF else M3.OUTLINE_V, if (selected) 3 else 1)
             setPadding(dp(3), dp(3), dp(3), dp(3))
             setOnClickListener { onClick() }
             if (onLong != null) setOnLongClickListener { onLong(); true }
         }
         if (id == null) {
-            box.addView(ui.label("✕", 20f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -1))
+            box.addView(ui.label("✕", 20f, M3.VARIANT).apply { gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -1))
         } else {
             val iv = android.widget.ImageView(act).apply { scaleType = android.widget.ImageView.ScaleType.CENTER_CROP }
             try {
@@ -683,23 +684,23 @@ class MapEditor(
                 }
             }))
         }
-        row.addView(ui.label("＋", 24f, GameUi.CREAM).apply {
+        row.addView(ui.label("＋", 24f, M3.ON_SURF).apply {
             gravity = Gravity.CENTER
-            background = ui.round(GameUi.SURFACE3, 12, GameUi.LINE_TAN)
+            background = ui.round(M3.HIGH, 12, M3.OUTLINE_V)
             layoutParams = LinearLayout.LayoutParams(dp(58), dp(58))
             setOnClickListener { importTexture(o) }
         })
         inspector.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(row) })
-        inspector.addView(ui.label("＋ добавляет картинку из галереи, долгое нажатие на текстуру удаляет её. Цвет объекта работает как оттенок.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        inspector.addView(ui.label("＋ добавляет картинку из галереи, долгое нажатие на текстуру удаляет её. Цвет объекта работает как оттенок.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
         if (o.tex.isNotEmpty()) {
             section("Повтор текстуры")
             val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val fu = numField(o.tu, "tu") { v -> o.tu = v.coerceIn(0.01, 1000.0) }
             val fv = numField(o.tv, "tv") { v -> o.tv = v.coerceIn(0.01, 1000.0) }
             liveFields.add(fu to { o.tu }); liveFields.add(fv to { o.tv })
-            r2.addView(ui.label("X", 12f, GameUi.MUTED), LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(ui.label("X", 12f, M3.VARIANT), LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT))
             r2.addView(fu, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
-            r2.addView(ui.label("Y", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(20), ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(ui.label("Y", 12f, M3.VARIANT).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(20), ViewGroup.LayoutParams.WRAP_CONTENT))
             r2.addView(fv, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
             inspector.addView(r2)
             inspector.addView(ui.pill("По размеру объекта", sizeSp = 12f) {
@@ -725,10 +726,10 @@ class MapEditor(
         }
         inspector.addView(kind, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)).apply { topMargin = dp(4) })
         if (o.an.isEmpty()) {
-            inspector.addView(ui.label("Выбери вид анимации, потом жми «▶ Анимация» сверху, чтобы посмотреть.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+            inspector.addView(ui.label("Выбери вид анимации, потом жми «▶ Анимация» сверху, чтобы посмотреть.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
             return
         }
-        inspector.addView(ui.label(MapAnim.HINTS[o.an] ?: "", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        inspector.addView(ui.label(MapAnim.HINTS[o.an] ?: "", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
         if (o.an == "keys") { keysSection(o); return }
         vec3("Параметры", arrayOf({ o.ax }, { o.ay }, { o.az }), arrayOf({ v -> o.ax = v }, { v -> o.ay = v }, { v -> o.az = v }), "anim")
         val r2 = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -736,10 +737,10 @@ class MapEditor(
         val fd = numField(o.ad, "ad") { v -> o.ad = v }
         liveFields.add(fp to { o.ap }); liveFields.add(fd to { o.ad })
         if (o.an != "rotate") {
-            r2.addView(ui.label("Период, с", 12f, GameUi.MUTED), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            r2.addView(ui.label("Период, с", 12f, M3.VARIANT), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             r2.addView(fp, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
         }
-        r2.addView(ui.label("Задержка, с", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+        r2.addView(ui.label("Задержка, с", 12f, M3.VARIANT).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
         r2.addView(fd, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
         inspector.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
     }
@@ -761,7 +762,7 @@ class MapEditor(
         kfHead = kfHead.coerceIn(0.0, dur)
         if (kfSel !in keys.indices) kfSel = -1
         fun save() { o.kf = MapAnim.fmtKeys(keys); commit("kf") }
-        val info = ui.label("", 12f, GameUi.MUTED, bold = false).apply { setPadding(dp(4), dp(6), 0, 0) }
+        val info = ui.label("", 12f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(6), 0, 0) }
         fun paintInfo() {
             info.text = "Время: " + ui.fmt(kfHead, 2) + " с · ключей: " + keys.size + if (kfSel >= 0) " · выбран ключ " + (kfSel + 1) + " (" + MapAnim.EASES[keys[kfSel].ease] + ")" else ""
         }
@@ -813,12 +814,12 @@ class MapEditor(
         val fp = numField(o.ap, "ap") { v -> o.ap = v.coerceIn(0.2, 3600.0); tl.duration = o.ap; tl.invalidate() }
         val fd = numField(o.ad, "ad") { v -> o.ad = v }
         liveFields.add(fp to { o.ap }); liveFields.add(fd to { o.ad })
-        r2.addView(ui.label("Длина, с", 12f, GameUi.MUTED), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        r2.addView(ui.label("Длина, с", 12f, M3.VARIANT), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         r2.addView(fp, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
-        r2.addView(ui.label("Задержка, с", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
+        r2.addView(ui.label("Задержка, с", 12f, M3.VARIANT).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(8) })
         r2.addView(fd, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(6) })
         inspector.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        inspector.addView(ui.label("Как делать: поставь объект в начальную позу (поля позиции, поворота, размера выше), время 0 на шкале, «+ Ключ». Потом тапни шкалу на другом времени, измени позу объекта, снова «+ Ключ». Ромбик можно перетаскивать. ▶ Анимация сверху покажет результат.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(8), 0, 0) })
+        inspector.addView(ui.label("Как делать: поставь объект в начальную позу (поля позиции, поворота, размера выше), время 0 на шкале, «+ Ключ». Потом тапни шкалу на другом времени, измени позу объекта, снова «+ Ключ». Ромбик можно перетаскивать. ▶ Анимация сверху покажет результат.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(8), 0, 0) })
     }
 
     /** Экспорт карты в .glb (glTF 2.0) с цветами, текстурами и анимациями; файл кладётся в «Загрузки». */
@@ -866,12 +867,12 @@ class MapEditor(
         if (!map.world) {
             val shareToggle = ui.togglePill(map.shared, 84) { on -> map.shared = on; commit("shared") }
             inspector.addView(ui.row("Делиться с игроками", shareToggle), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-            inspector.addView(ui.label("В мультиплеере игроки комнаты увидят эти объекты (без текстур) и смогут стоять на них и взаимодействовать. Телепорты на другие карты и привязки к объектам игры у них отключаются.", 11f, GameUi.DIM, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+            inspector.addView(ui.label("В мультиплеере игроки комнаты увидят эти объекты (без текстур) и смогут стоять на них и взаимодействовать. Телепорты на другие карты и привязки к объектам игры у них отключаются.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
         }
         inspector.addView(ui.label(
             if (map.world) "Остальной мир скрывается, игрок переносится на точку появления, небо заливается цветом ниже. Выключи карту, и всё вернётся."
             else "Выключено: объекты просто добавляются в обычную сцену игры.",
-            11f, GameUi.DIM, bold = false
+            11f, M3.VARIANT, bold = false
         ).apply { setPadding(dp(4), dp(4), 0, 0) })
         if (map.world) {
             vec3("Точка появления игрока", arrayOf({ map.spx }, { map.spy }, { map.spz }),
@@ -886,7 +887,7 @@ class MapEditor(
             val skies = intArrayOf(0x87B8E8, 0xF2DFC5, 0xE8A07A, 0x2B2A4C, 0x1B1410, 0x5E8C61)
             for (c in skies) {
                 val v = View(act).apply {
-                    background = ui.round(0xFF000000.toInt() or c, 8, if (c == map.sky) GameUi.CREAM else GameUi.LINE, if (c == map.sky) 3 else 1)
+                    background = ui.round(0xFF000000.toInt() or c, 8, if (c == map.sky) M3.ON_SURF else M3.OUTLINE_V, if (c == map.sky) 3 else 1)
                     setOnClickListener { map.sky = c; commit(); showInspector(); vp.invalidate() }
                 }
                 skyRow.addView(v, LinearLayout.LayoutParams(0, dp(34), 1f).apply { rightMargin = dp(4) })
@@ -908,14 +909,14 @@ class MapEditor(
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val sc = numField(map.scale, "scale") { map.scale = it.coerceIn(0.01, 100.0) }
         val ly = numField(map.layer.toDouble(), "layer") { map.layer = it.toInt().coerceIn(0, 31) }
-        row.addView(ui.label("×", 12f, GameUi.MUTED), LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT))
+        row.addView(ui.label("×", 12f, M3.VARIANT), LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT))
         row.addView(sc, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
-        row.addView(ui.label("слой", 12f, GameUi.MUTED).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT))
+        row.addView(ui.label("слой", 12f, M3.VARIANT).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT))
         row.addView(ly, LinearLayout.LayoutParams(0, dp(36), 1f).apply { leftMargin = dp(2) })
         inspector.addView(row)
         inspector.addView(ui.label(
             "Как работать: выбери «Двигать», тапни по объекту и тяни цветную стрелку. Один палец по пустому месту вращает обзор, два пальца приближают и сдвигают. «＋» в списке слева добавляет объекты, ↶ отменяет.",
-            12f, GameUi.DIM, bold = false
+            12f, M3.VARIANT, bold = false
         ).apply { setPadding(dp(4), dp(14), dp(4), 0) })
     }
 }

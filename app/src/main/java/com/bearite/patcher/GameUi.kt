@@ -109,9 +109,9 @@ class GameUi(val act: Activity) {
     }
 
     /** Кнопка-пилюля. primary = жёлтая (главное действие), danger = красная, иначе синяя. */
-    fun flatBg(color: Int, pressed: Int, radiusDp: Int = 5): Drawable = android.graphics.drawable.StateListDrawable().apply {
-        addState(intArrayOf(android.R.attr.state_pressed), round(pressed, radiusDp, 0xFF1A1A1A.toInt()))
-        addState(intArrayOf(), round(color, radiusDp, 0xFF1A1A1A.toInt()))
+    fun flatBg(color: Int, pressed: Int, radiusDp: Int = 20): Drawable = android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), round(pressed, radiusDp))
+        addState(intArrayOf(), round(color, radiusDp))
     }
 
     fun pill(
@@ -121,15 +121,15 @@ class GameUi(val act: Activity) {
         if (flat) TextView(act).apply {
             this.text = text
             textSize = (sizeSp - 1f).coerceAtLeast(11f) * UiScale.factor(act)
-            setTextColor(0xFFEDEDED.toInt())
-            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if (primary) M3.ON_PRIMARY else if (danger) M3.ON_ERROR_C else M3.ON_TONAL)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
-            setPadding(dp(10), 0, dp(10), 0)
-            minHeight = dp(32)
+            setPadding(dp(16), 0, dp(16), 0)
+            minHeight = dp(40)
             background = when {
-                primary -> flatBg(0xFF4772B3.toInt(), 0xFF5A86CC.toInt())
-                danger -> flatBg(0xFF9C3A3A.toInt(), 0xFFB84A4A.toInt())
-                else -> flatBg(0xFF545454.toInt(), 0xFF6A6A6A.toInt())
+                primary -> flatBg(M3.PRIMARY, 0xFFD3D9FF.toInt())
+                danger -> flatBg(M3.ERROR_C, 0xFFB3261E.toInt())
+                else -> flatBg(M3.TONAL, 0xFF4F556E.toInt())
             }
             setOnClickListener { onClick() }
         } else outlined(text, sizeSp).apply {
@@ -151,8 +151,8 @@ class GameUi(val act: Activity) {
         val t = label("", 15f).apply { gravity = Gravity.CENTER }
         fun paint() {
             t.text = if (state) "Вкл" else "Выкл"
-            t.setTextColor(0xFFFFFFFF.toInt())
-            t.background = if (flat) flatBg(if (state) 0xFF4772B3.toInt() else 0xFF545454.toInt(), if (state) 0xFF5A86CC.toInt() else 0xFF6A6A6A.toInt()) else chunky(if (state) GREEN else SURFACE3, 16, 2)
+            t.setTextColor(if (flat) (if (state) M3.ON_PRIMARY else M3.VARIANT) else 0xFFFFFFFF.toInt())
+            t.background = if (flat) flatBg(if (state) M3.PRIMARY else M3.HIGH, if (state) 0xFFD3D9FF.toInt() else 0xFF33343B.toInt()) else chunky(if (state) GREEN else SURFACE3, 16, 2)
         }
         paint()
         t.setOnClickListener {
