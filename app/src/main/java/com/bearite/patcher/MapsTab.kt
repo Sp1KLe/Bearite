@@ -125,7 +125,7 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
         fun add(v: View) = d.addView(v, rowLp())
         fun save() = store.save(m)
 
-        add(ui.pill("Открыть редактор карты", primary = true) { { hideMenu?.invoke(true); MapEditor(act, ui, store, m) { hideMenu?.invoke(false); rebuild?.invoke() }.show() })
+        add(ui.pill("Открыть редактор карты", primary = true) { hideMenu?.invoke(true); MapEditor(act, ui, store, m) { hideMenu?.invoke(false); rebuild?.invoke() }.show() })
         add(ui.row("Название", ui.textInput(m.name, 230) { m.name = it.ifBlank { m.id }; save() }))
 
         // сцена: карта появляется только в выбранной сцене (по умолчанию в любой)
