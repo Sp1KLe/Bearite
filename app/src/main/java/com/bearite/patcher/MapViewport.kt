@@ -303,7 +303,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val k = 640f / max(width, height)
         val yaw = Math.toDegrees(Math.atan2(fx.toDouble(), fz.toDouble())).toFloat()
         val pitch = Math.toDegrees(Math.asin(fy.toDouble().coerceIn(-1.0, 1.0))).toFloat() * -1f
-        onViewNeeded?.invoke(floatArrayOf(ex * s + map.ox.toFloat(), ey * s + map.oy.toFloat(), ez * s + map.oz.toFloat(), pitch, yaw, 60f, (width * k).toInt(), (height * k).toInt()))
+        onViewNeeded?.invoke(floatArrayOf(ex * s + map.ox.toFloat(), ey * s + map.oy.toFloat(), ez * s + map.oz.toFloat(), pitch, yaw, 60f, (width * k).toInt().toFloat(), (height * k).toInt().toFloat()))
     }
 
     private val m9 = FloatArray(9)
