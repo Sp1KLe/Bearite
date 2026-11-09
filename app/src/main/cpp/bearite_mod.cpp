@@ -2453,7 +2453,7 @@ void dump_scene() {
                     if (M.batchStart) if (void* sv = inv(M.batchStart, o)) bFirst = *(const int*)obj_unbox(sv);
                     for (int q = 0; q < 16; ++q) m[q] = (q % 5 == 0) ? 1.f : 0.f;
                 }
-                char il[1600];
+                char il[9000];
                 int k = snprintf(il, sizeof il, "%d %d", n, mi);
                 for (int q = 0; q < 16 && k < (int)sizeof il - 20; ++q) k += snprintf(il + k, sizeof il - k, " %.5g", m[q]);
                 // материалы подмешей: r g b номер_текстуры

@@ -419,6 +419,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTe
         val from = if (mesh.subs.isEmpty()) 0 else mesh.subs[sub * 2]
         val cnt = if (mesh.subs.isEmpty()) mesh.idx.size else mesh.subs[sub * 2 + 1]
         if (cnt <= 0 || from + cnt > mesh.idx.size) return
+        if (it.ins.mats.isNotEmpty() && it.ins.mats.size < sub * 8 + 8) return   // для этого подмеша материал не пришёл: не рисуем бежевую заглушку
         var r = 0.72f; var g = 0.7f; var b = 0.66f; var ti = 0
         var st0 = 1f; var st1 = 1f; var st2 = 0f; var st3 = 0f
         if (it.ins.mats.size >= sub * 8 + 8) {
