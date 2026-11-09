@@ -88,12 +88,15 @@ object MeshDb {
         else -> 0f
     }
 
+    var lastFail = ""
+    private fun fail(tag: String, b: ByteBuffer): Parsed? { lastFail = tag + " поз=" + b.position() + " из " + b.limit(); return null }
+
     private fun parseMesh(raw: ByteArray, nameOnly: Boolean = false): Parsed? {
         val b = le(raw)
         val name = alignedName(b)
         if (nameOnly) return Parsed(name, -1, MapStore.SceneMesh(FloatArray(0), FloatArray(0), IntArray(0)))
         val nsm = b.getInt()
-        if (nsm < 0 || nsm > 64) return null
+        if (nsm < 0 || nsm > 64) return fail("#1", b)
         val sFirst = IntArray(nsm); val sCount = IntArray(nsm); val sTop = IntArray(nsm); val sBase = IntArray(nsm)
         for (i in 0 until nsm) {
             sFirst[i] = b.getInt(); sCount[i] = b.getInt(); sTop[i] = b.getInt(); sBase[i] = b.getInt()
@@ -115,21 +118,21 @@ object MeshDb {
         val compression = b.get().toInt()
         b.get(); b.get(); b.get()
         while (b.position() % 4 != 0) b.get()
-        if (compression != 0) return null
+        if (compression != 0) return fail("#2", b)
         val indexFormat = b.getInt()
         val ibLen = b.getInt()
-        if (ibLen < 0 || ibLen > b.remaining()) return null
+        if (ibLen < 0 || ibLen > b.remaining()) return fail("#3", b)
         val ibPos = b.position(); b.position(ibPos + ibLen)
         while (b.position() % 4 != 0) b.get()
         val vcount = b.getInt()
         val nch = b.getInt()
-        if (nch < 0 || nch > 32) return null
+        if (nch < 0 || nch > 32) return fail("#4", b)
         val chStream = IntArray(nch); val chOff = IntArray(nch); val chFmt = IntArray(nch); val chDim = IntArray(nch)
         for (i in 0 until nch) { chStream[i] = b.get().toInt() and 255; chOff[i] = b.get().toInt() and 255; chFmt[i] = b.get().toInt() and 255; chDim[i] = b.get().toInt() and 15 }
         val dLen = b.getInt()
-        if (dLen < 0 || dLen > b.remaining()) return null
+        if (dLen < 0 || dLen > b.remaining()) return fail("#5", b)
         val dPos = b.position()
-        if (vcount < 3 || vcount > 65000) return null
+        if (vcount < 3 || vcount > 65000) return fail("#6", b)
         // шаг и начало каждого потока
         val streams = (chStream.maxOrNull() ?: 0) + 1
         val stride = IntArray(streams)
@@ -137,14 +140,14 @@ object MeshDb {
         val sStart = LongArray(streams)
         var cur = 0L
         for (s in 0 until streams) { sStart[s] = cur; cur += stride[s].toLong() * vcount; cur = (cur + 15) and 15L.inv() }
-        if (nch < 1 || chDim[0] < 3 || stride[chStream[0]] == 0) return null
+        if (nch < 1 || chDim[0] < 3 || stride[chStream[0]] == 0) return fail("#7", b)
         val data = ByteBuffer.wrap(raw, dPos, dLen).slice().order(ByteOrder.LITTLE_ENDIAN)
         val v = FloatArray(vcount * 3)
         val uv = FloatArray(vcount * 2)
         val ps = chStream[0]; val pst = stride[ps]
         for (i in 0 until vcount) {
             val p = (sStart[ps] + i.toLong() * pst + chOff[0]).toInt()
-            if (p + 12 > dLen) return null
+            if (p + 12 > dLen) return fail("#8", b)
             for (k in 0 until 3) v[i * 3 + k] = comp(data, p + k * fmtSize(chFmt[0]), chFmt[0])
         }
         if (nch > 4 && chDim[4] >= 2 && stride[chStream[4]] > 0) {
@@ -165,15 +168,15 @@ object MeshDb {
             if (sTop[i] == 0 && sCount[i] > 0) {
                 for (k in 0 until sCount[i]) {
                     val po = sFirst[i] + k * isz
-                    if (po + isz > ibLen) return null
+                    if (po + isz > ibLen) return fail("#9", b)
                     val ix = (if (isz == 2) (ibuf.getShort(po).toInt() and 0xFFFF) else ibuf.getInt(po)) + sBase[i]
-                    if (ix < 0 || ix >= vcount) return null
+                    if (ix < 0 || ix >= vcount) return fail("#10", b)
                     idx.add(ix)
                 }
             }
             subs.add(start); subs.add(idx.size - start)
         }
-        if (idx.size < 3 || idx.size > 200000) return null
+        if (idx.size < 3 || idx.size > 200000) return fail("#11", b)
         return Parsed(name, vcount, MapStore.SceneMesh(v, uv, idx.toIntArray(), subs.toIntArray()))
     }
 
@@ -220,7 +223,7 @@ object MeshDb {
         val keyF = File(apk)
         buildIndex(u, File(dir, "_meshindex"), "${keyF.length()}-${keyF.lastModified()}")
         val out = ArrayList(meshes)
-        var found = 0; var absent = 0; var bad = 0
+        var found = 0; var absent = 0; var bad = 0; var logged = 0
         for (l in miss) {
             val p = l.split('\t')
             if (p.size < 4) continue
@@ -229,8 +232,10 @@ object MeshDb {
             if (cands == null || blob !in out.indices) { ++absent; continue }
             var done = false
             for (o in cands) {
-                val parsed = try { parseMesh(u.read(o.abs, o.size)) } catch (_: Throwable) { null } ?: continue
-                if (vc > 0 && parsed.vcount != vc) continue
+                lastFail = ""
+                val parsed = try { parseMesh(u.read(o.abs, o.size)) } catch (t: Throwable) { lastFail = "исключение " + t.message; null }
+                if (parsed == null) { if (logged++ < 8) BLog.i("  меш ${p[3]}: не разобрался ($lastFail), размер ${o.size}, нужно вершин $vc"); continue }
+                if (vc > 0 && parsed.vcount != vc) { if (logged++ < 8) BLog.i("  меш ${p[3]}: вершин ${parsed.vcount}, нужно $vc"); continue }
                 out[blob] = parsed.mesh; done = true; break
             }
             if (done) ++found else ++bad
