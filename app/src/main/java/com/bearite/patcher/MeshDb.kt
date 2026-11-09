@@ -150,7 +150,7 @@ object MeshDb {
                 }
                 --q
             }
-            if (pathAt < 0 || res == null) return fail("#12", b)
+            if (pathAt < 0 || res == null) { lastFail = "#12 хвост=" + raw.copyOfRange(maxOf(0, raw.size - 72), raw.size).joinToString("") { "%02x".format(it) }; return null }
             val size = bb.getInt(pathAt - 8); val off = bb.getLong(pathAt - 16)
             if (plen <= 0 || plen > 256 || size <= 0) return fail("#13", b)
             dBytes = res(String(raw, pathAt, plen, Charsets.UTF_8), off, size) ?: return fail("#14", b)
