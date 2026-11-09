@@ -59,6 +59,8 @@ data class EngineState(
  * (встроенный мод) и строит объекты в игре, поэтому формат менять нужно в обоих местах.
  */
 class MapStore(private val dir: File) {
+    fun dirPath(): String = dir.path
+
     constructor(act: android.content.Context) : this(File(act.filesDir, "maps"))
 
     init { dir.mkdirs() }

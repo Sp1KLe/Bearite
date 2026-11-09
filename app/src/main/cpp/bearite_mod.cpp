@@ -2242,7 +2242,10 @@ struct MeshApi {
     void *compGet = nullptr, *tMF = nullptr, *mfShared = nullptr, *isReadable = nullptr, *verts = nullptr, *tris = nullptr, *uv = nullptr, *l2w = nullptr;
     void *subCount = nullptr, *idxStart = nullptr, *idxCount = nullptr, *sharedMats = nullptr;
     void *tSMR = nullptr, *smrShared = nullptr;   // SkinnedMeshRenderer: геометрия в базовой позе
+    void* vcount = nullptr;
 };
+struct MeshMiss { int blob; std::string name; int vcount; int nsub; };
+std::vector<MeshMiss> g_meshMiss;   // закрытые от чтения меши: редактор достаёт их геометрию из файлов игры по имени
 std::vector<std::string> g_meshBlobs;
 std::vector<int> g_meshSubs;       // число подмешей (материалов) у каждого blob'а
 std::map<int, int> g_meshIdx;      // id меша игры -> номер blob'а (-1 = нечитаем или слишком большой)
@@ -2255,7 +2258,37 @@ int mesh_blob(MeshApi& M, void* mesh) {
     if (it != g_meshIdx.end()) return it->second;
     int res = -1;
     do {
-        if (M.isReadable) { void* r = inv(M.isReadable, mesh); if (!r || !*(const uint8_t*)obj_unbox(r)) { ++g_meshBad; break; } }
+        if (M.isReadable) {
+            void* r = inv(M.isReadable, mesh);
+            if (!r || !*(const uint8_t*)obj_unbox(r)) {
+                ++g_meshBad;
+                // заглушка без вершин: объект остаётся в сцене, геометрию подставит редактор из файлов игры
+                int nsub = 0;
+                std::vector<int32_t> sub;
+                if (M.subCount && M.idxStart && M.idxCount) {
+                    if (void* sc = inv(M.subCount, mesh)) nsub = *(const int*)obj_unbox(sc);
+                    if (nsub < 0 || nsub > 16) nsub = 0;
+                    for (int k = 0; k < nsub; ++k) {
+                        void* ka[1] = {&k};
+                        void* a = inv(M.idxStart, mesh, ka); void* c = inv(M.idxCount, mesh, ka);
+                        if (!a || !c) { nsub = 0; sub.clear(); break; }
+                        sub.push_back(*(const int*)obj_unbox(a)); sub.push_back(*(const int*)obj_unbox(c));
+                    }
+                }
+                int vc = 0;
+                if (M.vcount) if (void* v = inv(M.vcount, mesh)) vc = *(const int*)obj_unbox(v);
+                std::string b;
+                int32_t h[2] = {0, 0};
+                b.append((const char*)h, 8);
+                int32_t ns = nsub; b.append((const char*)&ns, 4);
+                if (nsub) b.append((const char*)sub.data(), sub.size() * 4);
+                g_meshSubs.push_back(nsub);
+                g_meshBlobs.push_back(std::move(b));
+                res = (int)g_meshBlobs.size() - 1;
+                g_meshMiss.push_back({res, name_of(mesh), vc, nsub});
+                break;
+            }
+        }
         bool ok = true;
         void* va = inv(M.verts, mesh, nullptr, &ok);
         if (!ok || !va) { ++g_meshBad; break; }
@@ -2326,6 +2359,7 @@ void dump_scene() {
         M.uv = sc_method(meshK, "get_uv", 0);
         M.l2w = sc_method(trK, "get_localToWorldMatrix", 0);
         M.subCount = sc_method(meshK, "get_subMeshCount", 0);
+        M.vcount = sc_method(meshK, "get_vertexCount", 0);
         M.idxStart = meshK ? find_method_types(meshK, "GetIndexStart", {"Int32"}) : nullptr;
         M.idxCount = meshK ? find_method_types(meshK, "GetIndexCount", {"Int32"}) : nullptr;
         M.tSMR = type_of("UnityEngine", "SkinnedMeshRenderer");
@@ -2445,6 +2479,16 @@ void dump_scene() {
             fclose(fp); rename(mtmp.c_str(), mt.c_str());
         }
         if (FILE* fp = fopen(itmp.c_str(), "w")) { fputs(inst.c_str(), fp); fclose(fp); rename(itmp.c_str(), it2.c_str()); }
+        {
+            std::string miss;
+            for (const auto& mm : g_meshMiss) {
+                std::string nm = mm.name; for (char& ch : nm) if (ch == '\t' || ch == '\n') ch = ' ';
+                char ln[64]; snprintf(ln, sizeof ln, "%d\t%d\t%d\t", mm.blob, mm.vcount, mm.nsub);
+                miss += ln; miss += nm; miss += '\n';
+            }
+            std::string mp = g_mapsDir + "/_meshmiss", mpt = g_mapsDir + "/.meshmiss.tmp";
+            if (FILE* fp = fopen(mpt.c_str(), "w")) { fputs(miss.c_str(), fp); fclose(fp); rename(mpt.c_str(), mp.c_str()); }
+        }
         logf_("меши сцены: у %d объектов есть геометрия, уникальных мешей %d (нечитаемых %d, слишком больших %d), %d КБ", withMesh, (int)g_meshBlobs.size(), g_meshBad, g_meshBig, (int)(g_meshBytes / 1024));
     }
     logf_("сцена для редактора: рендереров %d из %d, с текстурой %d, текстур выгружено сейчас %d, всего %d", n, (int)cnt, withTex, exported, (int)texIdx.size());

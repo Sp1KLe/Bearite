@@ -3,6 +3,7 @@ package com.bearite.patcher
 import android.graphics.BitmapFactory
 import kotlin.math.abs
 import android.app.Activity
+import java.io.File
 import android.app.Dialog
 import android.graphics.Typeface
 import android.text.Editable
@@ -441,7 +442,16 @@ class MapEditor(
                     val sc = store.readScene()
                     vp.scene = sc; vp.invalidate()
                     Thread {
-                        val me = store.readMeshes(); val ins = store.readInstances()
+                        var me = store.readMeshes(); val ins = store.readInstances()
+                        try {
+                            val mf = File(store.dirPath(), "_meshmiss")
+                            val gp = (act as? GameActivity)?.gameApkPaths ?: ""
+                            if (me != null && mf.isFile && gp.isNotEmpty()) {
+                                val r = MeshDb.fill(gp, File(store.dirPath()), me, mf.readLines())
+                                me = r.first
+                                BLog.i("меши из файлов игры: " + r.second)
+                            }
+                        } catch (t: Throwable) { BLog.e("меши из файлов игры не вышли", t) }
                         act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; gl.setData(me, ins); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")

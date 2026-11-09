@@ -43,6 +43,9 @@ import java.lang.reflect.Proxy
  * Поверх игры на паузе рисуется кнопка «Моды», она открывает GameModMenu (панель в стиле игры).
  */
 class GameActivity : Activity() {
+    /** Путь к base.apk игры: оттуда редактор достаёт геометрию закрытых мешей. */
+    var gameApkPaths: String = ""
+
     private var levelPrompt: LevelPrompt? = null
     private var chat: ChatOverlay? = null
     private var miniGames: MiniGames? = null
@@ -98,6 +101,7 @@ class GameActivity : Activity() {
         val abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: Build.SUPPORTED_32_BIT_ABIS.first()
         val gameApks = ArrayList<String>()
         gameApks.add(info.sourceDir)
+        gameApkPaths = info.sourceDir
         info.splitSourceDirs?.let { gameApks.addAll(it) }
         val ourApk = applicationInfo.sourceDir
 
