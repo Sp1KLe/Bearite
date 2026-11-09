@@ -363,6 +363,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTe
             var anyBlend = false
             for (sub in 0 until nsub) {
                 val ti = if (inst.mats.size >= sub * 8 + 8) inst.mats[sub * 8 + 3].toInt() else 0
+                if (ti / 1000 >= 100) continue
                 if (ti / 1000 > 0) { blend.add(Part(it, sub, cvz)); anyBlend = true }
             }
             if (!anyBlend || nsub > 1) opaque.add(it)
@@ -408,7 +409,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTe
         val nsub = if (it.mesh.subs.isEmpty()) 1 else it.mesh.subs.size / 2
         for (sub in 0 until nsub) {
             val ti = if (it.ins.mats.size >= sub * 8 + 8) it.ins.mats[sub * 8 + 3].toInt() else 0
-            if (ti / 1000 > 0) continue   // прозрачный подмеш рисуется во втором проходе
+            if (ti / 1000 > 0) continue   // прозрачный подмеш рисуется во втором проходе (а 100% — это чужой подмеш статического батча, его не рисуем)
             drawSub(it, sub)
         }
     }

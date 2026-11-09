@@ -244,9 +244,9 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private fun refreshHub() {
         try {
             val on = mods.scan().count { it.enabled }
-            modsBadge.text = on.toString(); modsBadge.visibility = if (on > 0) View.VISIBLE else View.GONE
+            modsBadge.text = on.toString(); modsBadge.visibility = View.GONE
             val mc = MapStore(act).list().count { it.enabled }
-            mapsBadge.text = mc.toString(); mapsBadge.visibility = if (mc > 0) View.VISIBLE else View.GONE
+            mapsBadge.text = mc.toString(); mapsBadge.visibility = View.GONE
             val room = try { java.io.File(act.filesDir, "maps/_room").readText().trim() } catch (_: Throwable) { "" }
             val online = room.isNotEmpty() && room != MiniGames.OFFLINE_ROOM
             hubStatus.text = "Bearite · " + (if (online) "мультиплеер: комната «$room»" else "одиночная игра")

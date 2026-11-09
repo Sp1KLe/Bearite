@@ -2243,6 +2243,7 @@ struct MeshApi {
     void *subCount = nullptr, *idxStart = nullptr, *idxCount = nullptr, *sharedMats = nullptr;
     void *tSMR = nullptr, *smrShared = nullptr;   // SkinnedMeshRenderer: геометрия в базовой позе
     void* vcount = nullptr;
+    void *isBatch = nullptr, *batchStart = nullptr;   // Renderer: статический батчинг (вершины уже в мировых координатах)
 };
 struct MeshMiss { int blob; std::string name; int vcount; int nsub; };
 std::vector<MeshMiss> g_meshMiss;   // закрытые от чтения меши: редактор достаёт их геометрию из файлов игры по имени
@@ -2364,6 +2365,7 @@ void dump_scene() {
         M.idxCount = meshK ? find_method_types(meshK, "GetIndexCount", {"Int32"}) : nullptr;
         M.tSMR = type_of("UnityEngine", "SkinnedMeshRenderer");
         { void* sk = bearite_find_class("UnityEngine", "SkinnedMeshRenderer"); M.smrShared = sk ? bearite_il2.class_get_method_from_name(sk, "get_sharedMesh", 0) : nullptr; }
+        { void* rk0 = bearite_find_class("UnityEngine", "Renderer"); M.isBatch = rk0 ? bearite_il2.class_get_method_from_name(rk0, "get_isPartOfStaticBatch", 0) : nullptr; M.batchStart = rk0 ? bearite_il2.class_get_method_from_name(rk0, "get_subMeshStartIndex", 0) : nullptr; }
         { void* rk = bearite_find_class("UnityEngine", "Renderer"); M.sharedMats = sc_method(rk, "get_sharedMaterials", 0); }
         logf_("меши сцены: GetComponent=%d MeshFilter=%d sharedMesh=%d isReadable=%d vertices=%d triangles=%d uv=%d l2w=%d", M.compGet != 0, M.tMF != 0, M.mfShared != 0,
               M.isReadable != 0, M.verts != 0, M.tris != 0, M.uv != 0, M.l2w != 0);
@@ -2444,6 +2446,13 @@ void dump_scene() {
             if (mv) {
                 float m[16];
                 memcpy(m, obj_unbox(mv), sizeof m);
+                // статический батчинг: вершины общего меша уже в мире, матрица рендерера не применяется, рисуется только его диапазон подмешей
+                bool batched = false; int bFirst = 0;
+                if (M.isBatch) if (void* bv = inv(M.isBatch, o)) batched = *(const uint8_t*)obj_unbox(bv) != 0;
+                if (batched) {
+                    if (M.batchStart) if (void* sv = inv(M.batchStart, o)) bFirst = *(const int*)obj_unbox(sv);
+                    for (int q = 0; q < 16; ++q) m[q] = (q % 5 == 0) ? 1.f : 0.f;
+                }
                 char il[1600];
                 int k = snprintf(il, sizeof il, "%d %d", n, mi);
                 for (int q = 0; q < 16 && k < (int)sizeof il - 20; ++q) k += snprintf(il + k, sizeof il - k, " %.5g", m[q]);
@@ -2454,7 +2463,14 @@ void dump_scene() {
                     uintptr_t nm = marr ? arr_len(marr) : 0;
                     for (int q = 0; q < nsub && k < (int)sizeof il - 110; ++q) {
                         SceneMat sq = sm;
-                        if (nm > 0) { void* mq = *(void**)arr_elem(marr, sizeof(void*), q < (int)nm ? q : nm - 1); if (mq) sq = matInfo(mq); }
+                        if (batched) {
+                            int rel = q - bFirst;
+                            if (rel < 0 || rel >= (int)nm) {   // подмеш чужого рендерера
+                                k += snprintf(il + k, sizeof il - k, " 0 0 0 100000 1 1 0 0");
+                                continue;
+                            }
+                            void* mq = *(void**)arr_elem(marr, sizeof(void*), rel); if (mq) sq = matInfo(mq);
+                        } else if (nm > 0) { void* mq = *(void**)arr_elem(marr, sizeof(void*), q < (int)nm ? q : nm - 1); if (mq) sq = matInfo(mq); }
                         k += snprintf(il + k, sizeof il - k, " %.3f %.3f %.3f %d %.4g %.4g %.4g %.4g", sq.c[0], sq.c[1], sq.c[2], scene_enc(sq), sq.st[0], sq.st[1], sq.st[2], sq.st[3]);
                     }
                 }
