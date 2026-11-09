@@ -91,7 +91,7 @@ object MeshDb {
     var lastFail = ""
     private fun fail(tag: String, b: ByteBuffer): Parsed? { lastFail = tag + " поз=" + b.position() + " из " + b.limit(); return null }
 
-    private fun parseMesh(raw: ByteArray, nameOnly: Boolean = false): Parsed? {
+    private fun parseMesh(raw: ByteArray, nameOnly: Boolean = false, res: ((String, Long, Int) -> ByteArray?)? = null): Parsed? {
         val b = le(raw)
         val name = alignedName(b)
         if (nameOnly) return Parsed(name, -1, MapStore.SceneMesh(FloatArray(0), FloatArray(0), IntArray(0)))
@@ -129,10 +129,25 @@ object MeshDb {
         if (nch < 0 || nch > 32) return fail("#4", b)
         val chStream = IntArray(nch); val chOff = IntArray(nch); val chFmt = IntArray(nch); val chDim = IntArray(nch)
         for (i in 0 until nch) { chStream[i] = b.get().toInt() and 255; chOff[i] = b.get().toInt() and 255; chFmt[i] = b.get().toInt() and 255; chDim[i] = b.get().toInt() and 15 }
-        val dLen = b.getInt()
+        var dLen = b.getInt()
         if (dLen < 0 || dLen > b.remaining()) return fail("#5", b)
         val dPos = b.position()
         if (vcount < 3 || vcount > 65000) return fail("#6", b)
+        // у закрытых мешей вершины лежат не в самом объекте, а в файле .resS (m_StreamData в конце объекта)
+        var dBytes: ByteArray
+        if (dLen > 0) dBytes = raw.copyOfRange(dPos, dPos + dLen)
+        else {
+            val key = "archive:/".toByteArray()
+            var at = -1
+            var q = raw.size - key.size
+            while (q >= 16) { var ok = true; for (k in key.indices) if (raw[q + k] != key[k]) { ok = false; break }; if (ok) { at = q; break }; --q }
+            if (at < 16 || res == null) return fail("#12", b)
+            val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
+            val plen = bb.getInt(at - 4); val size = bb.getInt(at - 8); val off = bb.getLong(at - 16)
+            if (plen <= 0 || plen > 256 || size <= 0) return fail("#13", b)
+            dBytes = res(String(raw, at, plen, Charsets.UTF_8), off, size) ?: return fail("#14", b)
+            dLen = dBytes.size
+        }
         // шаг и начало каждого потока
         val streams = (chStream.maxOrNull() ?: 0) + 1
         val stride = IntArray(streams)
@@ -141,7 +156,7 @@ object MeshDb {
         var cur = 0L
         for (s in 0 until streams) { sStart[s] = cur; cur += stride[s].toLong() * vcount; cur = (cur + 15) and 15L.inv() }
         if (nch < 1 || chDim[0] < 3 || stride[chStream[0]] == 0) return fail("#7", b)
-        val data = ByteBuffer.wrap(raw, dPos, dLen).slice().order(ByteOrder.LITTLE_ENDIAN)
+        val data = ByteBuffer.wrap(dBytes).order(ByteOrder.LITTLE_ENDIAN)
         val v = FloatArray(vcount * 3)
         val uv = FloatArray(vcount * 2)
         val ps = chStream[0]; val pst = stride[ps]
@@ -223,6 +238,11 @@ object MeshDb {
         val keyF = File(apk)
         buildIndex(u, File(dir, "_meshindex"), "${keyF.length()}-${keyF.lastModified()}")
         val out = ArrayList(meshes)
+        val resolver = { path: String, off: Long, size: Int ->
+            val fn = path.substringAfterLast('/')
+            val nd = u.nodes.firstOrNull { it.path == fn || it.path.endsWith("/$fn") }
+            if (nd == null || off < 0 || off + size > nd.size) null else u.read(nd.offset + off, size)
+        }
         var found = 0; var absent = 0; var bad = 0; var logged = 0
         for (l in miss) {
             val p = l.split('\t')
@@ -233,7 +253,7 @@ object MeshDb {
             var done = false
             for (o in cands) {
                 lastFail = ""
-                val parsed = try { parseMesh(u.read(o.abs, o.size)) } catch (t: Throwable) { lastFail = "исключение " + t.message; null }
+                val parsed = try { parseMesh(u.read(o.abs, o.size), false, resolver) } catch (t: Throwable) { lastFail = "исключение " + t.message; null }
                 if (parsed == null) { if (logged++ < 8) BLog.i("  меш ${p[3]}: не разобрался ($lastFail), размер ${o.size}, нужно вершин $vc"); continue }
                 if (vc > 0 && parsed.vcount != vc) { if (logged++ < 8) BLog.i("  меш ${p[3]}: вершин ${parsed.vcount}, нужно $vc"); continue }
                 out[blob] = parsed.mesh; done = true; break
