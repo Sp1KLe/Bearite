@@ -3877,6 +3877,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         api->log(mod_id, "несовместимая версия API лаунчера");
         return;
     }
+    logf_("сборка мода: %s %s", __DATE__, __TIME__);
     char msg[200];
     snprintf(msg, sizeof msg, "встроенный мод Bearite запущен (сборка %s %s, круги v2), libil2cpp: база=%p", __DATE__, __TIME__, api->module_base("libil2cpp.so"));
     api->log(mod_id, msg);

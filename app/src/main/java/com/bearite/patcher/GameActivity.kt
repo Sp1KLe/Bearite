@@ -187,7 +187,7 @@ class GameActivity : Activity() {
             BLog.i("APK: " + apks.joinToString { File(it).name + " " + File(it).length() / 1024 + "K" })
             val dir = info.nativeLibraryDir?.let { File(it) }
             val libs = dir?.listFiles()?.sortedBy { it.name }
-            Thread { GameDataProbe.run(apks) }.start()
+            try { val pi = packageManager.getPackageInfo(packageName, 0); BLog.i("лаунчер установлен: " + java.text.SimpleDateFormat("dd.MM HH:mm:ss", java.util.Locale.US).format(java.util.Date(pi.lastUpdateTime))) } catch (_: Throwable) { }
             BLog.i("lib в ${dir?.path}: " + (libs?.joinToString { it.name + " " + it.length() / 1024 + "K" } ?: "нет"))
         } catch (t: Throwable) {
             BLog.e("диагностика игры не удалась", t)
