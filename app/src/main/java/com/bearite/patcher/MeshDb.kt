@@ -147,7 +147,7 @@ object MeshDb {
         val ps = chStream[0]; val pst = stride[ps]
         for (i in 0 until vcount) {
             val p = (sStart[ps] + i.toLong() * pst + chOff[0]).toInt()
-            if (p + 12 > dLen) return fail("#8", b)
+            if (p + 12 > dLen) { lastFail = "#8 i=$i/$vcount dLen=$dLen ibLen=$ibLen idxFmt=$indexFormat nsm=$nsm каналы=" + (0 until nch).joinToString(" ") { "${chStream[it]}/${chOff[it]}/${chFmt[it]}/${chDim[it]}" } + " шаги=" + stride.joinToString(","); return null }
             for (k in 0 until 3) v[i * 3 + k] = comp(data, p + k * fmtSize(chFmt[0]), chFmt[0])
         }
         if (nch > 4 && chDim[4] >= 2 && stride[chStream[4]] > 0) {
