@@ -137,15 +137,23 @@ object MeshDb {
         var dBytes: ByteArray
         if (dLen > 0) dBytes = raw.copyOfRange(dPos, dPos + dLen)
         else {
-            val key = "archive:/".toByteArray()
-            var at = -1
-            var q = raw.size - key.size
-            while (q >= 16) { var ok = true; for (k in key.indices) if (raw[q + k] != key[k]) { ok = false; break }; if (ok) { at = q; break }; --q }
-            if (at < 16 || res == null) return fail("#12", b)
+            // конец объекта: offset(8) size(4) длина_пути(4) путь_к_.resS (имя файла или archive:/…)
+            val key = ".resS".toByteArray()
             val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
-            val plen = bb.getInt(at - 4); val size = bb.getInt(at - 8); val off = bb.getLong(at - 16)
+            var pathAt = -1; var plen = 0
+            var q = raw.size - key.size
+            while (q >= 20 && pathAt < 0) {
+                var ok = true; for (k in key.indices) if (raw[q + k] != key[k]) { ok = false; break }
+                if (ok) {
+                    val e = q + key.size
+                    for (len in key.size..120) { val st = e - len; if (st >= 16 && bb.getInt(st - 4) == len) { pathAt = st; plen = len; break } }
+                }
+                --q
+            }
+            if (pathAt < 0 || res == null) return fail("#12", b)
+            val size = bb.getInt(pathAt - 8); val off = bb.getLong(pathAt - 16)
             if (plen <= 0 || plen > 256 || size <= 0) return fail("#13", b)
-            dBytes = res(String(raw, at, plen, Charsets.UTF_8), off, size) ?: return fail("#14", b)
+            dBytes = res(String(raw, pathAt, plen, Charsets.UTF_8), off, size) ?: return fail("#14", b)
             dLen = dBytes.size
         }
         // шаг и начало каждого потока
