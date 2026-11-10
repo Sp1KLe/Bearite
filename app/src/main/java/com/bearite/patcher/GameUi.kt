@@ -28,13 +28,15 @@ class GameUi(val act: Activity) {
     private val d = UiScale.density(act)
     /** Плоский стиль в духе Blender (редактор карт): серые кнопки, синий акцент, без окантовки текста. */
     var flat = false
+    /** Шрифт игры (Super Bear Adventure, BubbleFont): весь интерфейс мода рисуется им. */
+    val font: Typeface = loadFont(act)
     fun dp(v: Int) = (v * d).toInt()
 
     fun label(text: String, sizeSp: Float, color: Int = CREAM, bold: Boolean = true) = TextView(act).apply {
         this.text = text
         textSize = sizeSp * UiScale.factor(act)
         setTextColor(color)
-        typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        typeface = if (bold) font else font
     }
 
     fun round(color: Int, radiusDp: Int, strokeColor: Int = 0, strokeDp: Int = 1) = GradientDrawable().apply {
@@ -88,7 +90,7 @@ class GameUi(val act: Activity) {
         this.text = text
         textSize = sizeSp * UiScale.factor(act)
         setTextColor(color)
-        typeface = Typeface.DEFAULT_BOLD
+        typeface = font
         outlineWidthPx = dp(1) * 2f + sizeSp * 0.12f * d
     }
 
@@ -122,7 +124,7 @@ class GameUi(val act: Activity) {
             this.text = text
             textSize = (sizeSp - 1f).coerceAtLeast(11f) * UiScale.factor(act)
             setTextColor(if (primary) M3.ON_PRIMARY else if (danger) M3.ON_ERROR_C else M3.ON_TONAL)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = font
             gravity = Gravity.CENTER
             setPadding(dp(16), 0, dp(16), 0)
             minHeight = dp(40)
@@ -229,7 +231,7 @@ class GameUi(val act: Activity) {
         val field = EditText(act).apply {
             setTextColor(CREAM)
             textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = font
             gravity = Gravity.CENTER
             isSingleLine = true
             background = round(BG_DEEP, 12)
@@ -305,7 +307,7 @@ class GameUi(val act: Activity) {
             setTextColor(CREAM)
             setHintTextColor(DIM)
             textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = font
             isSingleLine = true
             background = round(BG_DEEP, 14)
             setPadding(dp(12), 0, dp(12), 0)
@@ -432,4 +434,14 @@ class GameUi(val act: Activity) {
         val TILES = intArrayOf(0xFFE5483D.toInt(), 0xFFFF9F1C.toInt(), 0xFF2BA84A.toInt(), 0xFF2E86DE.toInt(), 0xFF9B59B6.toInt())
         fun tileColor(id: String) = TILES[(id.hashCode() and 0x7fffffff) % TILES.size]
     }
+}
+
+private var fontCache: Typeface? = null
+private fun loadFont(act: android.app.Activity): Typeface {
+    fontCache?.let { return it }
+    return try {
+        val f = java.io.File(act.cacheDir, "bubble_font.ttf")
+        if (!f.isFile || f.length() < 1000) act.resources.openRawResource(R.font.bubble_font).use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+        Typeface.createFromFile(f)
+    } catch (_: Throwable) { Typeface.DEFAULT_BOLD }.also { fontCache = it }
 }

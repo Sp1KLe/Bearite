@@ -815,6 +815,7 @@ int primitive_id(const std::string& s) {
 }
 
 void* type_of(const char* ns, const char* name);
+void* goClass_();
 
 /** Модель сообщества: меш из maps/props/<id>.mesh ставится в MeshFilter примитива (куб), остальное (материал, текстуру) делает обычный путь объекта. */
 bool apply_custom_mesh(void* go, const std::string& id) {
@@ -854,6 +855,24 @@ bool apply_custom_mesh(void* go, const std::string& id) {
     if (!mf) { logf_("проп сообщества %s: у примитива нет MeshFilter", id.c_str()); return false; }
     void* a[1] = {mesh};
     inv(smf, mf, a);
+    // твёрдая форма: вместо коробки куба — коллайдер по самому мешу (если класс не вырезан из сборки, остаётся коробка)
+    {
+        void* mcK = bearite_find_class("UnityEngine", "MeshCollider");
+        void* tMC = type_of("UnityEngine", "MeshCollider");
+        void* gk = goClass_();
+        void* addC = gk ? find_method_p0(gk, "AddComponent", 1, "Type") : nullptr;
+        void* setMesh = mcK ? M(mcK, "set_sharedMesh", 1) : nullptr;
+        if (mcK && tMC && addC && setMesh) {
+            void* tBox = type_of("UnityEngine", "BoxCollider");
+            void* ta[1] = {tMC};
+            void* mc = inv(addC, go, ta);
+            if (mc) {
+                void* ma[1] = {mesh};
+                inv(setMesh, mc, ma);
+                if (tBox && F.destroy_imm) { void* ba[1] = {tBox}; if (void* box = inv(F.get_component, go, ba)) { void* da[1] = {box}; bool ok2 = false; inv(F.destroy_imm, nullptr, da, &ok2); } }
+            }
+        } else logf_("проп сообщества: MeshCollider недоступен, остаётся коробка");
+    }
     logf_("проп сообщества «%s» создан (%d вершин, %d треугольников)", id.c_str(), nv, ni / 3);
     return true;
 }
@@ -1845,6 +1864,45 @@ void* make_prop(const std::string& name, float* base) {
     return cgo;
 }
 
+/** Диагностика: какие скрипты висят на камнях и прочих объектах, которые можно брать в руки (для будущей физики захвата). */
+void log_grabbables() {
+    if (!g_typeTransform || !F.get_gameobject || !F.get_comps_children || !F.type_mono) return;
+    void* arr = find_objects(g_typeTransform);
+    if (!arr) return;
+    static const char* kw[] = {"rock", "stone", "boulder", "pebble", "камен", "pickup", "grab", "throw", "carry"};
+    void* tRb = type_of("UnityEngine", "Rigidbody");
+    bool oc = g_crumbs; g_crumbs = false;
+    uintptr_t n = arr_len(arr);
+    if (n > 100000) n = 100000;
+    int logged = 0;
+    for (uintptr_t i = 0; i < n && logged < 14; ++i) {
+        void* tr = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!tr) continue;
+        std::string nm = name_of(tr), low = nm;
+        for (char& ch : low) ch = (char)tolower((unsigned char)ch);
+        bool hit = false;
+        for (const char* k : kw) if (low.find(k) != std::string::npos) { hit = true; break; }
+        if (!hit) continue;
+        void* go = inv(F.get_gameobject, tr);
+        if (!go) continue;
+        std::string cls;
+        uint8_t inc = 1; void* a[2] = {F.type_mono, &inc};
+        if (void* comps = inv(F.get_comps_children, go, a)) {
+            uintptr_t cn = arr_len(comps);
+            for (uintptr_t q = 0; q < cn && q < 12; ++q) {
+                void* c = *(void**)arr_elem(comps, sizeof(void*), q);
+                void* k = c ? obj_class(c) : nullptr;
+                if (k) { cls += class_name(k); cls += ' '; }
+            }
+        }
+        bool rb = false;
+        if (tRb && F.get_component) { void* ra[1] = {tRb}; rb = inv(F.get_component, go, ra) != nullptr; }
+        logf_("берётся в руки? «%s»: rigidbody=%d, скрипты: %s", nm.c_str(), rb, cls.c_str());
+        ++logged;
+    }
+    g_crumbs = oc;
+}
+
 /** Один раз за сцену: ищет по имени объекты, похожие на круг/портал/вход (чтобы найти родной круг телепорта). */
 void scan_names() {
     if (!g_typeTransform || !F.get_transform) return;
@@ -2020,7 +2078,7 @@ void portals_tick(long long now) {
         static std::string scNames;
         static long long scSince = 0;
         if (scNames != g_scene) { scNames = g_scene; scSince = now; }
-        if (scSince && now - scSince > 5000) { scSince = 0; scan_names(); }
+        if (scSince && now - scSince > 5000) { scSince = 0; scan_names(); log_grabbables(); }
     }
     if (diag) {
         static float lastScan[3] = {1e9f, 0, 0};

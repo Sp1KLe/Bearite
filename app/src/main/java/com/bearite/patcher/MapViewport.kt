@@ -655,6 +655,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
     private var worldSig = ""
 
     private fun drawWorld(c: Canvas) {
+        if (true) return   // карту игры редактор больше не рисует: только сетка и объекты
         if (touching || animate) { drawScene(c, fast = true); return }
         val sig = "%.3f %.3f %.3f %.4f %.4f %.4f %d %d %d %d".format(ex, ey, ez, fx, fy, fz, width, height, System.identityHashCode(scene), System.identityHashCode(sceneInst)) + (if (showScene) 1 else 0) + map.scale + map.ox + map.oy + map.oz
         var b = worldBmp

@@ -35,9 +35,7 @@ class MapEditor(
 ) {
     private val dlg = Dialog(act, android.R.style.Theme_Material_NoActionBar_Fullscreen)
     private val vp = MapViewport(act, map)
-    private val gl = MapGL(act, { store.sceneTexFile(it) }, { store.textureFile(it) })
     private val vpHost = android.widget.FrameLayout(act).apply {
-        addView(gl, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(vp, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
     private val tree = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
@@ -83,9 +81,7 @@ class MapEditor(
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             decorView.systemUiVisibility = act.window.decorView.systemUiVisibility
         }
-        dlg.setOnDismissListener { ui.flat = false; sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
-        vp.onCamera = { gl.setCamera(it) }
-        vp.onObjects = { gl.setObjects(it) }
+        dlg.setOnDismissListener { ui.flat = false; sceneAskedAt = -1L; vp.onCamera = null; store.clearEdCam(); onClose() }
         vp.propBox = { o -> propBoxOf(o) }
         vp.showScene = false
         setGameView(false)
@@ -212,8 +208,6 @@ class MapEditor(
     private fun setGameView(on: Boolean) {
         if (on && vp.realView) toggleRealView()
         vp.gameView = on
-        gl.visibility = if (on) View.VISIBLE else View.GONE
-        if (on) gl.onResume() else gl.onPause()
         if (::gameBtn.isInitialized) {
             gameBtn.alpha = if (on) 1f else 0.7f
             gameBtn.text = if (on) "■ Модели" else "Модели"
@@ -384,7 +378,7 @@ class MapEditor(
     /** Ставит модель игры в карту. pos/rot — в координатах карты; без них — перед камерой редактора. */
     private fun addProp(name: String, pos: DoubleArray? = null, rot: DoubleArray? = null) {
         val o = MapObj(name, "prop:$name")
-        o.solid = false
+        o.solid = true
         val sp = vp.spawnPoint()
         o.x = pos?.get(0) ?: sp[0].toDouble(); o.y = pos?.get(1) ?: 0.0; o.z = pos?.get(2) ?: sp[2].toDouble()
         if (rot != null) { o.rx = rot[0]; o.ry = rot[1]; o.rz = rot[2] }
@@ -513,7 +507,7 @@ class MapEditor(
 
     private fun addCommunityProp(id: String, name: String) {
         val o = MapObj(name, "cprop:$id")
-        o.solid = false
+        o.solid = true
         if (store.textureFile("cp_$id") != null) o.tex = "cp_$id"
         val sp = vp.spawnPoint()
         o.x = sp[0].toDouble(); o.z = sp[2].toDouble()
@@ -591,7 +585,6 @@ class MapEditor(
                 if (sceneAskedAt != asked) return
                 if (store.sceneStamp() >= asked - 1000) {
                     val sc = store.readScene()
-                    vp.scene = sc; vp.invalidate()
                     Thread {
                         var me = store.readMeshes(); val ins = store.readInstances(); val nm = store.readSceneNames(); val extra = store.readAllProps()
                         try {
@@ -603,7 +596,7 @@ class MapEditor(
                                 BLog.i("меши из файлов игры: " + r.second)
                             }
                         } catch (t: Throwable) { BLog.e("меши из файлов игры не вышли", t) }
-                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; sceneNames = nm; allProps = extra; propIdx = null; propBoxes.clear(); gl.setData(me, ins); vp.invalidate() }
+                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; sceneNames = nm; allProps = extra; propIdx = null; propBoxes.clear(); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return
