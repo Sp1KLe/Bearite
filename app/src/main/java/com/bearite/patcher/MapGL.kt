@@ -253,6 +253,7 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTe
         val l = objs
         if (l.isEmpty()) return
         for (ob in l) {
+            if (ob.propJ >= 0) continue
             val gm = primGpu.getOrPut(ob.shape) {
                 val pm = PrimMeshes.get(ob.shape)
                 upload(-10 - primGpu.size, MapStore.SceneMesh(pm.v, FloatArray(pm.v.size / 3 * 2), pm.t))
@@ -338,16 +339,22 @@ class MapGL(ctx: Context, private val texFile: (Int) -> File?, private val ownTe
 
         val opaque = ArrayList<Item>()
         val blend = ArrayList<Part>()
-        val all = ArrayList<Pair<MapStore.SceneMesh, MapStore.SceneInst>>(ins.size + 64)
-        for ((_, inst) in ins) { val me = ms.getOrNull(inst.mesh) ?: continue; all.add(me to inst) }
-        boxes?.let { for (b in it) all.add(cubeMesh to b) }
-        for ((mesh, inst) in all) {
+        val all = ArrayList<Triple<MapStore.SceneMesh, MapStore.SceneInst, FloatArray?>>(ins.size + 64)
+        for ((_, inst) in ins) { val me = ms.getOrNull(inst.mesh) ?: continue; all.add(Triple(me, inst, null)) }
+        boxes?.let { for (b in it) all.add(Triple(cubeMesh, b, null)) }
+        // модели игры, поставленные как объекты карты: тот же меш и материалы, но поза объекта
+        objs.forEach { ob -> if (ob.propJ >= 0) { val inst = ins[ob.propJ]; val me = inst?.let { ms.getOrNull(it.mesh) }; if (inst != null && me != null) all.add(Triple(me, inst, ob.model)) } }
+        for ((mesh, inst, over) in all) {
             val g = gpu.getOrPut(inst.mesh) { upload(inst.mesh, mesh) } ?: continue
             val m = inst.m
-            // модель в координатах редактора: (мир − смещение карты) / масштаб
-            for (k in 0 until 16) model[k] = m[k]
-            for (k in 0 until 12) model[k] = m[k] / s
-            model[12] = (m[12] - ox) / s; model[13] = (m[13] - oy) / s; model[14] = (m[14] - oz) / s; model[15] = 1f
+            if (over != null) {
+                for (k in 0 until 16) model[k] = over[k]
+            } else {
+                // модель в координатах редактора: (мир − смещение карты) / масштаб
+                for (k in 0 until 16) model[k] = m[k]
+                for (k in 0 until 12) model[k] = m[k] / s
+                model[12] = (m[12] - ox) / s; model[13] = (m[13] - oy) / s; model[14] = (m[14] - oz) / s; model[15] = 1f
+            }
             mul(view, model, mv)
             // отсечение по сфере модели
             val cvx = mv[0] * g.cx + mv[4] * g.cy + mv[8] * g.cz + mv[12]

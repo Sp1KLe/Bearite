@@ -86,6 +86,7 @@ class MapEditor(
         dlg.setOnDismissListener { ui.flat = false; sceneAskedAt = -1L; vp.onCamera = null; gl.onPause(); store.clearEdCam(); onClose() }
         vp.onCamera = { gl.setCamera(it) }
         vp.onObjects = { gl.setObjects(it) }
+        vp.propBox = { o -> propBoxOf(o) }
         setGameView(true)
         loadScene(auto = true)
         refreshTree()
@@ -321,7 +322,7 @@ class MapEditor(
         if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, M3.VARIANT, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
     }
 
-    private fun glyph(shape: String) = when (shape) { "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; else -> "■" }
+    private fun glyph(shape: String) = when (if (shape.startsWith("prop:")) "prop" else shape) { "prop" -> "◆";  "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; else -> "■" }
 
     private fun treeRow(g: String, name: String, on: Boolean, color: Int, click: () -> Unit): View {
         val r = LinearLayout(act).apply {
@@ -338,6 +339,133 @@ class MapEditor(
     }
 
     /** Окно «Фигуры и шаблоны»: плитки с фигурами и список готовых шаблонов. */
+    // ------------------------------------------------------------------- модели игры как объекты
+
+    private var sceneNames: Map<Int, String> = emptyMap()
+    private var propIdx: Map<String, Int>? = null
+    private val propBoxes = HashMap<String, FloatArray?>()
+
+    /** Имя модели → номер объекта сцены, у которого есть читаемый меш (для каждого имени берём первый). */
+    private fun propIndex(): Map<String, Int> {
+        propIdx?.let { return it }
+        val ms = vp.sceneMeshes; val ins = vp.sceneInst
+        val out = java.util.TreeMap<String, Int>(String.CASE_INSENSITIVE_ORDER)
+        if (ms != null && ins != null) for ((j, nm) in sceneNames.toSortedMap()) {
+            val inst = ins[j] ?: continue
+            if (ms.getOrNull(inst.mesh)?.v?.isNotEmpty() != true) continue
+            if (nm.isNotBlank() && !out.containsKey(nm)) out[nm] = j
+        }
+        propIdx = out
+        return out
+    }
+
+    /** S0 (родной размер, 3), центр коробки меша в его осях (3), её размер (3), номер объекта сцены. Масштаб карты учтён в S0. */
+    private fun propBoxOf(o: MapObj): FloatArray? {
+        val name = o.shape.removePrefix("prop:")
+        val j = propIndex()[name] ?: return null
+        val raw = propBoxes.getOrPut(name) {
+            val inst = vp.sceneInst?.get(j) ?: return@getOrPut null
+            val me = vp.sceneMeshes?.getOrNull(inst.mesh) ?: return@getOrPut null
+            if (me.v.isEmpty()) return@getOrPut null
+            var x0 = 1e9f; var y0 = 1e9f; var z0 = 1e9f; var x1 = -1e9f; var y1 = -1e9f; var z1 = -1e9f
+            var i = 0
+            while (i < me.v.size) {
+                x0 = minOf(x0, me.v[i]); x1 = maxOf(x1, me.v[i]); y0 = minOf(y0, me.v[i + 1]); y1 = maxOf(y1, me.v[i + 1]); z0 = minOf(z0, me.v[i + 2]); z1 = maxOf(z1, me.v[i + 2]); i += 3
+            }
+            val m = inst.m
+            fun n(c: Int) = Math.sqrt((m[c * 4] * m[c * 4] + m[c * 4 + 1] * m[c * 4 + 1] + m[c * 4 + 2] * m[c * 4 + 2]).toDouble()).toFloat().coerceAtLeast(1e-4f)
+            floatArrayOf(n(0), n(1), n(2), (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, maxOf(x1 - x0, 0.02f), maxOf(y1 - y0, 0.02f), maxOf(z1 - z0, 0.02f), j.toFloat())
+        } ?: return null
+        val sc = if (map.scale == 0.0) 1f else map.scale.toFloat()
+        val r = raw.copyOf(); r[0] /= sc; r[1] /= sc; r[2] /= sc
+        return r
+    }
+
+    /** Ставит модель игры в карту. pos/rot — в координатах карты; без них — перед камерой редактора. */
+    private fun addProp(name: String, pos: DoubleArray? = null, rot: DoubleArray? = null) {
+        val o = MapObj(name, "prop:$name")
+        o.solid = false
+        val sp = vp.spawnPoint()
+        o.x = pos?.get(0) ?: sp[0].toDouble(); o.y = pos?.get(1) ?: 0.0; o.z = pos?.get(2) ?: sp[2].toDouble()
+        if (rot != null) { o.rx = rot[0]; o.ry = rot[1]; o.rz = rot[2] }
+        map.objects.add(o)
+        commit()
+        select(map.objects.size - 1)
+        vp.invalidate()
+    }
+
+    /** Следующее касание в мире берёт объект игры под пальцем и ставит его копию в карту. */
+    private fun pickPropFromWorld() {
+        val sc = vp.scene ?: return toast("Мир игры ещё не загружен: нажми «↻ Мир»")
+        val ins = vp.sceneInst
+        toast("Коснись объекта игры, который нужно скопировать")
+        vp.pickWorld = { ray ->
+            val k = if (map.scale == 0.0) 1f else map.scale.toFloat()
+            var best = -1; var bt = 1e30f
+            for (b in 0 until sc.size / 10) {
+                val cx = (sc[b * 10] - map.ox.toFloat()) / k; val cy = (sc[b * 10 + 1] - map.oy.toFloat()) / k; val cz = (sc[b * 10 + 2] - map.oz.toFloat()) / k
+                val hx = sc[b * 10 + 3] / k; val hy = sc[b * 10 + 4] / k; val hz = sc[b * 10 + 5] / k
+                var t0 = 0f; var t1 = 1e30f
+                val o = floatArrayOf(ray[0] - cx, ray[1] - cy, ray[2] - cz); val d = floatArrayOf(ray[3], ray[4], ray[5]); val h = floatArrayOf(hx, hy, hz)
+                var ok = true
+                for (a in 0..2) {
+                    if (Math.abs(d[a]) < 1e-7f) { if (Math.abs(o[a]) > h[a]) { ok = false; break } }
+                    else {
+                        var ta = (-h[a] - o[a]) / d[a]; var tb = (h[a] - o[a]) / d[a]
+                        if (ta > tb) { val q = ta; ta = tb; tb = q }
+                        t0 = maxOf(t0, ta); t1 = minOf(t1, tb)
+                        if (t0 > t1) { ok = false; break }
+                    }
+                }
+                // у «земли» и огромных коробок смысла нет: берём то, что меньше 200 единиц
+                if (ok && t0 < bt && hx < 100f && hz < 100f && sceneNames[b]?.isNotBlank() == true && ins?.get(b) != null) { bt = t0; best = b }
+            }
+            if (best < 0) toast("Здесь нет объекта игры")
+            else {
+                val inst = ins!![best]!!; val m = inst.m
+                val nm = sceneNames[best] ?: "Модель"
+                if (!propIndex().containsKey(nm)) toast("У «$nm» нет читаемой модели")
+                else {
+                    fun n(c: Int) = Math.sqrt((m[c * 4] * m[c * 4] + m[c * 4 + 1] * m[c * 4 + 1] + m[c * 4 + 2] * m[c * 4 + 2]).toDouble()).coerceAtLeast(1e-6)
+                    val r = { rr: Int, cc: Int -> m[cc * 4 + rr] / n(cc) }
+                    val ex = Math.toDegrees(Math.asin((-r(1, 2)).coerceIn(-1.0, 1.0)))
+                    val ey = Math.toDegrees(Math.atan2(r(0, 2), r(2, 2)))
+                    val ez = Math.toDegrees(Math.atan2(r(1, 0), r(1, 1)))
+                    addProp(nm, doubleArrayOf(r2((m[12] - map.ox) / k), r2((m[13] - map.oy) / k), r2((m[14] - map.oz) / k)), doubleArrayOf(r2(ex), r2(ey), r2(ez)))
+                    toast("Скопировано: $nm")
+                }
+            }
+        }
+    }
+
+    private fun propsDialog() {
+        val names = propIndex().keys.toList()
+        if (names.isEmpty()) return toast(if (vp.sceneMeshes == null) "Мир игры ещё не загружен: нажми «↻ Мир»" else "В мире игры нет читаемых моделей (нужен свежий мод)")
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        var dlg: android.app.Dialog? = null
+        val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        fun fill(q: String) {
+            list.removeAllViews()
+            val f = names.filter { q.isBlank() || it.contains(q, true) }
+            for (nm in f.take(80)) {
+                val item = ui.label(nm, 14f, M3.ON_SURF, bold = false).apply {
+                    background = ui.round(M3.HIGH, 12, M3.OUTLINE_V)
+                    setPadding(dp(14), dp(10), dp(14), dp(10))
+                    setOnClickListener { dlg?.dismiss(); addProp(nm) }
+                }
+                list.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+            }
+            if (f.size > 80) list.addView(ui.label("…ещё ${f.size - 80}: уточни поиск", 12f, M3.VARIANT, bold = false))
+            if (f.isEmpty()) list.addView(ui.label("Ничего не найдено", 13f, M3.VARIANT, bold = false))
+        }
+        val search = ui.textInput("", 400, "Поиск по названию") { fill(it) }
+        col.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)))
+        col.addView(ScrollView(act).apply { addView(list) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300)).apply { topMargin = dp(8) })
+        fill("")
+        dlg = ui.dialog("Модели игры · ${names.size}", col, listOf(GameUi.Btn("Закрыть")), widthDp = 460)
+        dlg.show()
+    }
+
     private fun addMenu() {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var dlg: android.app.Dialog? = null
@@ -355,6 +483,11 @@ class MapEditor(
             row.addView(tile, LinearLayout.LayoutParams(0, dp(78), 1f).apply { rightMargin = dp(6) })
         }
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        col.addView(ui.label("Модели игры", 13f, M3.VARIANT).apply { setPadding(0, dp(16), 0, 0) })
+        val prow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        prow.addView(ui.pill("Каталог", sizeSp = 13f) { dlg?.dismiss(); propsDialog() }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(6) })
+        prow.addView(ui.pill("Выбрать в мире", sizeSp = 13f) { dlg?.dismiss(); pickPropFromWorld() }, LinearLayout.LayoutParams(0, dp(40), 1f))
+        col.addView(prow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         col.addView(ui.label("Шаблоны", 13f, M3.VARIANT).apply { setPadding(0, dp(16), 0, 0) })
         val hints = listOf("один большой пол", "8 ступеней вверх", "пол и четыре стены")
         MapStore.TEMPLATES.forEachIndexed { i, name ->
@@ -442,7 +575,7 @@ class MapEditor(
                     val sc = store.readScene()
                     vp.scene = sc; vp.invalidate()
                     Thread {
-                        var me = store.readMeshes(); val ins = store.readInstances()
+                        var me = store.readMeshes(); val ins = store.readInstances(); val nm = store.readSceneNames()
                         try {
                             val mf = File(store.dirPath(), "_meshmiss")
                             val gp = (act as? GameActivity)?.gameApkPaths ?: ""
@@ -452,7 +585,7 @@ class MapEditor(
                                 BLog.i("меши из файлов игры: " + r.second)
                             }
                         } catch (t: Throwable) { BLog.e("меши из файлов игры не вышли", t) }
-                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; gl.setData(me, ins); vp.invalidate() }
+                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; sceneNames = nm; propIdx = null; propBoxes.clear(); gl.setData(me, ins); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return

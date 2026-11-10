@@ -276,6 +276,15 @@ class MapStore(private val dir: File) {
         return out
     }
 
+    /** Имена объектов сцены игры: номер строки _scene → имя. */
+    fun readSceneNames(): Map<Int, String> {
+        val f = File(dir, "_scene_names")
+        val out = HashMap<Int, String>()
+        if (!f.isFile) return out
+        try { f.forEachLine { l -> val i = l.indexOf('\t'); if (i > 0) l.substring(0, i).toIntOrNull()?.let { out[it] = l.substring(i + 1).trim() } } } catch (_: Throwable) {}
+        return out
+    }
+
     /** Текстура материала мира игры (выгружает нативный мод в maps/scene_tex/N.png). */
     fun sceneTexFile(idx: Int): File? = File(File(dir, "scene_tex"), "$idx.png").takeIf { it.isFile }
 
@@ -347,7 +356,7 @@ class MapStore(private val dir: File) {
                     val n = DoubleArray(9) { p[3 + it].toDoubleOrNull() ?: 0.0 }
                     m.objects.add(
                         MapObj(
-                            name = p[1], shape = if (p[2] in SHAPES) p[2] else "cube",
+                            name = p[1], shape = if (p[2] in SHAPES || p[2].startsWith("prop:")) p[2] else "cube",
                             x = n[0], y = n[1], z = n[2], sx = n[3], sy = n[4], sz = n[5],
                             rx = n[6], ry = n[7], rz = n[8],
                             color = p[12].toIntOrNull(16) ?: 0x8D5338, solid = p[13] == "1",

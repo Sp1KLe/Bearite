@@ -288,7 +288,7 @@ struct Fns {
     void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
-    void *instantiate, *get_local_scale, *get_layer, *load_scene;
+    void *instantiate, *get_local_scale, *get_lossy_scale, *get_layer, *load_scene;
     int load_arity;
     void *go_ctor_str, *set_active, *set_parent, *instantiate_parent, *destroy_imm;
     void *type_mono, *get_comps_children, *beh_get_enabled, *beh_set_enabled, *col_is_trigger;
@@ -353,6 +353,7 @@ struct Live {
     std::vector<std::pair<uintptr_t, int>> natOff;      // что мы выключили у него: (handle, 0 = скрипт, 1 = триггер)
     long long natTry = 0;
     bool natHidden = false, natMiss = false, natClone = false;
+    bool prop = false; float base[3] = {1, 1, 1};   // модель игры (shape «prop:имя»): родной размер, на который умножается размер объекта
     bool nativeFull = false;  // копия платформы с родными скриптами: окно, анимацию и загрузку уровня ведёт сама игра
 };
 
@@ -813,12 +814,29 @@ int primitive_id(const std::string& s) {
     return 3;
 }
 
+void* make_prop(const std::string& name, float* base);
+std::map<std::string, long long> g_propTry;
+
 bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& fullName) {
-    int t = primitive_id(o.shape);
-    void* a[1] = {&t};
-    bool ok = false;
-    void* go = inv(F.create_primitive, nullptr, a, &ok);
-    if (!go) return false;
+    void* go = nullptr;
+    bool isProp = o.shape.rfind("prop:", 0) == 0;
+    if (isProp) {
+        timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        long long now = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+        long long& last = g_propTry[o.shape];
+        if (last && now - last < 3000) return false;   // поиск по сцене дорогой: повторяем раз в 3 секунды
+        last = now;
+        go = make_prop(o.shape.substr(5), L.base);
+        if (!go) return false;
+        L.prop = true;
+    } else {
+        int t = primitive_id(o.shape);
+        void* a[1] = {&t};
+        bool ok = false;
+        go = inv(F.create_primitive, nullptr, a, &ok);
+        if (!go) return false;
+        L.prop = false;
+    }
     L.h = gch_new(go, 0);
     ++g_liveCount;
     L.shape = o.shape;
@@ -831,7 +849,7 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
     L.tile[0] = L.tile[1] = 0;
     L.tid = 0;
     if (F.set_layer) { int ly = m.layer; void* b[1] = {&ly}; inv(F.set_layer, go, b); }
-    if ((!o.solid || o.shape == "portal") && F.type_collider && F.get_component && F.collider_enabled) {
+    if (!isProp && (!o.solid || o.shape == "portal") && F.type_collider && F.get_component && F.collider_enabled) {
         void* b[1] = {F.type_collider};
         void* col = inv(F.get_component, go, b);
         if (col) { uint8_t off = 0; void* c[1] = {&off}; inv(F.collider_enabled, col, c); }
@@ -902,6 +920,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     anim_eval(o, lp, lr, ls);
     V3 pos{m.off[0] + m.scale * lp[0], m.off[1] + m.scale * lp[1], m.off[2] + m.scale * lp[2]};
     V3 size{m.scale * ls[0], m.scale * ls[1], m.scale * ls[2]};
+    if (L.prop) size = V3{ls[0] * L.base[0], ls[1] * L.base[1], ls[2] * L.base[2]};   // s=1 — родной размер модели, масштаб карты не применяем
     V3 rot{lr[0], lr[1], lr[2]};
     if (memcmp(L.pos, &pos, sizeof pos) != 0) {
         void* a[1] = {&pos};
@@ -911,6 +930,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     }
     if (memcmp(L.size, &size, sizeof size) != 0) { void* a[1] = {&size}; inv(F.set_scale, tr, a); memcpy(L.size, &size, sizeof size); }
     if (memcmp(L.rot, &rot, sizeof rot) != 0) { void* a[1] = {&rot}; inv(F.set_euler, tr, a); memcpy(L.rot, &rot, sizeof rot); }
+    if (L.prop) return;   // у модели игры свои материалы: цвет и текстуру не трогаем
     unsigned eff = o.tex.empty() ? o.color : 0xFFFFFFu;  // с текстурой цвет не красит её (иначе картинка тонет в коричневом)
     if (L.color != eff && F.type_renderer && F.get_component && F.get_material && F.set_color) {
         void* b[1] = {F.type_renderer};
@@ -1724,6 +1744,51 @@ bool clone_native(Live& L, const std::string& name, const V3& pos, float k, cons
     return true;
 }
 
+/** Копия модели игры по имени: только вид и коллайдеры, без скриптов (иначе она ведёт себя как оригинал и ломает сеть). */
+void* make_prop(const std::string& name, float* base) {
+    void* tmpl = find_native(name);
+    if (!tmpl || !F.go_transform || !F.get_gameobject) return nullptr;
+    void* tgo = F.get_gameobject ? inv(F.get_gameobject, tmpl) : nullptr;
+    if (!tgo) return nullptr;
+    if (!(F.instantiate_parent && F.go_ctor_str && F.set_active && F.set_parent && F.destroy_imm && F.get_comps_children && F.type_mono && goClass_())) return nullptr;
+    void* holder = obj_new(goClass_());
+    bool ok = false;
+    void* na[1] = {bearite_il2.string_new("Bearite/holder")};
+    inv(F.go_ctor_str, holder, na, &ok);
+    if (!ok) return nullptr;
+    uint8_t off = 0; void* sa[1] = {&off};
+    inv(F.set_active, holder, sa);
+    void* htr = inv(F.go_transform, holder);
+    void* ia[2] = {tgo, htr};
+    void* cgo = inv(F.instantiate_parent, nullptr, ia);
+    if (!cgo) return nullptr;
+    // скрипты и триггеры вон, пока копия выключена
+    for (int pass = 0; pass < 2; ++pass) {
+        void* type = pass == 0 ? F.type_mono : F.type_collider;
+        uint8_t inc = 1;
+        void* a[2] = {type, &inc};
+        void* comps = inv(F.get_comps_children, cgo, a);
+        if (!comps) continue;
+        uintptr_t cn = arr_len(comps);
+        for (uintptr_t i = 0; i < cn && i < 300; ++i) {
+            void* c = *(void**)arr_elem(comps, sizeof(void*), i);
+            if (!c) continue;
+            if (pass == 1) { void* it = F.col_is_trigger ? inv(F.col_is_trigger, c) : nullptr; if (!it || !*(const uint8_t*)obj_unbox(it)) continue; }
+            void* da[1] = {c}; bool ok2 = false;
+            inv(F.destroy_imm, nullptr, da, &ok2);
+        }
+    }
+    void* ctr = inv(F.go_transform, cgo);
+    void* pa[1] = {nullptr};
+    inv(F.set_parent, ctr, pa);
+    { void* da[1] = {holder}; inv(F.destroy, nullptr, da); }
+    // то, что игра прячет у оригинала, в копии включаем (рендереры могли быть выключены родителем)
+    void* ls = F.get_lossy_scale ? inv(F.get_lossy_scale, tmpl) : (F.get_local_scale ? inv(F.get_local_scale, tmpl) : nullptr);
+    if (ls) { float v[3]; memcpy(v, obj_unbox(ls), sizeof v); base[0] = v[0]; base[1] = v[1]; base[2] = v[2]; }
+    logf_("модель игры «%s» создана", name.c_str());
+    return cgo;
+}
+
 /** Один раз за сцену: ищет по имени объекты, похожие на круг/портал/вход (чтобы найти родной круг телепорта). */
 void scan_names() {
     if (!g_typeTransform || !F.get_transform) return;
@@ -2371,7 +2436,7 @@ void dump_scene() {
               M.isReadable != 0, M.verts != 0, M.tris != 0, M.uv != 0, M.l2w != 0);
     }
     bool meshOk = M.compGet && M.tMF && M.mfShared && M.verts && M.tris && M.l2w;
-    std::string inst;
+    std::string inst, names;
     int withMesh = 0;
     std::map<int, SceneMat> mats;
     bool oc = g_crumbs;
@@ -2475,6 +2540,7 @@ void dump_scene() {
                     }
                 }
                 inst += il; inst += '\n';
+                { std::string nn = name_of(tr2); for (char& ch : nn) if (ch == '\t' || ch == '\n') ch = ' '; names += std::to_string(n) + "\t" + nn + "\n"; }
                 ++withMesh;
             }
         }
@@ -2495,6 +2561,10 @@ void dump_scene() {
             fclose(fp); rename(mtmp.c_str(), mt.c_str());
         }
         if (FILE* fp = fopen(itmp.c_str(), "w")) { fputs(inst.c_str(), fp); fclose(fp); rename(itmp.c_str(), it2.c_str()); }
+        {
+            std::string np = g_mapsDir + "/_scene_names", npt = g_mapsDir + "/.scene_names.tmp";
+            if (FILE* fp = fopen(npt.c_str(), "w")) { fputs(names.c_str(), fp); fclose(fp); rename(npt.c_str(), np.c_str()); }
+        }
         {
             std::string miss;
             for (const auto& mm : g_meshMiss) {
@@ -3728,6 +3798,7 @@ void bind_unity() {
     F.col_is_trigger = m0(co, "get_isTrigger", 0);
     F.instantiate = find_method_types(ob, "Instantiate", {"Object"});
     F.get_local_scale = m0(tr, "get_localScale", 0);
+    F.get_lossy_scale = m0(tr, "get_lossyScale", 0);
     F.type_mono = type_of("UnityEngine", "MonoBehaviour");
     if (void* bh = bearite_find_class("UnityEngine", "Behaviour")) {
         F.beh_get_enabled = m0(bh, "get_enabled", 0);

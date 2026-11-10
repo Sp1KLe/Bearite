@@ -26,7 +26,7 @@ import kotlin.math.sqrt
 
 /** Заготовки сеток для примитивов Unity (размеры как у GameObject.CreatePrimitive). */
 /** Объект карты для слоя OpenGL: модель в координатах редактора (по столбцам), оттенок, своя текстура и повторы. */
-class ObjDraw(val shape: String, val model: FloatArray, val color: Int, val tex: String, val tu: Float, val tv: Float)
+class ObjDraw(val shape: String, val model: FloatArray, val color: Int, val tex: String, val tu: Float, val tv: Float, val propJ: Int = -1)
 
 object PrimMeshes {
     class Mesh(val v: FloatArray, val t: IntArray, val sign: FloatArray, val doubleSided: Boolean)
@@ -107,6 +107,14 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         set(v) { field = v; invalidate() }
     var snap = true
     var onSelect: ((Int) -> Unit)? = null
+    /** Режим «выбрать в мире»: следующее касание отдаёт луч (начало xyz, направление xyz) в координатах редактора. */
+    var pickWorld: ((FloatArray) -> Unit)? = null
+    fun ray(x: Float, y: Float): FloatArray {
+        val sx = (x - pcx) / focal; val sy = -(y - pcy) / focal
+        var dx = fx + rx * sx + ux * sy; var dy = fy + ry * sx + uy * sy; var dz = fz + rz * sx + uz * sy
+        val l = sqrt(dx * dx + dy * dy + dz * dz); dx /= l; dy /= l; dz /= l
+        return floatArrayOf(ex, ey, ez, dx, dy, dz)
+    }
     /** Объект изменён перетаскиванием (идёт процесс). */
     var onEdited: (() -> Unit)? = null
     /** Перетаскивание закончено: можно сохранять и запоминать для отмены. */
@@ -252,6 +260,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         set(v) { field = v; invalidate() }
     var onCamera: ((FloatArray) -> Unit)? = null
     var onObjects: ((List<ObjDraw>) -> Unit)? = null
+    /** Для модели игры (shape «prop:…»): S0 (родной размер, 3), центр коробки в осях модели (3), её размер (3), номер экземпляра сцены. */
+    var propBox: ((MapObj) -> FloatArray?)? = null
     private var pcx = 0f
     private var pcy = 0f
 
@@ -661,30 +671,42 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val p = FloatArray(3)
         val glList = if (gameView) ArrayList<ObjDraw>() else null
         for ((oi, o) in map.objects.withIndex()) {
-            val mesh = PrimMeshes.get(o.shape)
+            val pb = if (o.shape.startsWith("prop:")) propBox?.invoke(o) else null
+            val mesh = PrimMeshes.get(if (pb != null || o.shape.startsWith("prop:")) "cube" else o.shape)
             // предпросмотр анимации: положение объекта в текущий момент
             val anim = animate && o.an.isNotEmpty()
             if (anim) MapAnim.pose(o, (System.nanoTime() - animT0) / 1e9, ps)
             if (anim) rotXYZ(ps[3], ps[4], ps[5], m9) else rot(o, m9)
             val sxx = (if (anim) ps[6] else o.sx).toFloat(); val syy = (if (anim) ps[7] else o.sy).toFloat(); val szz = (if (anim) ps[8] else o.sz).toFloat()
             val opx = (if (anim) ps[0] else o.x).toFloat(); val opy = (if (anim) ps[1] else o.y).toFloat(); val opz = (if (anim) ps[2] else o.z).toFloat()
+            // коробка для выбора и контура: у модели игры это габариты её меша, у фигур — единичная фигура с размером объекта
+            var gx = sxx; var gy = syy; var gz = szz; var gcx = opx; var gcy = opy; var gcz = opz
+            if (pb != null) {
+                val ex = sxx * pb[0]; val ey = syy * pb[1]; val ez = szz * pb[2]
+                val lx = pb[3] * ex; val ly = pb[4] * ey; val lz = pb[5] * ez
+                gx = pb[6] * ex; gy = pb[7] * ey; gz = pb[8] * ez
+                gcx = opx + m9[0] * lx + m9[1] * ly + m9[2] * lz
+                gcy = opy + m9[3] * lx + m9[4] * ly + m9[5] * lz
+                gcz = opz + m9[6] * lx + m9[7] * ly + m9[8] * lz
+            }
             if (glList != null) {
-                // объекты рисует слой OpenGL вместе с моделями игры (общий буфер глубины): здесь только собираем их позы
+                // объекты рисует слой OpenGL вместе с моделями игры (общий буфер глубины); здесь собираем позы, а коробка нужна для выбора касанием
+                val ks = if (pb != null) floatArrayOf(pb[0], pb[1], pb[2]) else floatArrayOf(1f, 1f, 1f)
                 val md = FloatArray(16)
-                md[0] = m9[0] * sxx; md[1] = m9[3] * sxx; md[2] = m9[6] * sxx
-                md[4] = m9[1] * syy; md[5] = m9[4] * syy; md[6] = m9[7] * syy
-                md[8] = m9[2] * szz; md[9] = m9[5] * szz; md[10] = m9[8] * szz
+                md[0] = m9[0] * sxx * ks[0]; md[1] = m9[3] * sxx * ks[0]; md[2] = m9[6] * sxx * ks[0]
+                md[4] = m9[1] * syy * ks[1]; md[5] = m9[4] * syy * ks[1]; md[6] = m9[7] * syy * ks[1]
+                md[8] = m9[2] * szz * ks[2]; md[9] = m9[5] * szz * ks[2]; md[10] = m9[8] * szz * ks[2]
                 md[12] = opx; md[13] = opy; md[14] = opz; md[15] = 1f
-                glList.add(ObjDraw(o.shape, md, o.color, o.tex, o.tu.toFloat(), o.tv.toFloat()))
-                continue
+                glList.add(ObjDraw(o.shape, md, o.color, o.tex, o.tu.toFloat(), o.tv.toFloat(), if (pb != null) pb[9].toInt() else -1))
+                if (o.shape.startsWith("prop:") && pb == null) continue   // каталог ещё не загружен: модели нет, выбирать нечего
             }
             val nv = mesh.v.size / 3
             // мир (vtmp[i*6..2]) и экран (vtmp[i*6+3..5]; глубина < 0 → не виден)
             for (i in 0 until nv) {
-                val vx = mesh.v[i * 3] * sxx; val vy = mesh.v[i * 3 + 1] * syy; val vz = mesh.v[i * 3 + 2] * szz
-                val wx = m9[0] * vx + m9[1] * vy + m9[2] * vz + opx
-                val wy = m9[3] * vx + m9[4] * vy + m9[5] * vz + opy
-                val wz = m9[6] * vx + m9[7] * vy + m9[8] * vz + opz
+                val vx = mesh.v[i * 3] * gx; val vy = mesh.v[i * 3 + 1] * gy; val vz = mesh.v[i * 3 + 2] * gz
+                val wx = m9[0] * vx + m9[1] * vy + m9[2] * vz + gcx
+                val wy = m9[3] * vx + m9[4] * vy + m9[5] * vz + gcy
+                val wz = m9[6] * vx + m9[7] * vy + m9[8] * vz + gcz
                 vtmp[i * 6] = wx; vtmp[i * 6 + 1] = wy; vtmp[i * 6 + 2] = wz
                 if (proj(wx, wy, wz, p)) { vtmp[i * 6 + 3] = p[0]; vtmp[i * 6 + 4] = p[1]; vtmp[i * 6 + 5] = p[2] }
                 else vtmp[i * 6 + 5] = -1f
@@ -747,8 +769,8 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         glList?.let { onObjects?.invoke(it) }
         java.util.Arrays.sort(order, 0, triCount)
         for (k in 0 until triCount) sortedIdx[k] = (order[k] and 0xFFFFFFFFL).toInt()
-        // рисуем от дальних к ближним
-        for (k in triCount - 1 downTo 0) {
+        // рисуем от дальних к ближним (в режиме мира OpenGL треугольники нужны только для выбора касанием)
+        for (k in (if (gameView) -1 else triCount - 1) downTo 0) {
             val i = sortedIdx[k]
             path.rewind()
             path.moveTo(triScr[i * 6], triScr[i * 6 + 1])
@@ -776,15 +798,22 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         val o = map.objects.getOrNull(selected) ?: return
         rot(o, m9)
         line.color = 0xFFFFA52F.toInt(); line.strokeWidth = 2f * d
-        val hx = if (o.shape == "plane") 5f * o.sx.toFloat() else 0.5f * o.sx.toFloat()
-        val hz = if (o.shape == "plane") 5f * o.sz.toFloat() else 0.5f * o.sz.toFloat()
-        val hy = when (o.shape) { "plane" -> 0f; "cylinder", "capsule", "portal" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
+        val pbo = if (o.shape.startsWith("prop:")) propBox?.invoke(o) else null
+        var ocx = o.x.toFloat(); var ocy = o.y.toFloat(); var ocz = o.z.toFloat()
+        if (pbo != null) {
+            val ex = o.sx.toFloat() * pbo[0]; val ey = o.sy.toFloat() * pbo[1]; val ez = o.sz.toFloat() * pbo[2]
+            val lx = pbo[3] * ex; val ly = pbo[4] * ey; val lz = pbo[5] * ez
+            ocx += m9[0] * lx + m9[1] * ly + m9[2] * lz; ocy += m9[3] * lx + m9[4] * ly + m9[5] * lz; ocz += m9[6] * lx + m9[7] * ly + m9[8] * lz
+        }
+        val hx = if (pbo != null) 0.5f * pbo[6] * o.sx.toFloat() * pbo[0] else if (o.shape == "plane") 5f * o.sx.toFloat() else 0.5f * o.sx.toFloat()
+        val hz = if (pbo != null) 0.5f * pbo[8] * o.sz.toFloat() * pbo[2] else if (o.shape == "plane") 5f * o.sz.toFloat() else 0.5f * o.sz.toFloat()
+        val hy = if (pbo != null) 0.5f * pbo[7] * o.sy.toFloat() * pbo[1] else when (o.shape) { "plane" -> 0f; "cylinder", "capsule", "portal" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
         val cs = Array(8) { i ->
             val vx = (if (i and 1 == 0) -hx else hx); val vy = (if (i and 2 == 0) -hy else hy); val vz = (if (i and 4 == 0) -hz else hz)
             floatArrayOf(
-                m9[0] * vx + m9[1] * vy + m9[2] * vz + o.x.toFloat(),
-                m9[3] * vx + m9[4] * vy + m9[5] * vz + o.y.toFloat(),
-                m9[6] * vx + m9[7] * vy + m9[8] * vz + o.z.toFloat()
+                m9[0] * vx + m9[1] * vy + m9[2] * vz + ocx,
+                m9[3] * vx + m9[4] * vy + m9[5] * vz + ocy,
+                m9[6] * vx + m9[7] * vy + m9[8] * vz + ocz
             )
         }
         for (i in 0 until 8) for (bit in intArrayOf(1, 2, 4)) {
@@ -992,6 +1021,9 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
                 touching = false; postInvalidate()
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (dragMode != 0) { if (moved) onCommit?.invoke() }
+                else if (!moved && !panning && pickWorld != null) {
+                    val cb = pickWorld; pickWorld = null; cb?.invoke(ray(e.x, e.y))
+                }
                 else if (!moved && !panning) {
                     val hit = pick(e.x, e.y)
                     selected = hit
