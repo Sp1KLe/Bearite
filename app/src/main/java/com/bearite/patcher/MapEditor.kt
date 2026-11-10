@@ -87,8 +87,9 @@ class MapEditor(
         vp.onCamera = { gl.setCamera(it) }
         vp.onObjects = { gl.setObjects(it) }
         vp.propBox = { o -> propBoxOf(o) }
-        setGameView(true)
-        loadScene(auto = true)
+        vp.showScene = false
+        setGameView(false)
+        loadScene(auto = true)   // мир рисовать не нужно, данные нужны только для каталога моделей
         refreshTree()
         showInspector()
         dlg.show()
@@ -191,11 +192,9 @@ class MapEditor(
             if (vp.showScene && vp.scene == null) loadScene()
             paintTools(); vp.invalidate()
         }
-        tools.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         gameBtn = ui.pill("Модели", sizeSp = 13f) { setGameView(!vp.gameView) }
-        tools.addView(gameBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         realBtn = ui.pill("", sizeSp = 13f) {}  // устарело: рендер игры больше не используется
-        tools.addView(ui.pill("↻ Мир", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
+        tools.addView(ui.pill("↻ Каталог", sizeSp = 13f) { loadScene() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         animBtn = ui.pill("▶ Анимация", sizeSp = 13f) { vp.animate = !vp.animate; paintTools() }
         tools.addView(animBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
         tools.addView(ui.pill("Экспорт .glb", sizeSp = 13f) { exportGlb() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply { leftMargin = dp(4) })
@@ -394,53 +393,9 @@ class MapEditor(
         vp.invalidate()
     }
 
-    /** Следующее касание в мире берёт объект игры под пальцем и ставит его копию в карту. */
-    private fun pickPropFromWorld() {
-        val sc = vp.scene ?: return toast("Мир игры ещё не загружен: нажми «↻ Мир»")
-        val ins = vp.sceneInst
-        toast("Коснись объекта игры, который нужно скопировать")
-        vp.pickWorld = { ray ->
-            val k = if (map.scale == 0.0) 1f else map.scale.toFloat()
-            var best = -1; var bt = 1e30f
-            for (b in 0 until sc.size / 10) {
-                val cx = (sc[b * 10] - map.ox.toFloat()) / k; val cy = (sc[b * 10 + 1] - map.oy.toFloat()) / k; val cz = (sc[b * 10 + 2] - map.oz.toFloat()) / k
-                val hx = sc[b * 10 + 3] / k; val hy = sc[b * 10 + 4] / k; val hz = sc[b * 10 + 5] / k
-                var t0 = 0f; var t1 = 1e30f
-                val o = floatArrayOf(ray[0] - cx, ray[1] - cy, ray[2] - cz); val d = floatArrayOf(ray[3], ray[4], ray[5]); val h = floatArrayOf(hx, hy, hz)
-                var ok = true
-                for (a in 0..2) {
-                    if (Math.abs(d[a]) < 1e-7f) { if (Math.abs(o[a]) > h[a]) { ok = false; break } }
-                    else {
-                        var ta = (-h[a] - o[a]) / d[a]; var tb = (h[a] - o[a]) / d[a]
-                        if (ta > tb) { val q = ta; ta = tb; tb = q }
-                        t0 = maxOf(t0, ta); t1 = minOf(t1, tb)
-                        if (t0 > t1) { ok = false; break }
-                    }
-                }
-                // у «земли» и огромных коробок смысла нет: берём то, что меньше 200 единиц
-                if (ok && t0 < bt && hx < 100f && hz < 100f && sceneNames[b]?.isNotBlank() == true && ins?.get(b) != null) { bt = t0; best = b }
-            }
-            if (best < 0) toast("Здесь нет объекта игры")
-            else {
-                val inst = ins!![best]!!; val m = inst.m
-                val nm = sceneNames[best] ?: "Модель"
-                if (!propIndex().containsKey(nm)) toast("У «$nm» нет читаемой модели")
-                else {
-                    fun n(c: Int) = Math.sqrt((m[c * 4] * m[c * 4] + m[c * 4 + 1] * m[c * 4 + 1] + m[c * 4 + 2] * m[c * 4 + 2]).toDouble()).coerceAtLeast(1e-6)
-                    val r = { rr: Int, cc: Int -> m[cc * 4 + rr] / n(cc) }
-                    val ex = Math.toDegrees(Math.asin((-r(1, 2)).coerceIn(-1.0, 1.0)))
-                    val ey = Math.toDegrees(Math.atan2(r(0, 2), r(2, 2)))
-                    val ez = Math.toDegrees(Math.atan2(r(1, 0), r(1, 1)))
-                    addProp(nm, doubleArrayOf(r2((m[12] - map.ox) / k), r2((m[13] - map.oy) / k), r2((m[14] - map.oz) / k)), doubleArrayOf(r2(ex), r2(ey), r2(ez)))
-                    toast("Скопировано: $nm")
-                }
-            }
-        }
-    }
-
     private fun propsDialog() {
         val names = propIndex().keys.toList()
-        if (names.isEmpty()) return toast(if (vp.sceneMeshes == null) "Мир игры ещё не загружен: нажми «↻ Мир»" else "В мире игры нет читаемых моделей (нужен свежий мод)")
+        if (names.isEmpty()) return toast(if (vp.sceneMeshes == null) "Мир игры ещё не загружен: нажми «↻ Каталог»" else "В мире игры нет читаемых моделей (нужен свежий мод)")
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var dlg: android.app.Dialog? = null
         val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
@@ -485,8 +440,7 @@ class MapEditor(
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         col.addView(ui.label("Модели игры", 13f, M3.VARIANT).apply { setPadding(0, dp(16), 0, 0) })
         val prow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        prow.addView(ui.pill("Каталог", sizeSp = 13f) { dlg?.dismiss(); propsDialog() }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(6) })
-        prow.addView(ui.pill("Выбрать в мире", sizeSp = 13f) { dlg?.dismiss(); pickPropFromWorld() }, LinearLayout.LayoutParams(0, dp(40), 1f))
+        prow.addView(ui.pill("Каталог", sizeSp = 13f) { dlg?.dismiss(); propsDialog() }, LinearLayout.LayoutParams(0, dp(40), 1f))
         col.addView(prow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         col.addView(ui.label("Шаблоны", 13f, M3.VARIANT).apply { setPadding(0, dp(16), 0, 0) })
         val hints = listOf("один большой пол", "8 ступеней вверх", "пол и четыре стены")
@@ -591,7 +545,7 @@ class MapEditor(
                     return
                 }
                 if (++tries < 12) h.postDelayed(this, 500)
-                else if (!auto) toast("Игра не ответила. Подожди секунду и нажми «↻ Мир»")
+                else if (!auto) toast("Игра не ответила. Подожди секунду и нажми «↻ Каталог»")
             }
         })
     }
