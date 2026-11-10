@@ -128,6 +128,25 @@ class MapStore(private val dir: File) {
         null
     }
 
+    /** Картинка из байтов (текстура пропа из .glb) под заданным id: PNG для превью и сырой RGBA для игры. */
+    fun saveTextureBytes(id: String, bytes: ByteArray): Boolean = try {
+        var bm = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IllegalStateException("не удалось прочитать картинку")
+        val k = 512f / maxOf(bm.width, bm.height)
+        if (k < 1f) bm = android.graphics.Bitmap.createScaledBitmap(bm, maxOf(1, (bm.width * k).toInt()), maxOf(1, (bm.height * k).toInt()), true)
+        File(texDir, "$id.png").outputStream().use { bm.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        val w = bm.width; val h = bm.height
+        val px = IntArray(w * h)
+        bm.getPixels(px, 0, w, 0, 0, w, h)
+        val buf = java.nio.ByteBuffer.allocate(8 + w * h * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buf.putInt(w).putInt(h)
+        for (y in h - 1 downTo 0) for (x in 0 until w) {
+            val c = px[y * w + x]
+            buf.put(((c shr 16) and 255).toByte()).put(((c shr 8) and 255).toByte()).put((c and 255).toByte()).put(((c ushr 24) and 255).toByte())
+        }
+        File(texDir, "$id.tex").writeBytes(buf.array())
+        true
+    } catch (_: Throwable) { false }
+
     fun deleteTexture(id: String) { File(texDir, "$id.png").delete(); File(texDir, "$id.tex").delete() }
 
     private val avgCache = HashMap<String, Int>()
@@ -363,7 +382,7 @@ class MapStore(private val dir: File) {
                     val n = DoubleArray(9) { p[3 + it].toDoubleOrNull() ?: 0.0 }
                     m.objects.add(
                         MapObj(
-                            name = p[1], shape = if (p[2] in SHAPES || p[2].startsWith("prop:")) p[2] else "cube",
+                            name = p[1], shape = if (p[2] in SHAPES || p[2].startsWith("prop:") || p[2].startsWith("cprop:")) p[2] else "cube",
                             x = n[0], y = n[1], z = n[2], sx = n[3], sy = n[4], sz = n[5],
                             rx = n[6], ry = n[7], rz = n[8],
                             color = p[12].toIntOrNull(16) ?: 0x8D5338, solid = p[13] == "1",

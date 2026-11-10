@@ -814,6 +814,50 @@ int primitive_id(const std::string& s) {
     return 3;
 }
 
+void* type_of(const char* ns, const char* name);
+
+/** Модель сообщества: меш из maps/props/<id>.mesh ставится в MeshFilter примитива (куб), остальное (материал, текстуру) делает обычный путь объекта. */
+bool apply_custom_mesh(void* go, const std::string& id) {
+    std::vector<unsigned char> raw;
+    if (!read_file(g_mapsDir + "/props/" + id + ".mesh", raw) || raw.size() < 8) { logf_("проп сообщества %s: файл не найден", id.c_str()); return false; }
+    int nv = 0, ni = 0;
+    memcpy(&nv, raw.data(), 4); memcpy(&ni, raw.data() + 4, 4);
+    if (nv < 3 || nv > 65535 || ni < 3 || ni > 600000 || raw.size() != (size_t)8 + (size_t)nv * 20 + (size_t)ni * 4) { logf_("проп сообщества %s: повреждённый файл", id.c_str()); return false; }
+    void* meshK = bearite_find_class("UnityEngine", "Mesh");
+    void* v3K = bearite_find_class("UnityEngine", "Vector3");
+    void* v2K = bearite_find_class("UnityEngine", "Vector2");
+    void* i32K = bearite_find_class("System", "Int32");
+    void* mfK = bearite_find_class("UnityEngine", "MeshFilter");
+    void* tMF = type_of("UnityEngine", "MeshFilter");
+    if (!meshK || !v3K || !v2K || !i32K || !mfK || !tMF || !arr_new || !obj_new || !F.get_component) { logf_("проп сообщества: в игре нет нужных классов"); return false; }
+    auto M = [&](void* k, const char* n, int argc) { return bearite_il2.class_get_method_from_name(k, n, argc); };
+    void* ctor = M(meshK, ".ctor", 0); void* sv = M(meshK, "set_vertices", 1); void* su = M(meshK, "set_uv", 1); void* st = M(meshK, "set_triangles", 1);
+    void* rn = M(meshK, "RecalculateNormals", 0); void* rb = M(meshK, "RecalculateBounds", 0); void* smf = M(mfK, "set_sharedMesh", 1);
+    if (!ctor || !sv || !su || !st || !smf) { logf_("проп сообщества: нет методов Mesh (ctor=%d v=%d uv=%d tri=%d mf=%d)", ctor != 0, sv != 0, su != 0, st != 0, smf != 0); return false; }
+    void* mesh = obj_new(meshK);
+    if (!mesh) return false;
+    bool ok = false;
+    inv(ctor, mesh, nullptr, &ok);
+    if (!ok) return false;
+    void* av = arr_new(v3K, nv); void* au = arr_new(v2K, nv); void* ai = arr_new(i32K, ni);
+    if (!av || !au || !ai) return false;
+    memcpy(arr_elem(av, 12, 0), raw.data() + 8, (size_t)nv * 12);
+    memcpy(arr_elem(au, 8, 0), raw.data() + 8 + (size_t)nv * 12, (size_t)nv * 8);
+    memcpy(arr_elem(ai, 4, 0), raw.data() + 8 + (size_t)nv * 20, (size_t)ni * 4);
+    { void* a[1] = {av}; inv(sv, mesh, a); }
+    { void* a[1] = {au}; inv(su, mesh, a); }
+    { void* a[1] = {ai}; inv(st, mesh, a); }
+    if (rn) inv(rn, mesh, nullptr);
+    if (rb) inv(rb, mesh, nullptr);
+    void* ga[1] = {tMF};
+    void* mf = inv(F.get_component, go, ga);
+    if (!mf) { logf_("проп сообщества %s: у примитива нет MeshFilter", id.c_str()); return false; }
+    void* a[1] = {mesh};
+    inv(smf, mf, a);
+    logf_("проп сообщества «%s» создан (%d вершин, %d треугольников)", id.c_str(), nv, ni / 3);
+    return true;
+}
+
 void* make_prop(const std::string& name, float* base);
 std::map<std::string, long long> g_propTry;
 
@@ -836,6 +880,7 @@ bool create_live(Live& L, const Obj& o, const MapSpec& m, const std::string& ful
         go = inv(F.create_primitive, nullptr, a, &ok);
         if (!go) return false;
         L.prop = false;
+        if (o.shape.rfind("cprop:", 0) == 0) apply_custom_mesh(go, o.shape.substr(6));
     }
     L.h = gch_new(go, 0);
     ++g_liveCount;

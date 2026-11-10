@@ -394,54 +394,137 @@ class MapEditor(
         vp.invalidate()
     }
 
-    /** Окно выбора объектов: широкое, плиточное. Фигуры и модели игры в одной сетке, сверху поиск. */
+    private val shop = PropShop(File(store.dirPath()), store)
+    private var pickTab = 0   // 0 фигуры, 1 игра, 2 сообщество
+
+    /** Окно выбора объектов: широкое, плиточное. Вкладки: фигуры, модели игры, пропы сообщества (с магазином). */
     private fun addMenu() {
+        PrimMeshes.loader = { id -> shop.loadMesh(id) }
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         var dlg: android.app.Dialog? = null
         val grid = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
         val cols = 5
-        fun tile(glyph: String, title: String, click: () -> Unit): View = LinearLayout(act).apply {
+        var query = ""
+        lateinit var refill: () -> Unit
+        fun tile(glyph: String, title: String, click: () -> Unit, long: (() -> Unit)? = null): View = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             background = ui.round(M3.HIGH, 16, M3.OUTLINE_V)
             setPadding(dp(6), dp(6), dp(6), dp(6))
-            setOnClickListener { dlg?.dismiss(); click() }
+            setOnClickListener { click() }
+            if (long != null) setOnLongClickListener { long(); true }
             addView(ui.label(glyph, 26f, M3.PRIMARY).apply { gravity = Gravity.CENTER })
             addView(ui.label(title, 11f, M3.ON_SURF, bold = false).apply { gravity = Gravity.CENTER; maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
         }
-        fun header(t: String) = grid.addView(ui.label(t, 13f, M3.VARIANT).apply { setPadding(0, dp(12), 0, dp(2)) })
-        fun addTiles(items: List<Triple<String, String, () -> Unit>>) {
+        fun note(t: String) = grid.addView(ui.label(t, 12f, M3.VARIANT, bold = false).apply { setPadding(0, dp(10), 0, dp(2)) })
+        class T(val g: String, val t: String, val c: () -> Unit, val l: (() -> Unit)? = null)
+        fun addTiles(items: List<T>) {
             var i = 0
             while (i < items.size) {
                 val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
                 for (k in 0 until cols) {
                     val it = items.getOrNull(i + k)
-                    if (it != null) row.addView(tile(it.first, it.second, it.third), LinearLayout.LayoutParams(0, dp(84), 1f).apply { rightMargin = dp(6); topMargin = dp(6) })
+                    if (it != null) row.addView(tile(it.g, it.t, it.c, it.l), LinearLayout.LayoutParams(0, dp(84), 1f).apply { rightMargin = dp(6); topMargin = dp(6) })
                     else row.addView(View(act), LinearLayout.LayoutParams(0, dp(84), 1f).apply { rightMargin = dp(6) })
                 }
                 grid.addView(row)
                 i += cols
             }
         }
-        fun fill(q: String) {
+        fun fill() {
             grid.removeAllViews()
-            val shapes = MapStore.SHAPES.filter { q.isBlank() || (MapStore.SHAPE_NAMES[it] ?: it).contains(q, true) }
-            if (shapes.isNotEmpty()) { header("Фигуры"); addTiles(shapes.map { sh -> Triple(glyph(sh), MapStore.SHAPE_NAMES[sh] ?: sh, { addObject(sh) }) }) }
-            val names = (propIndex().keys + allProps).toSortedSet(String.CASE_INSENSITIVE_ORDER).filter { q.isBlank() || it.contains(q, true) }
-            if (names.isNotEmpty()) {
-                header("Модели игры · ${names.size}")
-                addTiles(names.take(150).map { nm -> Triple("◆", nm, { addProp(nm) }) })
-                if (names.size > 150) grid.addView(ui.label("…ещё ${names.size - 150}: уточни поиск", 12f, M3.VARIANT, bold = false))
-            } else if (q.isBlank()) {
-                header("Модели игры")
-                grid.addView(ui.label("Каталог пуст: нажми «↻ Каталог» в панели и открой окно снова (нужен свежий мод)", 12f, M3.VARIANT, bold = false))
+            val q = query
+            when (pickTab) {
+                0 -> {
+                    val shapes = MapStore.SHAPES.filter { q.isBlank() || (MapStore.SHAPE_NAMES[it] ?: it).contains(q, true) }
+                    if (shapes.isEmpty()) note("Ничего не найдено")
+                    addTiles(shapes.map { sh -> T(glyph(sh), MapStore.SHAPE_NAMES[sh] ?: sh, { dlg?.dismiss(); addObject(sh) }) })
+                }
+                1 -> {
+                    val names = (propIndex().keys + allProps).toSortedSet(String.CASE_INSENSITIVE_ORDER).filter { q.isBlank() || it.contains(q, true) }
+                    if (names.isEmpty()) note(if (q.isBlank()) "Каталог пуст: нажми «↻ Каталог» в панели и открой окно снова (нужен свежий мод)" else "Ничего не найдено")
+                    else note("Моделей игры: ${names.size}")
+                    addTiles(names.take(150).map { nm -> T("◆", nm, { dlg?.dismiss(); addProp(nm) }) })
+                    if (names.size > 150) note("…ещё ${names.size - 150}: уточни поиск")
+                }
+                else -> {
+                    grid.addView(ui.pill("Магазин пропов", primary = true, sizeSp = 13f) { dlg?.dismiss(); shopDialog() },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(6) })
+                    val list = shop.installed().filter { q.isBlank() || it.second.contains(q, true) }
+                    if (list.isEmpty()) note(if (q.isBlank()) "Пока нет скачанных пропов: загляни в магазин" else "Ничего не найдено")
+                    else note("Скачано: ${list.size} · долгое нажатие — удалить")
+                    addTiles(list.map { (id, nm) -> T("★", nm, { dlg?.dismiss(); addCommunityProp(id, nm) }, {
+                        ui.dialog("Удалить «$nm»?", null, listOf(GameUi.Btn("Отмена"), GameUi.Btn("Удалить", danger = true) { shop.remove(id); PrimMeshes.forget("cprop:$id"); refill() })).show()
+                    }) })
+                }
             }
         }
-        col.addView(ui.textInput("", 700, "Поиск по названию") { fill(it) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)))
-        col.addView(ScrollView(act).apply { addView(grid) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360)).apply { topMargin = dp(4) })
-        fill("")
+        refill = { fill() }
+        val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabViews = ArrayList<TextView>()
+        listOf("Фигуры", "Игра", "Сообщество").forEachIndexed { i, nm ->
+            val t = ui.pill(nm, primary = i == pickTab, sizeSp = 13f) { pickTab = i; tabViews.forEachIndexed { k, v -> v.alpha = if (k == i) 1f else 0.6f }; fill() }
+            t.alpha = if (i == pickTab) 1f else 0.6f
+            tabViews.add(t)
+            tabs.addView(t, LinearLayout.LayoutParams(0, dp(38), 1f).apply { rightMargin = dp(6) })
+        }
+        col.addView(tabs)
+        col.addView(ui.textInput("", 700, "Поиск по названию") { query = it; fill() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(8) })
+        col.addView(ScrollView(act).apply { addView(grid) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(340)).apply { topMargin = dp(4) })
+        fill()
         dlg = ui.dialog("Добавить объект", col, listOf(GameUi.Btn("Закрыть")), widthDp = 760)
         dlg.show()
+    }
+
+    /** Магазин: список из релиза «props» проекта, скачивание в одно касание. */
+    private fun shopDialog() {
+        val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        val status = ui.label("Загружаю список…", 13f, M3.VARIANT, bold = false)
+        list.addView(status)
+        col.addView(ScrollView(act).apply { addView(list) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(340)))
+        val d = ui.dialog("Магазин пропов", col, listOf(GameUi.Btn("Закрыть")) , onCancel = null, widthDp = 640)
+        d.setOnDismissListener { addMenu() }
+        d.show()
+        shop.fetchIndex { items, err ->
+            list.removeAllViews()
+            if (items == null) { list.addView(ui.label("Не удалось загрузить: ${err ?: "нет связи"}", 13f, M3.VARIANT, bold = false)); return@fetchIndex }
+            if (items.isEmpty()) { list.addView(ui.label("В магазине пока пусто", 13f, M3.VARIANT, bold = false)); return@fetchIndex }
+            for (e in items) {
+                val row = LinearLayout(act).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    background = ui.round(M3.HIGH, 14, M3.OUTLINE_V); setPadding(dp(14), dp(8), dp(10), dp(8))
+                }
+                val tx = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+                tx.addView(ui.label(e.name, 15f))
+                val sub = (if (e.author.isNotEmpty()) e.author + " · " else "") + (if (e.size > 0) "%.1f МБ".format(e.size / 1048576.0) else "")
+                if (sub.isNotEmpty()) tx.addView(ui.label(sub, 12f, M3.VARIANT, bold = false))
+                row.addView(tx, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val btn = ui.pill(if (shop.isInstalled(e.id)) "Скачано" else "Скачать", sizeSp = 13f) {}
+                btn.setOnClickListener {
+                    btn.text = "…"
+                    shop.download(e) { er -> if (er == null) btn.text = "Скачано" else { btn.text = "Скачать"; toast("Не вышло: $er") } }
+                }
+                row.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
+                list.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+            }
+        }
+    }
+
+    private fun addCommunityProp(id: String, name: String) {
+        val o = MapObj(name, "cprop:$id")
+        o.solid = false
+        if (store.textureFile("cp_$id") != null) o.tex = "cp_$id"
+        val sp = vp.spawnPoint()
+        o.x = sp[0].toDouble(); o.z = sp[2].toDouble()
+        val mesh = PrimMeshes.get(o.shape)
+        var lo = 1e9f; var i = 1
+        while (i < mesh.v.size) { lo = minOf(lo, mesh.v[i]); i += 3 }
+        o.y = if (lo < 1e8f) -lo.toDouble() else 0.0   // модель стоит на земле
+        map.objects.add(o)
+        commit()
+        select(map.objects.size - 1)
+        vp.invalidate()
     }
 
     private fun addObject(shape: String) {

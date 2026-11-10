@@ -29,11 +29,23 @@ import kotlin.math.sqrt
 class ObjDraw(val shape: String, val model: FloatArray, val color: Int, val tex: String, val tu: Float, val tv: Float, val propJ: Int = -1)
 
 object PrimMeshes {
-    class Mesh(val v: FloatArray, val t: IntArray, val sign: FloatArray, val doubleSided: Boolean)
+    class Mesh(val v: FloatArray, val t: IntArray, val sign: FloatArray, val doubleSided: Boolean, val uv: FloatArray? = null)
+    /** Загрузка модели сообщества по id: вершины, uv, индексы. */
+    var loader: ((String) -> Triple<FloatArray, FloatArray, IntArray>?)? = null
 
     private val cache = HashMap<String, Mesh>()
 
-    fun get(shape: String): Mesh = cache.getOrPut(if (shape == "portal") "cylinder" else shape) {
+    fun get(shape: String): Mesh {
+        if (shape.startsWith("cprop:")) {
+            cache[shape]?.let { return it }
+            val d = loader?.invoke(shape.substring(6)) ?: return get("cube")
+            return Mesh(d.first, d.third, FloatArray(d.third.size / 3), true, d.second).also { cache[shape] = it }
+        }
+        return getPrim(shape)
+    }
+    fun forget(shape: String) { cache.remove(shape) }
+
+    private fun getPrim(shape: String): Mesh = cache.getOrPut(if (shape == "portal") "cylinder" else shape) {
         when (if (shape == "portal") "cylinder" else shape) {
             "sphere" -> {
                 val l = ArrayList<Pair<Float, Float>>()
@@ -183,6 +195,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
 
     /** Координаты текстуры вершины в локальных осях фигуры: куб и плоскость — по грани, тела вращения — вокруг оси Y. */
     private fun uv(shape: String, mesh: PrimMeshes.Mesh, i: Int, nax: Int, out: FloatArray, o: Int) {
+        mesh.uv?.let { out[o] = it[i * 2]; out[o + 1] = it[i * 2 + 1]; return }
         val x = mesh.v[i * 3]; val y = mesh.v[i * 3 + 1]; val z = mesh.v[i * 3 + 2]
         when (shape) {
             "sphere", "cylinder", "capsule", "portal" -> {
