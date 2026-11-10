@@ -285,6 +285,13 @@ class MapStore(private val dir: File) {
         return out
     }
 
+    /** Все модели, что мод нашёл в памяти игры (в том числе не на этом уровне): по одному имени в строке. */
+    fun readAllProps(): List<String> {
+        val f = File(dir, "_props_all")
+        if (!f.isFile) return emptyList()
+        return try { f.readLines().map { it.trim() }.filter { it.isNotEmpty() } } catch (_: Throwable) { emptyList() }
+    }
+
     /** Текстура материала мира игры (выгружает нативный мод в maps/scene_tex/N.png). */
     fun sceneTexFile(idx: Int): File? = File(File(dir, "scene_tex"), "$idx.png").takeIf { it.isFile }
 

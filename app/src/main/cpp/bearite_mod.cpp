@@ -285,7 +285,7 @@ struct Fns {
     // текстуры
     void *tex2d, *set_main_tex, *set_main_tex_scale, *set_hideflags, *image_conv;
     // отдельный мир
-    void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted;
+    void *get_iid, *get_parent, *get_child_count, *get_gameobject, *find_tag, *find_obj, *find_objs, *find_objs_sorted, *find_all;
     void *rend_set_enabled, *rend_get_enabled, *col_get_enabled, *cam_set_flags, *cam_get_flags, *cam_set_bg, *cam_get_bg;
     void *type_cc, *type_kcm, *kcm_set_pos;
     void *instantiate, *get_local_scale, *get_lossy_scale, *get_layer, *load_scene;
@@ -1556,6 +1556,17 @@ void* find_native(const std::string& name) {
         void* tr = *(void**)arr_elem(arr, sizeof(void*), i);
         if (tr && name_of(tr) == name) found = tr;
     }
+    if (!found && F.find_all) {   // в сцене нет — ищем среди выключенных объектов и заготовок, загруженных в память
+        void* a[1] = {g_typeTransform};
+        if (void* all = inv(F.find_all, nullptr, a)) {
+            uintptr_t m = arr_len(all);
+            if (m > 200000) m = 200000;
+            for (uintptr_t i = 0; i < m && !found; ++i) {
+                void* tr = *(void**)arr_elem(all, sizeof(void*), i);
+                if (tr && name_of(tr) == name) found = tr;
+            }
+        }
+    }
     g_crumbs = oc;
     return found;
 }
@@ -2552,6 +2563,32 @@ void dump_scene() {
     g_crumbs = oc;
     std::string path = g_mapsDir + "/_scene", tmp = g_mapsDir + "/.scene.tmp";
     if (FILE* fp = fopen(tmp.c_str(), "w")) { fputs(out.c_str(), fp); fclose(fp); rename(tmp.c_str(), path.c_str()); }
+    if (F.find_all && F.get_parent && F.get_gameobject && F.get_comps_children && F.type_renderer) {
+        // все корневые объекты с видом, что есть в памяти (в том числе выключенные и заготовки): каталог моделей шире, чем текущий уровень
+        std::string all; std::unordered_set<std::string> seen;
+        void* ta[1] = {g_typeTransform};
+        if (void* arrAll = inv(F.find_all, nullptr, ta)) {
+            uintptr_t m = arr_len(arrAll);
+            if (m > 200000) m = 200000;
+            int kept = 0;
+            for (uintptr_t i = 0; i < m && kept < 4000; ++i) {
+                void* tr = *(void**)arr_elem(arrAll, sizeof(void*), i);
+                if (!tr || inv(F.get_parent, tr)) continue;
+                std::string nn = name_of(tr);
+                if (nn.empty() || nn.rfind("Bearite", 0) == 0 || !seen.insert(nn).second) continue;
+                void* go2 = inv(F.get_gameobject, tr);
+                if (!go2) continue;
+                uint8_t inc = 1; void* ra[2] = {F.type_renderer, &inc};
+                void* rs = inv(F.get_comps_children, go2, ra);
+                if (!rs || arr_len(rs) == 0) continue;
+                for (char& ch : nn) if (ch == '\t' || ch == '\n') ch = ' ';
+                all += nn; all += '\n'; ++kept;
+            }
+            logf_("модели в памяти игры: %d", kept);
+        }
+        std::string ap = g_mapsDir + "/_props_all", apt = g_mapsDir + "/.props_all.tmp";
+        if (FILE* fp = fopen(apt.c_str(), "w")) { fputs(all.c_str(), fp); fclose(fp); rename(apt.c_str(), ap.c_str()); }
+    }
     if (meshOk) {
         std::string mt = g_mapsDir + "/_meshes", mtmp = g_mapsDir + "/.meshes.tmp", it2 = g_mapsDir + "/_scene_inst", itmp = g_mapsDir + "/.scene_inst.tmp";
         if (FILE* fp = fopen(mtmp.c_str(), "wb")) {
@@ -3821,6 +3858,8 @@ void bind_unity() {
     F.find_obj = find_method_p0(ob, "FindObjectOfType", 1, "Type");
     F.find_objs = find_method_p0(ob, "FindObjectsOfType", 1, "Type");
     F.find_objs_sorted = find_method_types(ob, "FindObjectsByType", {"Type", "FindObjectsSortMode"});
+    if (void* rsk = bearite_find_class("UnityEngine", "Resources")) F.find_all = find_method_p0(rsk, "FindObjectsOfTypeAll", 1, "Type");
+    logf_("поиск среди всех загруженных объектов: %d", F.find_all != nullptr);
     F.rend_set_enabled = m0(rd, "set_enabled", 1);
     F.rend_get_enabled = m0(rd, "get_enabled", 0);
     F.col_get_enabled = m0(co, "get_enabled", 0);

@@ -342,6 +342,7 @@ class MapEditor(
 
     private var sceneNames: Map<Int, String> = emptyMap()
     private var propIdx: Map<String, Int>? = null
+    private var allProps: List<String> = emptyList()
     private val propBoxes = HashMap<String, FloatArray?>()
 
     /** Имя модели → номер объекта сцены, у которого есть читаемый меш (для каждого имени берём первый). */
@@ -426,12 +427,12 @@ class MapEditor(
             grid.removeAllViews()
             val shapes = MapStore.SHAPES.filter { q.isBlank() || (MapStore.SHAPE_NAMES[it] ?: it).contains(q, true) }
             if (shapes.isNotEmpty()) { header("Фигуры"); addTiles(shapes.map { sh -> Triple(glyph(sh), MapStore.SHAPE_NAMES[sh] ?: sh, { addObject(sh) }) }) }
-            val names = propIndex().keys.filter { q.isBlank() || it.contains(q, true) }
+            val names = (propIndex().keys + allProps).toSortedSet(String.CASE_INSENSITIVE_ORDER).filter { q.isBlank() || it.contains(q, true) }
             if (names.isNotEmpty()) {
                 header("Модели игры · ${names.size}")
                 addTiles(names.take(150).map { nm -> Triple("◆", nm, { addProp(nm) }) })
                 if (names.size > 150) grid.addView(ui.label("…ещё ${names.size - 150}: уточни поиск", 12f, M3.VARIANT, bold = false))
-            } else if (propIndex().isEmpty() && q.isBlank()) {
+            } else if (q.isBlank()) {
                 header("Модели игры")
                 grid.addView(ui.label("Каталог пуст: нажми «↻ Каталог» в панели и открой окно снова (нужен свежий мод)", 12f, M3.VARIANT, bold = false))
             }
@@ -509,7 +510,7 @@ class MapEditor(
                     val sc = store.readScene()
                     vp.scene = sc; vp.invalidate()
                     Thread {
-                        var me = store.readMeshes(); val ins = store.readInstances(); val nm = store.readSceneNames()
+                        var me = store.readMeshes(); val ins = store.readInstances(); val nm = store.readSceneNames(); val extra = store.readAllProps()
                         try {
                             val mf = File(store.dirPath(), "_meshmiss")
                             val gp = (act as? GameActivity)?.gameApkPaths ?: ""
@@ -519,7 +520,7 @@ class MapEditor(
                                 BLog.i("меши из файлов игры: " + r.second)
                             }
                         } catch (t: Throwable) { BLog.e("меши из файлов игры не вышли", t) }
-                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; sceneNames = nm; propIdx = null; propBoxes.clear(); gl.setData(me, ins); vp.invalidate() }
+                        act.runOnUiThread { vp.sceneMeshes = me; vp.sceneInst = ins; sceneNames = nm; allProps = extra; propIdx = null; propBoxes.clear(); gl.setData(me, ins); vp.invalidate() }
                     }.start()
                     if (!auto) toast(if (sc == null || sc.isEmpty()) "В сцене игры нет объектов" else "Карта игры загружена: ${sc.size / 10} объектов")
                     return
