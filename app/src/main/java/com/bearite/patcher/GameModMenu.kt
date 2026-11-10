@@ -30,7 +30,7 @@ import java.util.Locale
  * Вкладки «Установлено», «Все моды» (поиск и фильтр) и «Карты» (редактор карт). Рисуется обычными View
  * поверх Unity, открывается и закрывается с анимацией.
  */
-class GameModMenu(private val act: Activity, private val mods: ModManager, private val games: MiniGames) {
+class GameModMenu(private val act: Activity, private val mods: ModManager) {
     private val ui = GameUi(act)
     private fun dp(v: Int) = ui.dp(v)
 
@@ -42,8 +42,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private val search = EditText(act)
     private lateinit var filterBtn: TextView
     private lateinit var tabInstalled: TextView
-    private lateinit var tabGames: TextView
-    private lateinit var tabReplay: TextView
     private lateinit var footer: TextView
     private val head = LinearLayout(act)
     private val hub = FrameLayout(act)
@@ -59,7 +57,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private lateinit var scroll: ScrollView
 
     private val maps = MapsTab(act, ui, MapStore(act))
-    private val replay = ReplayTab(act, ui)
     private val expanded = HashSet<String>()
     private var catalog: List<ModCatalog.Item>? = null
     private var catalogErr = ""
@@ -77,8 +74,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
 
     init {
         maps.hideMenu = { h -> root.alpha = if (h) 0f else 1f }
-        games.onStarted = { hide() }
-        replay.onPlay = { hide() }
         root.visibility = View.GONE
         root.setBackgroundColor(0xC0100B08.toInt())
         root.isClickable = true  // касания не уходят в Unity, пока меню открыто
@@ -103,8 +98,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
         tabInstalled = tab("Установлено", TAB_INSTALLED)
-        tabGames = tab("Мини-игры", TAB_GAMES)
-        tabReplay = tab("Реплей", TAB_REPLAY)
         col.addView(head, ui.matchWrap())
         buildHub()
 
@@ -248,7 +241,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
             val mc = MapStore(act).list().count { it.enabled }
             mapsBadge.text = mc.toString(); mapsBadge.visibility = View.GONE
             val room = try { java.io.File(act.filesDir, "maps/_room").readText().trim() } catch (_: Throwable) { "" }
-            val online = room.isNotEmpty() && room != MiniGames.OFFLINE_ROOM
+            val online = room.isNotEmpty() && room != Rooms.OFFLINE
             hubStatus.text = "Bearite · " + (if (online) "мультиплеер: комната «$room»" else "одиночная игра")
             hub.post { positionBadges() }
         } catch (t: Throwable) { BLog.e("главный экран", t) }
@@ -296,7 +289,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private fun openScreen(s: Int) {
         screen = s
         tab = when (s) {
-            SCR_MODS -> if (tab == TAB_GAMES || tab == TAB_REPLAY) tab else TAB_INSTALLED
+            SCR_MODS -> TAB_INSTALLED
             SCR_SHOP -> TAB_ALL
             SCR_MAPS -> TAB_MAPS
             SCR_SETTINGS -> TAB_INSTALLED
@@ -351,7 +344,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
         } else ui.outlined(title, 22f).apply { setPadding(dp(12), 0, dp(8), 0) }
         if (screen == SCR_MODS) {
             head.addView(titleView, LinearLayout.LayoutParams(dp(150), dp(40)))
-            for (t in listOf(tabInstalled, tabGames, tabReplay)) {
+            for (t in listOf(tabInstalled)) {
                 (t.parent as? ViewGroup)?.removeView(t)
                 head.addView(t, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(6) })
             }
@@ -440,7 +433,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
     private fun refresh() {
         if (screen == SCR_HUB) return
         buildHead()
-        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED, tabGames to TAB_GAMES, tabReplay to TAB_REPLAY)) {
+        for ((t, id) in listOf(tabInstalled to TAB_INSTALLED)) {
             t.background = ui.chunky(if (tab == id) GameUi.YELLOW else GameUi.SURFACE3, 16)
         }
         searchRow.visibility = if (tab == TAB_ALL && screen == SCR_SHOP) View.VISIBLE else View.GONE
@@ -468,15 +461,6 @@ class GameModMenu(private val act: Activity, private val mods: ModManager, priva
                 card.addView(buildDetails(own), ui.matchWrap())
                 list.addView(card, cardLp())
             }
-            return
-        }
-        if (tab == TAB_REPLAY) {
-            try { replay.render(list) { if (tab == TAB_REPLAY && isOpen) renderList() } } catch (t: Throwable) { BLog.e("вкладка «Реплей»", t) }
-            return
-        }
-        if (tab == TAB_GAMES) {
-            list.removeAllViews()
-            try { games.render(list) } catch (t: Throwable) { BLog.e("вкладка «Мини-игры»", t) }
             return
         }
         if (tab == TAB_MAPS) {

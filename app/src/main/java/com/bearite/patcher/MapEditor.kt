@@ -442,8 +442,10 @@ class MapEditor(
                     if (names.size > 150) note("…ещё ${names.size - 150}: уточни поиск")
                 }
                 else -> {
-                    grid.addView(ui.pill("Магазин пропов", primary = true, sizeSp = 13f) { dlg?.dismiss(); shopDialog() },
-                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(6) })
+                    val br = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+                    br.addView(ui.pill("Магазин пропов", primary = true, sizeSp = 13f) { dlg?.dismiss(); shopDialog() }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { rightMargin = dp(6) })
+                    br.addView(ui.pill("Импорт .zip / .glb", sizeSp = 13f) { importPropFile { refill() } }, LinearLayout.LayoutParams(0, dp(40), 1f))
+                    grid.addView(br, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
                     val list = shop.installed().filter { q.isBlank() || it.second.contains(q, true) }
                     if (list.isEmpty()) note(if (q.isBlank()) "Пока нет скачанных пропов: загляни в магазин" else "Ничего не найдено")
                     else note("Скачано: ${list.size} · долгое нажатие — удалить")
@@ -468,6 +470,25 @@ class MapEditor(
         fill()
         dlg = ui.dialog("Добавить объект", col, listOf(GameUi.Btn("Закрыть")), widthDp = 760)
         dlg.show()
+    }
+
+    /** Пропы из файла: .zip (index.json + модели .glb) или одиночный .glb. */
+    private fun importPropFile(done: () -> Unit) {
+        val g = act as? GameActivity ?: return toast("Импорт доступен только из игры")
+        g.pickFile("*/*") { uri ->
+            if (uri == null) return@pickFile
+            Thread {
+                val res: Pair<Int, String?> = try {
+                    val name = act.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "prop"
+                    val bytes = act.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalStateException("файл не прочитался")
+                    if (bytes.size > 60_000_000) 0 to "файл слишком большой" else shop.installFile(bytes, name)
+                } catch (t: Throwable) { 0 to (t.message ?: "ошибка") }
+                act.runOnUiThread {
+                    toast(if (res.second == null) "Установлено пропов: ${res.first}" else "Не вышло: ${res.second}")
+                    done()
+                }
+            }.start()
+        }
     }
 
     /** Магазин: список из релиза «props» проекта, скачивание в одно касание. */

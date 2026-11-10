@@ -48,7 +48,6 @@ class GameActivity : Activity() {
 
     private var levelPrompt: LevelPrompt? = null
     private var chat: ChatOverlay? = null
-    private var miniGames: MiniGames? = null
     var mapSync: MapSync? = null
     private var gameCtx: Context? = null
     private var gameLoader: ClassLoader? = null
@@ -59,7 +58,6 @@ class GameActivity : Activity() {
 
     private var modMenu: GameModMenu? = null
     private var hud: GameHud? = null
-    private var replayUi: ReplayOverlay? = null
     private var modButton: View? = null
     private var touchBtn: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
@@ -155,9 +153,7 @@ class GameActivity : Activity() {
             view,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         )
-        val games = MiniGames(this)
-        miniGames = games
-        val menu = GameModMenu(this, ModManager(this), games)
+        val menu = GameModMenu(this, ModManager(this))
         modMenu = menu
         val gameHud = GameHud(this, ModManager(this))
         hud = gameHud
@@ -166,10 +162,7 @@ class GameActivity : Activity() {
         val btn = menuButton()
         modButton = btn
         root.addView(btn)
-        val hudDensity = UiScale.density(this)
-        root.addView(games.hud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = (70 * hudDensity).toInt(); rightMargin = (12 * hudDensity).toInt() })
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        replayUi = ReplayOverlay(this, root).also { it.start() }
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
         mapSync = MapSync(this).also { it.start() }
@@ -445,8 +438,6 @@ class GameActivity : Activity() {
         BLog.i("GameActivity: нормальный выход")
         try { levelPrompt?.stop() } catch (_: Throwable) {}
         try { chat?.stop() } catch (_: Throwable) {}
-        try { miniGames?.stopAll() } catch (_: Throwable) {}
-        try { replayUi?.stop() } catch (_: Throwable) {}
         try { File(filesDir, RUNNING_MARKER).delete() } catch (_: Throwable) {}
         val hasDestroy = player?.javaClass?.methods?.any { it.name == "destroy" && it.parameterTypes.isEmpty() } == true
         callPlayer(if (hasDestroy) "destroy" else "quit")
@@ -505,11 +496,14 @@ class GameActivity : Activity() {
     private var imageCallback: ((android.net.Uri?) -> Unit)? = null
 
     /** Выбор картинки из галереи (для своих текстур в редакторе карт). */
-    fun pickImage(cb: (android.net.Uri?) -> Unit) {
+    fun pickImage(cb: (android.net.Uri?) -> Unit) = pickFile("image/*", cb)
+
+    /** Выбор любого файла (например .zip с пропом). */
+    fun pickFile(mime: String, cb: (android.net.Uri?) -> Unit) {
         imageCallback = cb
         try {
             startActivityForResult(
-                Intent(Intent.ACTION_GET_CONTENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE) },
+                Intent(Intent.ACTION_GET_CONTENT).apply { type = mime; addCategory(Intent.CATEGORY_OPENABLE) },
                 REQ_IMAGE
             )
         } catch (t: Throwable) {

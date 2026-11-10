@@ -45,7 +45,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
     } catch (_: Throwable) { null }
 
     /** Ставит модель из .glb (скачанного или выбранного из файла). */
-    fun install(id: String, name: String, glb: ByteArray): String? = try {
+    fun install(id: String, name: String, glb: ByteArray, texture: ByteArray? = null): String? = try {
         val m = Glb.parse(glb)
         val nv = m.v.size / 3
         val buf = ByteBuffer.allocate(8 + nv * 12 + nv * 8 + m.idx.size * 4).order(ByteOrder.LITTLE_ENDIAN)
@@ -53,11 +53,68 @@ class PropShop(private val dir: File, private val store: MapStore) {
         for (f in m.v) buf.putFloat(f)
         for (f in m.uv) buf.putFloat(f)
         for (i in m.idx) buf.putInt(i)
-        m.texture?.let { store.saveTextureBytes("cp_$id", it) }
+        (texture ?: m.texture)?.let { store.saveTextureBytes("cp_$id", it) }
         File(propsDir, "$id.name").writeText(name)
         File(propsDir, "$id.mesh").writeBytes(buf.array())   // последним: по нему пропу считается установленным
         null
     } catch (t: Throwable) { t.message ?: "не удалось разобрать файл" }
+
+    /**
+     * Ставит пропы из .zip: внутри index.json и модели .glb. index.json: {"props":[{"id","name","author","model":"x.glb","texture":"t.png"}]}
+     * или один пропс без обёртки; без index.json берётся первая .glb. Возвращает (сколько установлено, ошибка).
+     */
+    fun installZip(zip: ByteArray): Pair<Int, String?> {
+        val files = HashMap<String, ByteArray>()
+        try {
+            var total = 0L
+            java.util.zip.ZipInputStream(zip.inputStream()).use { z ->
+                while (true) {
+                    val e = z.nextEntry ?: break
+                    if (e.isDirectory) continue
+                    val b = z.readBytes(); total += b.size
+                    if (total > 60_000_000) return 0 to "архив слишком большой"
+                    files[e.name.replace('\\', '/').trimStart('/')] = b
+                }
+            }
+        } catch (t: Throwable) { return 0 to "это не zip-архив" }
+        fun find(path: String?): ByteArray? {
+            if (path.isNullOrBlank()) return null
+            val p = path.replace('\\', '/').trimStart('/')
+            return files[p] ?: files.entries.firstOrNull { it.key.endsWith("/$p") || it.key.substringAfterLast('/') == p.substringAfterLast('/') }?.value
+        }
+        val idxBytes = files.entries.firstOrNull { it.key == "index.json" || it.key.endsWith("/index.json") }?.value
+        val metas = ArrayList<JSONObject>()
+        if (idxBytes != null) {
+            try {
+                val j = JSONObject(String(idxBytes, Charsets.UTF_8))
+                val arr = j.optJSONArray("props")
+                if (arr != null) for (i in 0 until arr.length()) metas.add(arr.getJSONObject(i)) else metas.add(j)
+            } catch (t: Throwable) { return 0 to "index.json не читается: ${t.message}" }
+        } else {
+            val g = files.keys.firstOrNull { it.endsWith(".glb", true) } ?: return 0 to "в архиве нет .glb и index.json"
+            metas.add(JSONObject().put("model", g))
+        }
+        var ok = 0; var lastErr: String? = null
+        for (m in metas) {
+            val modelPath = m.optString("model").ifEmpty { files.keys.firstOrNull { it.endsWith(".glb", true) } ?: "" }
+            val glb = find(modelPath)
+            if (glb == null) { lastErr = "в архиве нет модели «$modelPath»"; continue }
+            val base = modelPath.substringAfterLast('/').removeSuffix(".glb").removeSuffix(".GLB")
+            val name = m.optString("name").ifEmpty { base }
+            val id = (m.optString("id").ifEmpty { base }).filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40).ifEmpty { "prop" + System.currentTimeMillis() % 100000 }
+            val err = install(id, name, glb, find(m.optString("texture")))
+            if (err == null) ok++ else lastErr = "$name: $err"
+        }
+        return ok to (if (ok == 0) lastErr ?: "ничего не установилось" else null)
+    }
+
+    /** Файл, выбранный пользователем: .zip или .glb. */
+    fun installFile(bytes: ByteArray, fileName: String): Pair<Int, String?> {
+        if (bytes.size > 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) return installZip(bytes)
+        val base = fileName.substringBeforeLast('.').filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40).ifEmpty { "prop" }
+        val err = install(base, fileName.substringBeforeLast('.').ifEmpty { base }, bytes)
+        return (if (err == null) 1 else 0) to err
+    }
 
     private fun get(url: String, max: Int): ByteArray {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -91,7 +148,10 @@ class PropShop(private val dir: File, private val store: MapStore) {
 
     fun download(e: Entry, cb: (String?) -> Unit) {
         Thread {
-            val err = try { install(e.id, e.name, get("$BASE/${e.file}", 20_000_000)) } catch (t: Throwable) { t.message ?: "не скачалось" }
+            val err = try {
+                val b = get("$BASE/${e.file}", 40_000_000)
+                if (e.file.endsWith(".zip", true)) installZip(b).second else install(e.id, e.name, b)
+            } catch (t: Throwable) { t.message ?: "не скачалось" }
             main.post { cb(err) }
         }.start()
     }

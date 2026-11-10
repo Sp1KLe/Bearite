@@ -52,7 +52,7 @@ class MapSync(private val act: Activity) {
 
     private fun readRoom(): String {
         val raw = try { File(dir, "_room").readText().trim() } catch (_: Throwable) { "" }
-        return if (raw == MiniGames.OFFLINE_ROOM) "" else raw
+        return if (raw == Rooms.OFFLINE) "" else raw
     }
 
     private fun topic(r: String) = "bearite-maps-" + MessageDigest.getInstance("SHA-256").digest(("bmaps" + r).toByteArray()).joinToString("") { "%02x".format(it) }.take(24)
@@ -198,3 +198,6 @@ class MapSync(private val act: Activity) {
         return m
     }
 }
+
+/** Служебные значения комнат мультиплеера. */
+object Rooms { const val OFFLINE = "offlineMode" }
