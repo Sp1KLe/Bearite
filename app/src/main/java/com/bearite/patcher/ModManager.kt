@@ -339,7 +339,7 @@ class ModManager(private val ctx: Context) {
         return configFile
     }
 
-    /** Сюжетный мод может нести свои карты: файлы maps/*.txt в архиве (формат «Скопировать карту», начинается с BEARITE-MAP). Повторная установка заменяет их. */
+    /** Сюжетный мод может нести свои карты: файлы .txt из папки maps в архиве (формат «Скопировать карту», начинается с BEARITE-MAP). Повторная установка заменяет их. */
     private fun importModMaps(modId: String, dest: File) {
         try {
             val store = MapStore(ctx)
