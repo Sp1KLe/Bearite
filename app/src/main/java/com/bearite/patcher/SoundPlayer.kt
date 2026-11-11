@@ -54,6 +54,10 @@ class SoundPlayer(private val ctx: Context) {
         }
     }
 
+    fun playFile(path: String, volume: Float, loop: Boolean) = play(path, volume, loop)
+    fun stopFile(path: String) = stopPath(path)
+    fun isPlaying(path: String) = players.any { it.first == path }
+
     private fun play(path: String, volume: Float, loop: Boolean) {
         val f = File(path)
         // только файлы из папок модов

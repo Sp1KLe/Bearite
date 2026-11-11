@@ -333,6 +333,9 @@ struct MapSpec {
     bool world = false;
     unsigned sky = 0x87B8E8;
     float spawn[3] = {0, 2, 0};
+    std::string goal;            // мини-игра: coins, finish, both или пусто
+    int timer = 0;               // лимит времени, секунды (0 — нет)
+    std::string winMsg, loseMsg;
     std::vector<Obj> objs;
 };
 
@@ -488,6 +491,10 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
         else if (k == "spx") m.spawn[0] = num(v, 0);
         else if (k == "spy") m.spawn[1] = num(v, 2);
         else if (k == "spz") m.spawn[2] = num(v, 0);
+        else if (k == "goal") m.goal = (v == "coins" || v == "finish" || v == "both") ? v : "";
+        else if (k == "timer") m.timer = atoi(v.c_str());
+        else if (k == "win") m.winMsg = v;
+        else if (k == "lose") m.loseMsg = v;
     }
     fclose(f);
     if (m.scale < 0.01f) m.scale = 0.01f;
@@ -810,7 +817,7 @@ int primitive_id(const std::string& s) {
     // UnityEngine.PrimitiveType: Sphere=0, Capsule=1, Cylinder=2, Cube=3, Plane=4, Quad=5
     if (s == "sphere") return 0;
     if (s == "capsule") return 1;
-    if (s == "cylinder" || s == "portal" || s == "coin") return 2;  // круг телепорта: плоский цилиндр
+    if (s == "cylinder" || s == "portal" || s == "coin" || s == "finish") return 2;  // круг телепорта: плоский цилиндр
     if (s == "plane") return 4;
     return 3;
 }
@@ -2077,8 +2084,82 @@ void coin_save() {
     }
 }
 
+// ------------------------------------------------------------------ мини-игры карт
+// Правила задаёт редактор (goal/timer/win/lose). Время идёт, когда игрок отошёл от точки старта; победа или поражение
+// показываются через maps/_mgevent, состояние (время, монеты) — в maps/_minigame; потом игрок возвращается на старт, монеты возвращаются.
+struct Mg { long long startT = 0, endT = 0; bool ended = false, win = false; };
+std::map<std::string, Mg> g_mg;
+long long g_mgStatusT = 0;
+bool g_mgStatusOn = false;
+
+void mg_write(const std::string& name, const std::string& text) {
+    std::string path = g_mapsDir + "/" + name, tmp = g_mapsDir + "/.mg.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(text.c_str(), f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+}
+
+void mini_tick(const float* pp, void* tr, long long now) {
+    bool anyMg = false;
+    for (const auto& m : g_specs) {
+        if (m.goal.empty() || !m.enabled) continue;
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        int total = 0, got = 0; bool haveFinish = false;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            if (!it->second[i].h) continue;
+            if (m.objs[i].shape == "coin") { ++total; if (g_coinGot.count(coin_key(m, m.objs[i]))) ++got; }
+            else if (m.objs[i].shape == "finish") haveFinish = true;
+        }
+        if (total == 0 && !haveFinish) continue;
+        anyMg = true;
+        Mg& g = g_mg[m.id];
+        float sp[3] = {m.off[0] + m.scale * m.spawn[0], m.off[1] + m.scale * m.spawn[1], m.off[2] + m.scale * m.spawn[2]};
+        if (g.ended) {
+            if (now - g.endT < 3500) continue;
+            // новый заход: монеты возвращаются, игрок на старт
+            for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i)
+                if (m.objs[i].shape == "coin") { g_coinGot.erase(coin_key(m, m.objs[i])); it->second[i].hidden = false; }
+            coin_save();
+            if (tr) teleport(tr, V3{sp[0], sp[1], sp[2]});
+            g = Mg();
+            continue;
+        }
+        float dx = pp[0] - sp[0], dz = pp[2] - sp[2];
+        if (!g.startT && dx * dx + dz * dz > 2.25f * m.scale * m.scale) g.startT = now;
+        bool touched = false;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            const Obj& o = m.objs[i];
+            if (o.shape != "finish" || !it->second[i].h) continue;
+            float cx = m.off[0] + m.scale * o.p[0], cy = m.off[1] + m.scale * o.p[1], cz = m.off[2] + m.scale * o.p[2];
+            float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]) + 0.4f;
+            float ex = pp[0] - cx, ez = pp[2] - cz, ey = pp[1] - cy;
+            if (ex * ex + ez * ez < r * r && ey > -1.5f * m.scale && ey < 3.0f * m.scale) touched = true;
+        }
+        bool coinsOk = total == 0 || got >= total;
+        bool needCoins = m.goal == "coins" || m.goal == "both", needFin = m.goal == "finish" || m.goal == "both";
+        bool win = g.startT && (!needCoins || (total > 0 && coinsOk)) && (!needFin || touched);
+        double elapsed = g.startT ? (now - g.startT) / 1000.0 : 0;
+        double left = m.timer > 0 ? m.timer - elapsed : -1;
+        bool lose = g.startT && m.timer > 0 && left <= 0;
+        if (win || lose) {
+            g.ended = true; g.win = win; g.endT = now;
+            std::string msg = win ? (m.winMsg.empty() ? "Победа!" : m.winMsg) : (m.loseMsg.empty() ? "Время вышло!" : m.loseMsg);
+            mg_write("_mgevent", std::string(win ? "win" : "lose") + "\t" + msg + "\n");
+            logf_("мини-игра «%s»: %s", m.name.c_str(), win ? "победа" : "поражение");
+        }
+        if (now - g_mgStatusT > 400) {
+            g_mgStatusT = now; g_mgStatusOn = true;
+            char b[160];
+            snprintf(b, sizeof b, "1\t%d\t%d\t%d\t%d\n", m.timer > 0 ? (int)(left < 0 ? 0 : left + 0.99) : -1, got, total, g.startT ? 1 : 0);
+            mg_write("_minigame", b);
+        }
+    }
+    if (!anyMg && g_mgStatusOn) { g_mgStatusOn = false; unlink((g_mapsDir + "/_minigame").c_str()); }
+}
+
 /** Монета собирается, когда игрок подходит ближе радиуса; собранная прячется (размер 0) и больше не появляется. */
-void coins_tick(const float* pp) {
+void mini_tick(const float* pp, void* tr, long long now);
+
+void coins_tick(const float* pp, void* tr, long long now) {
     coin_load();
     for (const auto& m : g_specs) {
         auto it = g_live.find(m.id);
@@ -2100,6 +2181,7 @@ void coins_tick(const float* pp) {
             }
         }
     }
+    mini_tick(pp, tr, now);
 }
 
 void portals_tick(long long now) {
@@ -2108,7 +2190,7 @@ void portals_tick(long long now) {
         auto it = g_live.find(m.id);
         if (it == g_live.end()) continue;
         for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i)
-            if ((m.objs[i].shape == "portal" || m.objs[i].shape == "coin") && it->second[i].h) { any = true; break; }
+            if ((m.objs[i].shape == "portal" || m.objs[i].shape == "coin" || m.objs[i].shape == "finish") && it->second[i].h) { any = true; break; }
         if (any) break;
     }
     if (!any) return;
@@ -2138,7 +2220,7 @@ void portals_tick(long long now) {
     if (!pv) { if (g_player) { gch_free(g_player); g_player = 0; } return; }
     float pp[3];
     memcpy(pp, obj_unbox(pv), sizeof pp);
-    coins_tick(pp);
+    coins_tick(pp, tr, now);
     if (diag) {
         static std::string scNames;
         static long long scSince = 0;

@@ -157,6 +157,9 @@ class GameActivity : Activity() {
         modMenu = menu
         val gameHud = GameHud(this, ModManager(this))
         hud = gameHud
+        gameHud.onSound = { p, v, l -> sounds.playFile(p, v, l) }
+        gameHud.onStopSound = { p -> sounds.stopFile(p) }
+        gameHud.isSoundPlaying = { p -> sounds.isPlaying(p) }
         menu.onClosed = { updateModButton() }
         root.addView(gameHud.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val btn = menuButton()

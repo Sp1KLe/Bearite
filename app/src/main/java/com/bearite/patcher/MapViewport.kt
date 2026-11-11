@@ -45,8 +45,8 @@ object PrimMeshes {
     }
     fun forget(shape: String) { cache.remove(shape) }
 
-    private fun getPrim(shape: String): Mesh = cache.getOrPut(if (shape == "portal" || shape == "coin") "cylinder" else shape) {
-        when (if (shape == "portal" || shape == "coin") "cylinder" else shape) {
+    private fun getPrim(shape: String): Mesh = cache.getOrPut(if (shape == "portal" || shape == "coin" || shape == "finish") "cylinder" else shape) {
+        when (if (shape == "portal" || shape == "coin" || shape == "finish") "cylinder" else shape) {
             "sphere" -> {
                 val l = ArrayList<Pair<Float, Float>>()
                 for (i in 0..8) { val a = Math.PI / 2 - Math.PI * i / 8; l.add((0.5 * sin(a)).toFloat() to (0.5 * cos(a)).toFloat()) }
@@ -198,7 +198,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         mesh.uv?.let { out[o] = it[i * 2]; out[o + 1] = it[i * 2 + 1]; return }
         val x = mesh.v[i * 3]; val y = mesh.v[i * 3 + 1]; val z = mesh.v[i * 3 + 2]
         when (shape) {
-            "sphere", "cylinder", "capsule", "portal", "coin" -> {
+            "sphere", "cylinder", "capsule", "portal", "coin", "finish" -> {
                 out[o] = (Math.atan2(z.toDouble(), x.toDouble()) / (2 * Math.PI)).toFloat() + 0.5f
                 out[o + 1] = if (shape == "sphere") y + 0.5f else if (shape == "capsule") y / 2f + 0.5f else y / 2f + 0.5f
             }
@@ -821,7 +821,7 @@ class MapViewport(ctx: Context, private val map: GameMap) : View(ctx) {
         }
         val hx = if (pbo != null) 0.5f * pbo[6] * o.sx.toFloat() * pbo[0] else if (o.shape == "plane") 5f * o.sx.toFloat() else 0.5f * o.sx.toFloat()
         val hz = if (pbo != null) 0.5f * pbo[8] * o.sz.toFloat() * pbo[2] else if (o.shape == "plane") 5f * o.sz.toFloat() else 0.5f * o.sz.toFloat()
-        val hy = if (pbo != null) 0.5f * pbo[7] * o.sy.toFloat() * pbo[1] else when (o.shape) { "plane" -> 0f; "cylinder", "capsule", "portal", "coin" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
+        val hy = if (pbo != null) 0.5f * pbo[7] * o.sy.toFloat() * pbo[1] else when (o.shape) { "plane" -> 0f; "cylinder", "capsule", "portal", "coin", "finish" -> 1f * o.sy.toFloat(); else -> 0.5f * o.sy.toFloat() }
         val cs = Array(8) { i ->
             val vx = (if (i and 1 == 0) -hx else hx); val vy = (if (i and 2 == 0) -hy else hy); val vz = (if (i and 4 == 0) -hz else hz)
             floatArrayOf(

@@ -11,7 +11,8 @@ import java.nio.ByteOrder
  * Из материалов берётся только первая картинка цвета (baseColorTexture): на всю модель.
  */
 object Glb {
-    class Model(val v: FloatArray, val uv: FloatArray, val idx: IntArray, val texture: ByteArray?)
+    /** anim: ключи анимации одного узла как смещения от позы покоя: t, dx dy dz, поворот x y z (градусы), масштаб x y z. */
+    class Model(val v: FloatArray, val uv: FloatArray, val idx: IntArray, val texture: ByteArray?, val anim: List<DoubleArray>? = null)
 
     private const val MAX_VERTS = 65000
 
@@ -144,6 +145,79 @@ object Glb {
                 if (o >= 0 && o + l <= b.size) tex = b.copyOfRange(o, o + l)
             }
         }
-        return Model(vs.toFloatArray(), us.toFloatArray(), ix.toIntArray(), tex)
+        val anim = try { readAnim(j, nodes, ::readAcc) } catch (_: Throwable) { null }
+        return Model(vs.toFloatArray(), us.toFloatArray(), ix.toIntArray(), tex, anim)
+    }
+
+    private fun quatToEuler(x: Double, y: Double, z: Double, w: Double): DoubleArray {   // порядок Unity (Z, X, Y), градусы
+        val r12 = 2 * (y * z - x * w); val r02 = 2 * (x * z + y * w); val r22 = 1 - 2 * (x * x + y * y)
+        val r10 = 2 * (x * y + z * w); val r11 = 1 - 2 * (x * x + z * z)
+        return doubleArrayOf(Math.toDegrees(Math.asin((-r12).coerceIn(-1.0, 1.0))), Math.toDegrees(Math.atan2(r02, r22)), Math.toDegrees(Math.atan2(r10, r11)))
+    }
+
+    private fun qmul(a: DoubleArray, b: DoubleArray) = doubleArrayOf(
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2])
+
+    /** Первая анимация модели: берётся узел с наибольшим числом каналов, остальные узлы игнорируются (модель движется целиком). */
+    private fun readAnim(j: JSONObject, nodes: JSONArray, readAcc: (Int) -> Triple<FloatArray, Int, Int>?): List<DoubleArray>? {
+        val a = j.optJSONArray("animations")?.optJSONObject(0) ?: return null
+        val chans = a.optJSONArray("channels") ?: return null
+        val samplers = a.optJSONArray("samplers") ?: return null
+        val count = HashMap<Int, Int>()
+        for (i in 0 until chans.length()) { val n = chans.getJSONObject(i).optJSONObject("target")?.optInt("node", -1) ?: -1; if (n >= 0) count[n] = (count[n] ?: 0) + 1 }
+        val node = count.maxByOrNull { it.value }?.key ?: return null
+        val nd = nodes.optJSONObject(node) ?: return null
+        class Ch(val path: String, val t: FloatArray, val v: FloatArray, val comps: Int, val cubic: Boolean, val step: Boolean)
+        val list = ArrayList<Ch>()
+        for (i in 0 until chans.length()) {
+            val c = chans.getJSONObject(i)
+            val tg = c.optJSONObject("target") ?: continue
+            if (tg.optInt("node", -1) != node) continue
+            val path = tg.optString("path")
+            if (path != "translation" && path != "rotation" && path != "scale") continue
+            val sm = samplers.optJSONObject(c.optInt("sampler", -1)) ?: continue
+            val inp = readAcc(sm.getInt("input")) ?: continue
+            val out = readAcc(sm.getInt("output")) ?: continue
+            val interp = sm.optString("interpolation", "LINEAR")
+            list.add(Ch(path, inp.first, out.first, out.third, interp == "CUBICSPLINE", interp == "STEP"))
+        }
+        if (list.isEmpty()) return null
+        val times = java.util.TreeSet<Float>()
+        for (c in list) for (t in c.t) times.add(t)
+        var ts = times.toList()
+        if (ts.size > 40) { val st = ts.size / 40.0; ts = (0 until 40).map { ts[(it * st).toInt()] } + ts.last() }
+        if (ts.isEmpty() || ts.last() <= 0f) return null
+        val tr0 = nd.optJSONArray("translation"); val r0 = nd.optJSONArray("rotation"); val s0 = nd.optJSONArray("scale")
+        val restT = doubleArrayOf(tr0?.getDouble(0) ?: 0.0, tr0?.getDouble(1) ?: 0.0, tr0?.getDouble(2) ?: 0.0)
+        val restR = doubleArrayOf(r0?.getDouble(0) ?: 0.0, r0?.getDouble(1) ?: 0.0, r0?.getDouble(2) ?: 0.0, r0?.getDouble(3) ?: 1.0)
+        val restS = doubleArrayOf(s0?.getDouble(0) ?: 1.0, s0?.getDouble(1) ?: 1.0, s0?.getDouble(2) ?: 1.0)
+        fun sample(c: Ch, t: Float): DoubleArray {
+            val n = c.t.size
+            fun at(i: Int) = DoubleArray(c.comps) { k -> c.v[(if (c.cubic) i * 3 + 1 else i) * c.comps + k].toDouble() }
+            if (t <= c.t[0]) return at(0)
+            if (t >= c.t[n - 1]) return at(n - 1)
+            var i = 0
+            while (i < n - 2 && c.t[i + 1] <= t) i++
+            val a0 = at(i); if (c.step) return a0
+            val b0 = at(i + 1); val u = ((t - c.t[i]) / (c.t[i + 1] - c.t[i])).toDouble()
+            val r = DoubleArray(c.comps) { a0[it] + (b0[it] - a0[it]) * u }
+            if (c.path == "rotation") { val l = Math.sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[3] * r[3]); if (l > 1e-9) for (k in 0..3) r[k] /= l }
+            return r
+        }
+        val out = ArrayList<DoubleArray>()
+        for (t in ts) {
+            var tv = restT.copyOf(); var rv = restR.copyOf(); var sv = restS.copyOf()
+            for (c in list) when (c.path) { "translation" -> tv = sample(c, t); "rotation" -> rv = sample(c, t); else -> sv = sample(c, t) }
+            // дельта поворота от покоя, зеркало по X: (qx, -qy, -qz, qw)
+            val inv = doubleArrayOf(-restR[0], -restR[1], -restR[2], restR[3])
+            val d = qmul(rv, inv)
+            val eu = quatToEuler(d[0], -d[1], -d[2], d[3])
+            out.add(doubleArrayOf(t.toDouble(), -(tv[0] - restT[0]), tv[1] - restT[1], tv[2] - restT[2], eu[0], eu[1], eu[2],
+                if (restS[0] != 0.0) sv[0] / restS[0] else 1.0, if (restS[1] != 0.0) sv[1] / restS[1] else 1.0, if (restS[2] != 0.0) sv[2] / restS[2] else 1.0))
+        }
+        return out
     }
 }

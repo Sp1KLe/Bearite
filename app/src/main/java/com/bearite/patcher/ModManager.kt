@@ -31,6 +31,10 @@ data class HudButton(
     val action: String,
     val step: Double,
     val pos: String,
+    val file: String = "",      // action sound: файл в папке мода
+    val volume: Double = 1.0,
+    val loop: Boolean = false,
+    val text: String = "",      // action say: текст на экране
 )
 
 data class Mod(
@@ -161,6 +165,15 @@ class ModManager(private val ctx: Context) {
         if (arr == null) return out
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
+            val act0 = o.optString("action")
+            if (act0 == "sound" || act0 == "say") {   // кнопки без кода и без настройки: играют звук или показывают текст
+                val file = o.optString("file")
+                if (act0 == "sound" && (file.isEmpty() || file.startsWith("/") || file.contains(".."))) { BLog.e("мод $modId: кнопка hud #$i: нет корректного file"); continue }
+                out.add(HudButton(label = o.optString("label", if (act0 == "sound") "♪" else "…"), setting = "", action = act0, step = 1.0,
+                    pos = o.optString("pos", "left"), file = file, volume = o.optDouble("volume", 1.0).coerceIn(0.0, 1.0),
+                    loop = o.optBoolean("loop", false), text = o.optString("text")))
+                continue
+            }
             val sid = o.optString("setting")
             val s = settings.firstOrNull { it.id == sid }
             if (s == null) {
@@ -326,6 +339,23 @@ class ModManager(private val ctx: Context) {
         return configFile
     }
 
+    /** Сюжетный мод может нести свои карты: файлы maps/*.txt в архиве (формат «Скопировать карту», начинается с BEARITE-MAP). Повторная установка заменяет их. */
+    private fun importModMaps(modId: String, dest: File) {
+        try {
+            val store = MapStore(ctx)
+            val files = File(dest, "maps").listFiles { f -> f.isFile && (f.extension == "txt" || f.extension == "bmap") } ?: return
+            var n = 0
+            for (f in files.sortedBy { it.name }.take(20)) {
+                val t = f.readText().trim()
+                if (!t.startsWith("BEARITE-MAP")) continue
+                val id = ("mod_" + modId + "_" + f.nameWithoutExtension).replace(Regex("[^A-Za-z0-9_]"), "_").take(60)
+                store.save(MapStore.parse(id, t.removePrefix("BEARITE-MAP").trimStart()))
+                n++
+            }
+            if (n > 0) BLog.i("мод $modId: карт добавлено $n")
+        } catch (t: Throwable) { BLog.e("мод $modId: карты из архива не добавились", t) }
+    }
+
     /** Ставит мод из zip (mod.json в корне архива или в единственной папке). Возвращает id. */
     fun installZip(uri: Uri): String {
         val tmp = File(modsDir, ".install_tmp")
@@ -392,6 +422,7 @@ class ModManager(private val ctx: Context) {
         }
         oldSettings?.let { File(dest, "settings.json").writeBytes(it) }
         tmp.deleteRecursively()
+        importModMaps(id, dest)
         // новая версия мода с нативным кодом должна быть подтверждена заново
         prefs.edit().remove("native_ok_$id").apply()
         BLog.i("мод установлен: $id")

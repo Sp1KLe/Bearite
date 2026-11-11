@@ -40,6 +40,9 @@ data class GameMap(
     var world: Boolean = false,       // отдельный мир: остальной мир скрывается, игрок появляется на карте
     var sky: Int = 0x87B8E8,          // цвет неба в отдельном мире
     var spx: Double = 0.0, var spy: Double = 2.0, var spz: Double = 0.0,  // точка появления (в координатах карты)
+    var goal: String = "",           // мини-игра: "" нет, coins собрать все монеты, finish дойти до финиша, both и то и другое
+    var timer: Int = 0,               // мини-игра: лимит времени в секундах (0 — без лимита)
+    var winMsg: String = "", var loseMsg: String = "",
     val objects: MutableList<MapObj> = ArrayList(),
 )
 
@@ -318,15 +321,16 @@ class MapStore(private val dir: File) {
     fun textureFile(id: String): File? = texturePng(id).takeIf { it.isFile }
 
     companion object {
-        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal", "coin")
+        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal", "coin", "finish")
         val SHAPE_NAMES = mapOf("cube" to "Куб", "sphere" to "Шар", "cylinder" to "Цилиндр", "capsule" to "Капсула",
-            "plane" to "Плоскость", "portal" to "Круг телепорта", "coin" to "Монета")
+            "plane" to "Плоскость", "portal" to "Круг телепорта", "coin" to "Монета", "finish" to "Финиш")
 
         /** Новый объект с подходящими размерами и цветом для формы. */
         fun newObj(shape: String): MapObj {
             val o = MapObj(SHAPE_NAMES[shape] ?: "Блок", shape)
             when (shape) {
                 "plane" -> { o.sx = 2.0; o.sz = 2.0 }
+                "finish" -> { o.sx = 2.5; o.sy = 0.08; o.sz = 2.5; o.color = 0x57D68D; o.solid = false }
                 "coin" -> { o.sx = 0.8; o.sy = 0.06; o.sz = 0.8; o.rx = 90.0; o.color = 0xFFC83A; o.solid = false }
                 "portal" -> { o.sx = 3.0; o.sy = 0.1; o.sz = 3.0; o.color = 0x6FE0D0; o.solid = false; o.bind = "Launch Platform (Turtletown)"; o.clone = true }
             }
@@ -354,9 +358,17 @@ class MapStore(private val dir: File) {
             append("scale=").append(f(m.scale)).append('\n')
             append("layer=").append(m.layer).append('\n')
             if (m.shared) append("shared=1\n")
+            if (m.goal.isNotEmpty()) {
+                append("goal=").append(m.goal).append('\n')
+                append("timer=").append(m.timer).append('\n')
+                append("win=").append(clean(m.winMsg)).append('\n')
+                append("lose=").append(clean(m.loseMsg)).append('\n')
+            }
             if (m.world) {
                 append("world=1\n")
                 append("sky=").append(String.format("%06X", m.sky and 0xFFFFFF)).append('\n')
+            }
+            if (m.world || m.goal.isNotEmpty()) {
                 append("spx=").append(f(m.spx)).append('\n')
                 append("spy=").append(f(m.spy)).append('\n')
                 append("spz=").append(f(m.spz)).append('\n')
@@ -418,6 +430,10 @@ class MapStore(private val dir: File) {
                     "scale" -> m.scale = (v.toDoubleOrNull() ?: 1.0).coerceIn(0.01, 100.0)
                     "layer" -> m.layer = (v.toIntOrNull() ?: 0).coerceIn(0, 31)
                     "shared" -> m.shared = v == "1" || v == "true"
+                    "goal" -> m.goal = if (v in listOf("coins", "finish", "both")) v else ""
+                    "timer" -> m.timer = (v.toIntOrNull() ?: 0).coerceIn(0, 3600)
+                    "win" -> m.winMsg = v
+                    "lose" -> m.loseMsg = v
                     "world" -> m.world = v == "1" || v == "true"
                     "sky" -> m.sky = v.trim().toIntOrNull(16) ?: 0x87B8E8
                     "spx" -> m.spx = v.toDoubleOrNull() ?: 0.0

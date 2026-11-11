@@ -278,6 +278,7 @@ class MapEditor(
         map.name = m.name; map.enabled = m.enabled; map.scene = m.scene
         map.ox = m.ox; map.oy = m.oy; map.oz = m.oz; map.scale = m.scale; map.layer = m.layer
         map.world = m.world; map.sky = m.sky; map.spx = m.spx; map.spy = m.spy; map.spz = m.spz
+        map.goal = m.goal; map.timer = m.timer; map.winMsg = m.winMsg; map.loseMsg = m.loseMsg
         map.objects.clear(); map.objects.addAll(m.objects)
         lastSnap = snap; lastKey = null
         store.save(map)
@@ -315,7 +316,7 @@ class MapEditor(
         if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, M3.VARIANT, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
     }
 
-    private fun glyph(shape: String) = when (if (shape.startsWith("prop:")) "prop" else shape) { "prop" -> "◆";  "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; "coin" -> "◉"; else -> "■" }
+    private fun glyph(shape: String) = when (if (shape.startsWith("prop:")) "prop" else shape) { "prop" -> "◆";  "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; "coin" -> "◉"; "finish" -> "⚑"; else -> "■" }
 
     private fun treeRow(g: String, name: String, on: Boolean, color: Int, click: () -> Unit): View {
         val r = LinearLayout(act).apply {
@@ -536,6 +537,11 @@ class MapEditor(
         var lo = 1e9f; var i = 1
         while (i < mesh.v.size) { lo = minOf(lo, mesh.v[i]); i += 3 }
         o.y = if (lo < 1e8f) -lo.toDouble() else 0.0   // модель стоит на земле
+        shop.loadAnim(id)?.let { a ->   // анимация из .glb: те же ключевые кадры, что в редакторе (по кругу)
+            val base = poseOf(o)
+            o.kf = MapAnim.fmtKeys(a.map { r -> MapAnim.Key(r[0], doubleArrayOf(base[0] + r[1], base[1] + r[2], base[2] + r[3], base[3] + r[4], base[4] + r[5], base[5] + r[6], base[6] * r[7], base[7] * r[8], base[8] * r[9]), 1) })
+            o.an = "keys"; o.ap = maxOf(a.last()[0], 0.2); o.km = 0
+        }
         map.objects.add(o)
         commit()
         select(map.objects.size - 1)
@@ -546,7 +552,7 @@ class MapEditor(
         val o = MapStore.newObj(shape)
         val sp = vp.spawnPoint()
         o.x = sp[0].toDouble(); o.z = sp[2].toDouble()
-        o.y = when (shape) { "plane" -> 0.0; "coin" -> 1.0; "cylinder", "capsule", "portal" -> o.sy; else -> 0.5 * o.sy }
+        o.y = when (shape) { "plane" -> 0.0; "coin" -> 1.0; "finish" -> o.sy; "cylinder", "capsule", "portal" -> o.sy; else -> 0.5 * o.sy }
         if (shape == "portal") { o.dx = o.x + 6.0; o.dy = 1.0; o.dz = o.z }
         map.objects.add(o)
         commit()
@@ -1079,6 +1085,27 @@ class MapEditor(
                 if (map.scene.isEmpty() && cur.isEmpty()) toast("Сцена игры пока неизвестна")
             }
             inspector.addView(sceneBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(8) })
+        }
+        section("Мини-игра")
+        val goals = listOf("", "coins", "finish", "both")
+        val goalNames = listOf("Нет (просто карта)", "Собрать все монеты", "Дойти до финиша", "Монеты, потом финиш")
+        val goalBtn = ui.pill(goalNames[goals.indexOf(map.goal).coerceAtLeast(0)], sizeSp = 13f) {}
+        goalBtn.setOnClickListener {
+            ui.choose("Цель мини-игры", goalNames, goals.indexOf(map.goal).coerceAtLeast(0)) { i -> map.goal = goals[i]; commit(); showInspector() }
+        }
+        inspector.addView(goalBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(4) })
+        if (map.goal.isNotEmpty()) {
+            val trow = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            trow.addView(ui.label("время, сек (0 — без лимита)", 12f, M3.VARIANT), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            trow.addView(numField(map.timer.toDouble(), "mgtimer") { map.timer = it.toInt().coerceIn(0, 3600) }, LinearLayout.LayoutParams(dp(80), dp(36)))
+            inspector.addView(trow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+            inspector.addView(ui.textInput(map.winMsg, 0, "Текст при победе") { map.winMsg = it; commit("mgwin") }.apply { textSize = 13f }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(4) })
+            inspector.addView(ui.textInput(map.loseMsg, 0, "Текст при поражении") { map.loseMsg = it; commit("mglose") }.apply { textSize = 13f }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)).apply { topMargin = dp(4) })
+            inspector.addView(ui.label("Добавь на карту «Монета» и/или «Финиш» (вкладка «Фигуры и предметы»). Время идёт, как только игрок отойдёт от точки появления. После победы или поражения игрок возвращается на точку появления, монеты появляются снова.", 11f, M3.VARIANT, bold = false).apply { setPadding(dp(4), dp(4), 0, 0) })
+        }
+        if (!map.world && map.goal.isNotEmpty()) {
+            vec3("Старт мини-игры (куда вернуть игрока)", arrayOf({ map.spx }, { map.spy }, { map.spz }),
+                arrayOf({ v -> map.spx = v }, { v -> map.spy = v }, { v -> map.spz = v }), "spawn")
         }
         vec3("Сдвиг карты в мире", arrayOf({ map.ox }, { map.oy }, { map.oz }), arrayOf({ v -> map.ox = v }, { v -> map.oy = v }, { v -> map.oz = v }), "off")
         section("Масштаб и слой")

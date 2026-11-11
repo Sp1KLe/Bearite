@@ -16,7 +16,11 @@ import java.util.Locale
  * Кнопки модов поверх игры (поле "hud" в mod.json). Нажатие меняет настройку мода, а нативная часть
  * подхватывает новое значение сразу. Кнопки есть только у включённых модов и скрыты на паузе.
  */
-class GameHud(private val act: Activity, mods: ModManager) {
+class GameHud(private val act: Activity, private val mods: ModManager) {
+    /** Проигрывание файла (его даёт GameActivity): путь, громкость, повтор; null stop — остановить. */
+    var onSound: ((String, Float, Boolean) -> Unit)? = null
+    var onStopSound: ((String) -> Unit)? = null
+    var isSoundPlaying: ((String) -> Boolean)? = null
     private val d = UiScale.density(act)
     private fun dp(v: Int) = (v * d).toInt()
 
@@ -77,11 +81,26 @@ class GameHud(private val act: Activity, mods: ModManager) {
     private val coinPoll = object : Runnable {
         override fun run() {
             try {
-                val f = java.io.File(act.filesDir, "maps/_coins")
-                val n = if (f.isFile) f.useLines { it.firstOrNull() }?.trim()?.toIntOrNull() ?: 0 else 0
-                if (n > 0) { coinView.text = "● $n"; coinView.visibility = View.VISIBLE } else coinView.visibility = View.GONE
+                val mg = java.io.File(act.filesDir, "maps/_minigame")
+                val ev = java.io.File(act.filesDir, "maps/_mgevent")
+                if (ev.isFile) {
+                    val l = try { ev.readText().trim().split('\t') } catch (_: Throwable) { emptyList() }
+                    ev.delete()
+                    if (l.size >= 2) say((if (l[0] == "win") "★ " else "✖ ") + l[1], 3200)
+                }
+                val m = if (mg.isFile) try { mg.readText().trim().split('\t') } catch (_: Throwable) { null } else null
+                if (m != null && m.size >= 5) {
+                    val left = m[1].toIntOrNull() ?: -1
+                    val t = if (left >= 0) "⏱ %d:%02d   ".format(left / 60, left % 60) else ""
+                    coinView.text = t + (if ((m[3].toIntOrNull() ?: 0) > 0) "● ${m[2]}/${m[3]}" else "")
+                    coinView.visibility = View.VISIBLE
+                } else {
+                    val f = java.io.File(act.filesDir, "maps/_coins")
+                    val n = if (f.isFile) f.useLines { it.firstOrNull() }?.trim()?.toIntOrNull() ?: 0 else 0
+                    if (n > 0) { coinView.text = "● $n"; coinView.visibility = View.VISIBLE } else coinView.visibility = View.GONE
+                }
             } catch (_: Throwable) {}
-            root.postDelayed(this, 800)
+            root.postDelayed(this, 500)
         }
     }
 
@@ -121,7 +140,22 @@ class GameHud(private val act: Activity, mods: ModManager) {
         e.view.background = GameBtnBg(if (on) GameUi.GREEN else GameUi.YELLOW, dp(18).toFloat(), dp(3).toFloat())
     }
 
+    /** Короткая подсказка по центру сверху (победа, текст из мода). */
+    fun say(text: String, ms: Long = 2800) {
+        hint.text = text
+        hint.removeCallbacks(hideHint)
+        hint.animate().cancel()
+        hint.alpha = 1f
+        hint.postDelayed(hideHint, ms)
+    }
+
     private fun click(e: Entry) {
+        if (e.button.action == "say") { say(e.button.text.ifEmpty { e.button.label }); return }
+        if (e.button.action == "sound") {
+            val path = java.io.File(mods.modsDir, e.mod.id + "/" + e.button.file).path
+            if (e.button.loop && isSoundPlaying?.invoke(path) == true) onStopSound?.invoke(path) else onSound?.invoke(path, e.button.volume.toFloat(), e.button.loop)
+            return
+        }
         val s = setting(e) ?: return
         val values = ModSettings.load(e.mod)
         val cur = values[s.id] ?: ModSettings.defaultOf(s)

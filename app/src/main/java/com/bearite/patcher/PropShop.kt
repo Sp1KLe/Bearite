@@ -27,10 +27,16 @@ class PropShop(private val dir: File, private val store: MapStore) {
             id to name.ifEmpty { id }
         }.sortedBy { it.second.lowercase() }
 
+    /** Анимация из модели: строки t dx dy dz rx ry rz sx sy sz; null, если её нет. */
+    fun loadAnim(id: String): List<DoubleArray>? = try {
+        val f = File(propsDir, "$id.anim")
+        if (!f.isFile) null else f.readLines().filter { it.isNotBlank() }.map { l -> l.trim().split(' ').map { it.toDouble() }.toDoubleArray() }.takeIf { it.size >= 2 && it.all { r -> r.size == 10 } }
+    } catch (_: Throwable) { null }
+
     fun isInstalled(id: String) = File(propsDir, "$id.mesh").isFile
 
     fun remove(id: String) {
-        File(propsDir, "$id.mesh").delete(); File(propsDir, "$id.name").delete()
+        File(propsDir, "$id.mesh").delete(); File(propsDir, "$id.name").delete(); File(propsDir, "$id.anim").delete()
         store.deleteTexture("cp_$id")
     }
 
@@ -54,6 +60,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
         for (f in m.uv) buf.putFloat(f)
         for (i in m.idx) buf.putInt(i)
         (texture ?: m.texture)?.let { store.saveTextureBytes("cp_$id", it) }
+        File(propsDir, "$id.anim").let { f -> if (m.anim != null) f.writeText(m.anim.joinToString("\n") { r -> r.joinToString(" ") { v -> "%.4f".format(java.util.Locale.US, v) } }) else f.delete() }
         File(propsDir, "$id.name").writeText(name)
         File(propsDir, "$id.mesh").writeBytes(buf.array())   // последним: по нему пропу считается установленным
         null
