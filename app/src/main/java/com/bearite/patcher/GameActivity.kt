@@ -169,6 +169,7 @@ class GameActivity : Activity() {
         chat = ChatOverlay(this, root).also { it.onRoomChanged = { updateModButton() }; it.start() }
         updateModButton()
         menuPoll.run()
+        sounds.start()
         view.requestFocus()
         BLog.i("UnityPlayer создан: ${p.javaClass.name}")
     }
@@ -430,11 +431,12 @@ class GameActivity : Activity() {
     }
 
     override fun onStart() { BLog.i("lifecycle: onStart"); super.onStart(); callPlayer(listOf("onStart", "start")) }
-    override fun onStop() { BLog.i("lifecycle: onStop"); callPlayer(listOf("onStop", "stop")); super.onStop() }
+    override fun onStop() { BLog.i("lifecycle: onStop"); callPlayer(listOf("onStop", "stop")); try { sounds.stopAll() } catch (_: Throwable) {}; super.onStop() }
     override fun onResume() { BLog.i("lifecycle: onResume"); super.onResume(); callPlayer("resume") }
     override fun onPause() { BLog.i("lifecycle: onPause"); callPlayer("pause"); super.onPause() }
 
     override fun onDestroy() {
+        try { sounds.stop() } catch (_: Throwable) {}
         BLog.i("GameActivity: нормальный выход")
         try { levelPrompt?.stop() } catch (_: Throwable) {}
         try { chat?.stop() } catch (_: Throwable) {}
@@ -493,6 +495,7 @@ class GameActivity : Activity() {
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
         inject(event) || super.onGenericMotionEvent(event)
 
+    private val sounds by lazy { SoundPlayer(this) }
     private var imageCallback: ((android.net.Uri?) -> Unit)? = null
 
     /** Выбор картинки из галереи (для своих текстур в редакторе карт). */

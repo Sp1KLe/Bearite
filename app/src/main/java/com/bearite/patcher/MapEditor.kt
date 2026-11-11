@@ -315,7 +315,7 @@ class MapEditor(
         if (map.objects.isEmpty()) tree.addView(ui.label("Пусто. Нажми ＋ и добавь объект.", 12f, M3.VARIANT, bold = false).apply { setPadding(dp(6), dp(12), dp(6), 0) })
     }
 
-    private fun glyph(shape: String) = when (if (shape.startsWith("prop:")) "prop" else shape) { "prop" -> "◆";  "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; else -> "■" }
+    private fun glyph(shape: String) = when (if (shape.startsWith("prop:")) "prop" else shape) { "prop" -> "◆";  "sphere" -> "●"; "cylinder" -> "▮"; "capsule" -> "⬮"; "plane" -> "▬"; "portal" -> "◎"; "coin" -> "◉"; else -> "■" }
 
     private fun treeRow(g: String, name: String, on: Boolean, color: Int, click: () -> Unit): View {
         val r = LinearLayout(act).apply {
@@ -458,7 +458,7 @@ class MapEditor(
         refill = { fill() }
         val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
         val tabViews = ArrayList<TextView>()
-        listOf("Фигуры", "Игра", "Сообщество").forEachIndexed { i, nm ->
+        listOf("Фигуры и предметы", "Игра", "Сообщество").forEachIndexed { i, nm ->
             val t = ui.pill(nm, primary = i == pickTab, sizeSp = 13f) { pickTab = i; tabViews.forEachIndexed { k, v -> v.alpha = if (k == i) 1f else 0.6f }; fill() }
             t.alpha = if (i == pickTab) 1f else 0.6f
             tabViews.add(t)
@@ -546,7 +546,7 @@ class MapEditor(
         val o = MapStore.newObj(shape)
         val sp = vp.spawnPoint()
         o.x = sp[0].toDouble(); o.z = sp[2].toDouble()
-        o.y = when (shape) { "plane" -> 0.0; "cylinder", "capsule", "portal" -> o.sy; else -> 0.5 * o.sy }
+        o.y = when (shape) { "plane" -> 0.0; "coin" -> 1.0; "cylinder", "capsule", "portal" -> o.sy; else -> 0.5 * o.sy }
         if (shape == "portal") { o.dx = o.x + 6.0; o.dy = 1.0; o.dz = o.z }
         map.objects.add(o)
         commit()

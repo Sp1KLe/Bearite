@@ -48,6 +48,13 @@ typedef struct BeariteApi {
     /* Папка данных Bearite (filesDir приложения), без завершающего слеша. Моды могут хранить там свои файлы.
      * Добавлено позже остальных полей; версия API при этом не менялась. */
     const char* (*data_dir)(void);
+
+    /* Звуки и песни. file: путь внутри папки мода (например "sounds/win.ogg"; wav, ogg, mp3, m4a). volume 0..1.
+     * loop != 0 — повторять, пока не остановят. Возвращает 0, если команда принята, -1 если файла нет.
+     * Звуки могут накладываться; песню с loop останавливает stop_sound (file = NULL или "" — остановить всё).
+     * Добавлено позже остальных полей; версия API не менялась. Перед вызовом проверь, что api->play_sound != NULL. */
+    int (*play_sound)(const char* mod_id, const char* file, float volume, int loop);
+    void (*stop_sound)(const char* mod_id, const char* file);
 } BeariteApi;
 
 typedef void (*BeariteModInitFn)(const BeariteApi* api, const char* mod_id);

@@ -301,9 +301,44 @@ static const char* api_data_dir() {
     return dir.c_str();
 }
 
+// ------------------------------------------------------------------ звуки модов
+// Мод просит проиграть файл из своей папки; команда дописывается в filesDir/_audio, лаунчер забирает её и играет через Android.
+static std::map<std::string, std::string> g_modDirs;  // id мода -> его папка
+
+static bool audio_path(const char* mod, const char* file, std::string& out) {
+    if (!mod || !file || !*file) return false;
+    std::string f = file;
+    if (f[0] == '/' || f.find("..") != std::string::npos || f.find('\t') != std::string::npos || f.find('\n') != std::string::npos) return false;
+    auto it = g_modDirs.find(mod);
+    if (it == g_modDirs.end()) return false;
+    out = it->second + "/" + f;
+    return access(out.c_str(), R_OK) == 0;
+}
+
+static void audio_cmd(const std::string& line) {
+    std::string path = std::string(api_data_dir()) + "/_audio";
+    if (FILE* f = fopen(path.c_str(), "a")) { fputs(line.c_str(), f); fputc('\n', f); fclose(f); }
+}
+
+static int api_play_sound(const char* mod, const char* file, float volume, int loop) {
+    std::string abs;
+    if (!audio_path(mod, file, abs)) { blog("[мод %s] звук «%s» не найден в папке мода", mod ? mod : "?", file ? file : ""); return -1; }
+    if (volume < 0) volume = 0;
+    if (volume > 1) volume = 1;
+    audio_cmd("play\t" + abs + "\t" + std::to_string(volume) + "\t" + (loop ? "1" : "0"));
+    return 0;
+}
+
+static void api_stop_sound(const char* mod, const char* file) {
+    if (!file || !*file) { audio_cmd("stopall"); return; }
+    std::string abs;
+    if (audio_path(mod, file, abs)) audio_cmd("stop\t" + abs);
+}
+
 static const BeariteApi g_api = {
     BEARITE_API_VERSION, api_log,      api_il2cpp_symbol, api_module_base, api_hook,
     api_get_bool,        api_get_int,  api_get_float,     api_get_string,   api_data_dir,
+    api_play_sound,      api_stop_sound,
 };
 
 // id модов живут до конца процесса: мод вправе запомнить указатель mod_id и пользоваться им позже
@@ -315,6 +350,10 @@ static void load_native_mods(const Config& cfg) {
         g_modIds.push_back(m.first);
         const std::string& id = g_modIds.back();
         const std::string& path = m.second;
+        {   // папка мода: …/<id>/libs/arm64-v8a/x.so -> …/<id>
+            size_t k = path.find("/" + id + "/");
+            if (k != std::string::npos) g_modDirs[id] = path.substr(0, k + 1 + id.size());
+        }
         void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!h) {
             const char* e = dlerror();

@@ -66,6 +66,31 @@ class GameHud(private val act: Activity, mods: ModManager) {
         )
     }
 
+    // счётчик собранных монет: число пишет мод в maps/_coins (первая строка), показываем, когда монеты уже есть
+    private val coinView = OutlinedText(act).apply {
+        outlineWidthPx = dp(3).toFloat()
+        textSize = 20f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(0xFFFFD34D.toInt())
+        visibility = View.GONE
+    }
+    private val coinPoll = object : Runnable {
+        override fun run() {
+            try {
+                val f = java.io.File(act.filesDir, "maps/_coins")
+                val n = if (f.isFile) f.useLines { it.firstOrNull() }?.trim()?.toIntOrNull() ?: 0 else 0
+                if (n > 0) { coinView.text = "● $n"; coinView.visibility = View.VISIBLE } else coinView.visibility = View.GONE
+            } catch (_: Throwable) {}
+            root.postDelayed(this, 800)
+        }
+    }
+
+    init {
+        root.addView(coinView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
+        root.postDelayed(coinPoll, 800)
+    }
+
     /** Перерисовать состояние кнопок (например, после изменения настроек в мод-меню). */
     fun refresh() = entries.forEach { paint(it) }
 

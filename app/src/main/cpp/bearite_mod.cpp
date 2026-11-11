@@ -354,6 +354,7 @@ struct Live {
     long long natTry = 0;
     bool natHidden = false, natMiss = false, natClone = false;
     bool prop = false; float base[3] = {1, 1, 1};   // модель игры (shape «prop:имя»): родной размер, на который умножается размер объекта
+    bool hidden = false;      // монета собрана: размер 0, объект остаётся
     bool nativeFull = false;  // копия платформы с родными скриптами: окно, анимацию и загрузку уровня ведёт сама игра
 };
 
@@ -809,7 +810,7 @@ int primitive_id(const std::string& s) {
     // UnityEngine.PrimitiveType: Sphere=0, Capsule=1, Cylinder=2, Cube=3, Plane=4, Quad=5
     if (s == "sphere") return 0;
     if (s == "capsule") return 1;
-    if (s == "cylinder" || s == "portal") return 2;  // круг телепорта: плоский цилиндр
+    if (s == "cylinder" || s == "portal" || s == "coin") return 2;  // круг телепорта: плоский цилиндр
     if (s == "plane") return 4;
     return 3;
 }
@@ -985,6 +986,7 @@ void apply_live(Live& L, const Obj& o, const MapSpec& m, const std::string& full
     V3 pos{m.off[0] + m.scale * lp[0], m.off[1] + m.scale * lp[1], m.off[2] + m.scale * lp[2]};
     V3 size{m.scale * ls[0], m.scale * ls[1], m.scale * ls[2]};
     if (L.prop) size = V3{ls[0] * L.base[0], ls[1] * L.base[1], ls[2] * L.base[2]};   // s=1 — родной размер модели, масштаб карты не применяем
+    if (L.hidden) size = V3{0.0001f, 0.0001f, 0.0001f};
     V3 rot{lr[0], lr[1], lr[2]};
     if (memcmp(L.pos, &pos, sizeof pos) != 0) {
         void* a[1] = {&pos};
@@ -2038,13 +2040,75 @@ void prompt_open(const MapSpec* t, long long now) {
     logf_("окно уровня «%s»: показываю", t->name.c_str());
 }
 
+// ------------------------------------------------------------------ монеты
+// Шаг «coin»: собранные монеты запоминаются в maps/_coins (первая строка — сколько всего собрано, дальше ключи) и переживают перезапуск игры.
+std::unordered_set<std::string> g_coinGot;
+bool g_coinLoaded = false;
+
+std::string coin_key(const MapSpec& m, const Obj& o) {
+    char b[96];
+    snprintf(b, sizeof b, "@%.2f,%.2f,%.2f", o.p[0], o.p[1], o.p[2]);
+    return m.id + b;
+}
+
+void coin_load() {
+    if (g_coinLoaded) return;
+    g_coinLoaded = true;
+    if (FILE* f = fopen((g_mapsDir + "/_coins").c_str(), "r")) {
+        char line[256];
+        bool first = true;
+        while (fgets(line, sizeof line, f)) {
+            std::string l = line;
+            while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+            if (first) { first = false; continue; }
+            if (!l.empty()) g_coinGot.insert(l);
+        }
+        fclose(f);
+    }
+}
+
+void coin_save() {
+    std::string tmp = g_mapsDir + "/.coins.tmp", fin = g_mapsDir + "/_coins";
+    if (FILE* f = fopen(tmp.c_str(), "w")) {
+        fprintf(f, "%d\n", (int)g_coinGot.size());
+        for (const auto& k : g_coinGot) fprintf(f, "%s\n", k.c_str());
+        fclose(f);
+        rename(tmp.c_str(), fin.c_str());
+    }
+}
+
+/** Монета собирается, когда игрок подходит ближе радиуса; собранная прячется (размер 0) и больше не появляется. */
+void coins_tick(const float* pp) {
+    coin_load();
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            const Obj& o = m.objs[i];
+            Live& L = it->second[i];
+            if (o.shape != "coin" || !L.h) continue;
+            std::string key = coin_key(m, o);
+            if (g_coinGot.count(key)) { if (!L.hidden) L.hidden = true; continue; }
+            float cx = m.off[0] + m.scale * o.p[0], cy = m.off[1] + m.scale * o.p[1], cz = m.off[2] + m.scale * o.p[2];
+            float r = 0.5f * m.scale * (o.s[0] > o.s[2] ? o.s[0] : o.s[2]) + 0.6f;
+            float dx = pp[0] - cx, dy = pp[1] + 0.8f - cy, dz = pp[2] - cz;   // центр медведя примерно на высоте пояса
+            if (dx * dx + dz * dz < r * r && dy > -1.6f * m.scale && dy < 1.6f * m.scale) {
+                g_coinGot.insert(key);
+                L.hidden = true;
+                coin_save();
+                logf_("монета собрана: всего %d", (int)g_coinGot.size());
+            }
+        }
+    }
+}
+
 void portals_tick(long long now) {
     bool any = false;
     for (const auto& m : g_specs) {
         auto it = g_live.find(m.id);
         if (it == g_live.end()) continue;
         for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i)
-            if (m.objs[i].shape == "portal" && it->second[i].h) { any = true; break; }
+            if ((m.objs[i].shape == "portal" || m.objs[i].shape == "coin") && it->second[i].h) { any = true; break; }
         if (any) break;
     }
     if (!any) return;
@@ -2074,6 +2138,7 @@ void portals_tick(long long now) {
     if (!pv) { if (g_player) { gch_free(g_player); g_player = 0; } return; }
     float pp[3];
     memcpy(pp, obj_unbox(pv), sizeof pp);
+    coins_tick(pp);
     if (diag) {
         static std::string scNames;
         static long long scSince = 0;

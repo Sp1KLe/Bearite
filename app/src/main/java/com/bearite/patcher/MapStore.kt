@@ -318,15 +318,16 @@ class MapStore(private val dir: File) {
     fun textureFile(id: String): File? = texturePng(id).takeIf { it.isFile }
 
     companion object {
-        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal")
+        val SHAPES = listOf("cube", "sphere", "cylinder", "capsule", "plane", "portal", "coin")
         val SHAPE_NAMES = mapOf("cube" to "Куб", "sphere" to "Шар", "cylinder" to "Цилиндр", "capsule" to "Капсула",
-            "plane" to "Плоскость", "portal" to "Круг телепорта")
+            "plane" to "Плоскость", "portal" to "Круг телепорта", "coin" to "Монета")
 
         /** Новый объект с подходящими размерами и цветом для формы. */
         fun newObj(shape: String): MapObj {
             val o = MapObj(SHAPE_NAMES[shape] ?: "Блок", shape)
             when (shape) {
                 "plane" -> { o.sx = 2.0; o.sz = 2.0 }
+                "coin" -> { o.sx = 0.8; o.sy = 0.06; o.sz = 0.8; o.rx = 90.0; o.color = 0xFFC83A; o.solid = false }
                 "portal" -> { o.sx = 3.0; o.sy = 0.1; o.sz = 3.0; o.color = 0x6FE0D0; o.solid = false; o.bind = "Launch Platform (Turtletown)"; o.clone = true }
             }
             return o
