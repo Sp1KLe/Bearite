@@ -3829,6 +3829,13 @@ void pm_scan(std::vector<PmBtn>& out) {
     }
 }
 
+/** «Оцените игру!» и аналоги: кнопка из паузы вырезается. */
+bool pm_is_rate(const std::string& t) {
+    for (const char* k : {"ценит", "ЦЕНИТ", "Rate", "RATE", "Bewert", "valu", "Califi", "Avali", "Noter", "Valuta"})
+        if (t.find(k) != std::string::npos) return true;
+    return false;
+}
+
 bool pm_is_achievements(const std::string& t) {
     for (const char* k : {"остижен", "ОСТИЖЕН", "chievem", "CHIEVEM", "ogros", "ccès", "rfolg"})
         if (t.find(k) != std::string::npos) return true;
@@ -3912,6 +3919,14 @@ void pm_tick(long long now) {
     if (!PM.tButton || !F.instantiate_parent || !F.get_parent) { if (g_pmTries++ == 0) pm_status("fail\tнет нужных методов"); return; }
     std::vector<PmBtn> v;
     pm_scan(v);
+    {   // убираем кнопку «Оцените игру!»; раскладка пересчитается к следующему шагу, поэтому остальное делаем потом
+        bool hid = false;
+        for (auto& b : v) {
+            if (b.name == "BeariteMenuButton" || !pm_is_rate(b.text)) continue;
+            if (F.set_active) { bool off = false; void* sa[1] = {&off}; inv(F.set_active, b.go, sa); hid = true; logf_("кнопка «%s» убрана из паузы", b.text.c_str()); }
+        }
+        if (hid) return;
+    }
     PmBtn *mine = nullptr, *tgt = nullptr;
     for (auto& b : v) {
         if (b.name == "BeariteMenuButton") mine = &b;
