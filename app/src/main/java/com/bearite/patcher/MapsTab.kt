@@ -123,6 +123,11 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
 
     private fun buildMapDetails(d: LinearLayout, m: GameMap, st: EngineState) {
         d.addView(ui.pill("Открыть редактор карты", primary = true) { hideMenu?.invoke(true); MapEditor(act, ui, store, m) { hideMenu?.invoke(false); rebuild?.invoke() }.show() }, rowLp())
+        d.addView(ui.pill("Удалить карту", sizeSp = 14f) {
+            ui.dialog("Удалить «${m.name}»?", null, listOf(GameUi.Btn("Отмена"), GameUi.Btn("Удалить", danger = true) {
+                store.delete(m); rebuild?.invoke()
+            })).show()
+        }, rowLp())
     }
 
     private fun sceneText(m: GameMap) = if (m.scene.isEmpty()) "Любая" else m.scene

@@ -94,7 +94,7 @@ class MapStore(private val dir: File) {
 
     /** Id всех импортированных текстур по порядку добавления. */
     fun textures(): List<String> =
-        (texDir.listFiles { f -> f.isFile && f.name.endsWith(".png") } ?: emptyArray())
+        (texDir.listFiles { f -> f.isFile && f.name.endsWith(".png") && !f.name.startsWith("_") } ?: emptyArray())
             .map { it.name.removeSuffix(".png") }
             .sortedWith(compareBy({ it.length }, { it }))
 

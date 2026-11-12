@@ -3860,6 +3860,51 @@ void h_btn_submit(void* self, void* ev, const void* mi) {
     if (o_btn_submit) o_btn_submit(self, ev, mi);
 }
 
+/** Иконка копии кнопки «Меню»: вместо джойстика — пазл (картинку кладёт лаунчер в maps/textures/_puzzle.tex). */
+void pm_set_icon(void* clone) {
+    static bool failedOnce = false;
+    void* tImg = type_of("UnityEngine.UI", "Image");
+    void* imgK = bearite_find_class("UnityEngine.UI", "Image");
+    void* spK = bearite_find_class("UnityEngine", "Sprite");
+    if (!tImg || !imgK || !spK || !F.get_comps_children) { if (!failedOnce) logf_("иконка кнопки: нет Image/Sprite"); failedOnce = true; return; }
+    std::vector<unsigned char> head;
+    if (!read_file(g_mapsDir + "/textures/_puzzle.tex", head) || head.size() < 8) { if (!failedOnce) logf_("иконка кнопки: нет файла пазла"); failedOnce = true; return; }
+    int w = 0, h = 0;
+    memcpy(&w, head.data(), 4); memcpy(&h, head.data() + 4, 4);
+    void* tex = make_texture("_puzzle");
+    void* create = find_method_types(spK, "Create", {"Texture2D", "Rect", "Vector2"});
+    void* setSprite = bearite_il2.class_get_method_from_name(imgK, "set_sprite", 1);
+    void* setAspect = bearite_il2.class_get_method_from_name(imgK, "set_preserveAspect", 1);
+    if (!tex || !create || !setSprite) { if (!failedOnce) logf_("иконка кнопки: не удалось создать спрайт (tex=%d create=%d set=%d)", tex != 0, create != 0, setSprite != 0); failedOnce = true; return; }
+    float rect[4] = {0, 0, (float)w, (float)h};
+    float pivot[2] = {0.5f, 0.5f};
+    void* ca[3] = {tex, rect, pivot};
+    void* sprite = inv(create, nullptr, ca);
+    if (!sprite) return;
+    bool inc = true;
+    void* ta[2] = {tImg, &inc};
+    void* arr = inv(F.get_comps_children, clone, ta);
+    if (!arr) return;
+    uintptr_t n = arr_len(arr);
+    std::string names;
+    void* pick = nullptr;
+    for (uintptr_t i = 0; i < n && i < 12; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!c) continue;
+        std::string nm = name_of(c), low = nm;
+        for (char& ch : low) ch = (char)tolower((unsigned char)ch);
+        names += nm + " | ";
+        if (i == 0) continue;   // корень — фон кнопки
+        if (!pick && (low.find("icon") != std::string::npos || low.find("ico") != std::string::npos)) pick = c;
+    }
+    if (!pick && n > 1) pick = *(void**)arr_elem(arr, sizeof(void*), 1);
+    logf_("иконка кнопки «Меню»: изображения [%s], выбрано %d", names.c_str(), pick != nullptr);
+    if (!pick) return;
+    void* sa[1] = {sprite};
+    inv(setSprite, pick, sa);
+    if (setAspect) { uint8_t on = 1; void* aa[1] = {&on}; inv(setAspect, pick, aa); }
+}
+
 void pm_tick(long long now) {
     if (!g_pmOpen || now - g_pmOpenAt < 250 || now - g_pmLast < 300) return;
     g_pmLast = now;
@@ -3919,6 +3964,7 @@ void pm_tick(long long now) {
         }
     }
     pm_set_text(clone, "Меню");
+    pm_set_icon(clone);
     if (F.set_active) { bool on = true; void* sa[1] = {&on}; inv(F.set_active, clone, sa); }
     char buf[160];
     snprintf(buf, sizeof buf, "ok\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", np.x, np.y, tgt->p[0], tgt->p[1], step);
