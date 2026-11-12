@@ -22,9 +22,28 @@ class AchievementStore(private val ctx: Context) {
 
     fun unlocked(): Set<String> = try { if (file.isFile) file.readLines().map { it.trim() }.filter { it.isNotEmpty() }.toSet() else emptySet() } catch (_: Throwable) { emptySet() }
 
-    /** Все достижения установленных модов. */
+    /** Достижения самого Bearite (встроенный мод): открываются движком карт и редактором. */
+    private val builtin = listOf(
+        Def("bearite:first_coin", "Bearite", "Первая монета", "Подбери монету на карте"),
+        Def("bearite:coins_10", "Bearite", "Коллекционер", "Собери 10 монет"),
+        Def("bearite:builder", "Bearite", "Строитель", "Поставь объект на своей карте"),
+        Def("bearite:modeler", "Bearite", "Модельер", "Добавь на карту модель из каталога"),
+        Def("bearite:finish", "Bearite", "Финишная прямая", "Выиграй мини-игру на карте"),
+        Def("bearite:curious", "Bearite", "Любопытный", "Загляни в список достижений"),
+    )
+
+    /** Открывает достижение из лаунчера; возвращает его название, если оно только что открыто. */
+    fun unlockKey(key: String): String? {
+        val def = defs().firstOrNull { it.key == key } ?: return null
+        val have = unlocked().toMutableSet()
+        if (!have.add(key)) return null
+        try { file.writeText(have.joinToString("\n") + "\n") } catch (_: Throwable) {}
+        return def.name
+    }
+
+    /** Все достижения: встроенные и установленных модов. */
     fun defs(): List<Def> {
-        val out = ArrayList<Def>()
+        val out = ArrayList<Def>(builtin)
         val dirs = ModManager(ctx).modsDir.listFiles { f -> f.isDirectory } ?: return out
         for (d in dirs.sortedBy { it.name }) {
             try {
@@ -69,6 +88,7 @@ class AchievementStore(private val ctx: Context) {
 class AchievementsWindow(private val act: Activity, private val ui: GameUi) {
     fun show() {
         val store = AchievementStore(act)
+        store.unlockKey("bearite:curious")
         val defs = store.defs()
         val have = store.unlocked()
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }

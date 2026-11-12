@@ -2076,6 +2076,11 @@ void coin_load() {
     }
 }
 
+/** Достижение самого Bearite: строка «bearite<TAB>id» в filesDir/_ach (лаунчер покажет «★ Достижение»). */
+void bearite_ach(const char* id) {
+    if (FILE* f = fopen((g_mapsDir + "/../_ach").c_str(), "a")) { fprintf(f, "bearite\t%s\n", id); fclose(f); }
+}
+
 void coin_save() {
     std::string tmp = g_mapsDir + "/.coins.tmp", fin = g_mapsDir + "/_coins";
     if (FILE* f = fopen(tmp.c_str(), "w")) {
@@ -2145,6 +2150,7 @@ void mini_tick(const float* pp, void* tr, long long now) {
         if (win || lose) {
             g.ended = true; g.win = win; g.endT = now;
             std::string msg = win ? (m.winMsg.empty() ? "Победа!" : m.winMsg) : (m.loseMsg.empty() ? "Время вышло!" : m.loseMsg);
+            if (win) bearite_ach("finish");
             mg_write("_mgevent", std::string(win ? "win" : "lose") + "\t" + msg + "\n");
             logf_("мини-игра «%s»: %s", m.name.c_str(), win ? "победа" : "поражение");
         }
@@ -2179,6 +2185,8 @@ void coins_tick(const float* pp, void* tr, long long now) {
                 g_coinGot.insert(key);
                 L.hidden = true;
                 coin_save();
+                bearite_ach("first_coin");
+                if (g_coinGot.size() >= 10) bearite_ach("coins_10");
                 logf_("монета собрана: всего %d", (int)g_coinGot.size());
             }
         }
