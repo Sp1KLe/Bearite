@@ -321,6 +321,7 @@ struct Obj {
     struct Key { float t; float v[9]; int e; };
     std::vector<Key> keys;     // свои ключевые кадры (an == keys): t, x y z rx ry rz sx sy sz, плавность
     int km = 0;                // 0 по кругу, 1 туда-обратно, 2 один раз
+    std::string tag;           // метка для модов
 };
 
 struct MapSpec {
@@ -470,6 +471,7 @@ bool parse_map(const std::string& id, const std::string& path, MapSpec& m) {
                 std::sort(o.keys.begin(), o.keys.end(), [](const Obj::Key& a, const Obj::Key& b) { return a.t < b.t; });
             }
             if (p.size() > 30) o.km = atoi(p[30].c_str());
+            if (p.size() > 31) o.tag = p[31];
             m.objs.push_back(o);
             continue;
         }
@@ -2182,6 +2184,45 @@ void coins_tick(const float* pp, void* tr, long long now) {
         }
     }
     mini_tick(pp, tr, now);
+}
+
+// ------------------------------------------------------------------ метки для модов
+// Моды ищут объекты карт по метке: bearite_tag_query(tag, -1, ...) — сколько их, index >= 0 — мировая позиция и размер объекта.
+// bearite_tag_visible скрывает/показывает объект (скрытый не виден и не мешает). Вызывается из libbearite через dlsym.
+extern "C" __attribute__((visibility("default")))
+int bearite_tag_query(const char* tag, int index, float* pos3, float* size3) {
+    if (!tag || !*tag) return 0;
+    int n = 0;
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            const Obj& o = m.objs[i];
+            if (o.tag != tag || !it->second[i].h) continue;
+            if (index >= 0 && n == index) {
+                if (pos3) for (int k = 0; k < 3; ++k) pos3[k] = m.off[k] + m.scale * o.p[k];
+                if (size3) for (int k = 0; k < 3; ++k) size3[k] = m.scale * o.s[k];
+                return 1;
+            }
+            ++n;
+        }
+    }
+    return index < 0 ? n : 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+void bearite_tag_visible(const char* tag, int index, int visible) {
+    if (!tag || !*tag) return;
+    int n = 0;
+    for (const auto& m : g_specs) {
+        auto it = g_live.find(m.id);
+        if (it == g_live.end()) continue;
+        for (size_t i = 0; i < m.objs.size() && i < it->second.size(); ++i) {
+            if (m.objs[i].tag != tag || !it->second[i].h) continue;
+            if (index < 0 || n == index) it->second[i].hidden = !visible;
+            ++n;
+        }
+    }
 }
 
 void portals_tick(long long now) {

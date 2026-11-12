@@ -335,10 +335,30 @@ static void api_stop_sound(const char* mod, const char* file) {
     if (audio_path(mod, file, abs)) audio_cmd("stop\t" + abs);
 }
 
+// ------------------------------------------------------------------ метки объектов карт
+// Объекты карт принадлежат встроенному моду (libbearite_mod.so); он экспортирует bearite_tag_query / bearite_tag_visible.
+typedef int (*TagQueryFn)(const char*, int, float*, float*);
+typedef void (*TagVisFn)(const char*, int, int);
+static std::vector<void*> g_modHandles;
+static TagQueryFn g_tagQuery = nullptr;
+static TagVisFn g_tagVis = nullptr;
+
+static void tag_resolve() {
+    if (g_tagQuery) return;
+    for (void* h : g_modHandles) {
+        if (void* f = dlsym(h, "bearite_tag_query")) { g_tagQuery = reinterpret_cast<TagQueryFn>(f); g_tagVis = reinterpret_cast<TagVisFn>(dlsym(h, "bearite_tag_visible")); return; }
+    }
+}
+
+static int api_tag_count(const char* tag) { tag_resolve(); return g_tagQuery ? g_tagQuery(tag, -1, nullptr, nullptr) : 0; }
+static int api_tag_get(const char* tag, int index, float* pos3, float* size3) { tag_resolve(); return g_tagQuery && index >= 0 ? g_tagQuery(tag, index, pos3, size3) : 0; }
+static void api_tag_set_visible(const char* tag, int index, int visible) { tag_resolve(); if (g_tagVis) g_tagVis(tag, index, visible); }
+
 static const BeariteApi g_api = {
     BEARITE_API_VERSION, api_log,      api_il2cpp_symbol, api_module_base, api_hook,
     api_get_bool,        api_get_int,  api_get_float,     api_get_string,   api_data_dir,
     api_play_sound,      api_stop_sound,
+    api_tag_count,       api_tag_get,  api_tag_set_visible,
 };
 
 // id модов живут до конца процесса: мод вправе запомнить указатель mod_id и пользоваться им позже
@@ -360,6 +380,7 @@ static void load_native_mods(const Config& cfg) {
             blog("мод %s: dlopen не удался: %s", id.c_str(), e ? e : "?");
             continue;
         }
+        g_modHandles.push_back(h);
         auto init = reinterpret_cast<BeariteModInitFn>(dlsym(h, BEARITE_MOD_INIT_SYMBOL));
         if (!init) {
             blog("мод %s: нет функции %s", id.c_str(), BEARITE_MOD_INIT_SYMBOL);

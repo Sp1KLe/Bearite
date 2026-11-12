@@ -55,6 +55,15 @@ typedef struct BeariteApi {
      * Добавлено позже остальных полей; версия API не менялась. Перед вызовом проверь, что api->play_sound != NULL. */
     int (*play_sound)(const char* mod_id, const char* file, float volume, int loop);
     void (*stop_sound)(const char* mod_id, const char* file);
+
+    /* Метки объектов карт. В редакторе у объекта есть поле «Метка» (start, checkpoint, enemy…): мод находит такие
+     * объекты и сам решает, что с ними делать. tag_count — сколько живых объектов с меткой (в сцене сейчас).
+     * tag_get — мировая позиция xyz и размер xyz объекта с номером index (0..count-1), pos3/size3 могут быть NULL; 1 — успех.
+     * tag_set_visible — спрятать (0) или вернуть (1) объект; index < 0 — все с этой меткой.
+     * Добавлено позже остальных полей; перед вызовом проверь, что указатель не NULL. */
+    int (*tag_count)(const char* tag);
+    int (*tag_get)(const char* tag, int index, float* pos3, float* size3);
+    void (*tag_set_visible)(const char* tag, int index, int visible);
 } BeariteApi;
 
 typedef void (*BeariteModInitFn)(const BeariteApi* api, const char* mod_id);
