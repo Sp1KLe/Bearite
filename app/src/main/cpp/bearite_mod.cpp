@@ -174,7 +174,7 @@ void scan_classes() {
     auto dom_get = sym<void* (*)()>("il2cpp_domain_get");
     auto dom_asms = sym<void** (*)(void*, size_t*)>("il2cpp_domain_get_assemblies");
     if (!img_count || !img_class || !cls_ns || !dom_get || !dom_asms || !asm_image) { logf_("разведка классов: нет функций il2cpp"); return; }
-    static const char* words[] = {"launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
+    static const char* words[] = {"achiev", "trophy", "launch", "vote", "level", "transition", "fade", "loading", "scene", "portal", "popup",
                                   "dialog", "panel", "select", "travel", "teleport", "warp", "curtain", "wipe", "cutscene",
                                   "worldmap", "stage", "player", "pause", "ingamemenu", "gamemenu", "mainmenu",
                                   "health", "damage", "hp", "life", "lives", "death", "die", "invinc", "immort", "emote", "emoji", "gesture", "anim",
@@ -3858,12 +3858,28 @@ void pm_clicked() {
     if (FILE* f = fopen(tmp.c_str(), "w")) { fprintf(f, "%d", g_pmClicks); fclose(f); rename(tmp.c_str(), path.c_str()); }
     logf_("нажата кнопка «Меню» в паузе");
 }
+int g_achClicks = 0;
+/** Кнопка «Достижения» в паузе: вместо окна Google Play открываем своё (лаунчер следит за maps/_achclick). */
+bool pm_is_ach_button(void* btn) {
+    if (!btn || !F.get_gameobject) return false;
+    void* go = inv(F.get_gameobject, btn);
+    if (!go || name_of(go) == "BeariteMenuButton") return false;
+    return pm_is_achievements(pm_get_text(go));
+}
+void pm_ach_clicked() {
+    ++g_achClicks;
+    std::string path = g_mapsDir + "/_achclick", tmp = g_mapsDir + "/.achclick.tmp";
+    if (FILE* f = fopen(tmp.c_str(), "w")) { fprintf(f, "%d", g_achClicks); fclose(f); rename(tmp.c_str(), path.c_str()); }
+    logf_("нажата кнопка «Достижения» в паузе");
+}
 void h_btn_click(void* self, void* ev, const void* mi) {
     if (pm_is_ours(self)) { pm_clicked(); return; }
+    if (pm_is_ach_button(self)) { pm_ach_clicked(); return; }
     if (o_btn_click) o_btn_click(self, ev, mi);
 }
 void h_btn_submit(void* self, void* ev, const void* mi) {
     if (pm_is_ours(self)) { pm_clicked(); return; }
+    if (pm_is_ach_button(self)) { pm_ach_clicked(); return; }
     if (o_btn_submit) o_btn_submit(self, ev, mi);
 }
 
@@ -3960,7 +3976,7 @@ void pm_tick(long long now) {
     if (F.set_name) { void* b[1] = {bearite_il2.string_new("BeariteMenuButton")}; inv(F.set_name, clone, b); }
     if (PM.sibGet && PM.sibSet) {  // если кнопки лежат в VerticalLayoutGroup, копия встанет на место оригинала и сдвинет его вниз
         void* si = inv(PM.sibGet, tgt->tr);
-        if (si) { int idx = *(const int*)obj_unbox(si); void* sa[1] = {&idx}; inv(PM.sibSet, ctr, sa); }
+        if (si) { int idx = *(const int*)obj_unbox(si) + 1; void* sa[1] = {&idx}; inv(PM.sibSet, ctr, sa); }
     }
     V3 np{tgt->p[0], tgt->p[1] + step, tgt->p[2]};
     void* pa[1] = {&np};
