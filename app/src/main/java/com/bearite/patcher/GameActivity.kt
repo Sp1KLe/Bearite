@@ -313,6 +313,8 @@ class GameActivity : Activity() {
     private var lastMenu = false
     private var lastPaused = false
     private var lastClick: String? = null
+    private var lastAch: String? = null
+    private val achStore by lazy { AchievementStore(this) }
     private val menuPoll = object : Runnable {
         override fun run() {
             val m = gameMenuOpen()
@@ -325,6 +327,12 @@ class GameActivity : Activity() {
                 modMenu?.show()
                 hud?.root?.visibility = View.GONE
             }
+            // новые достижения от модов: запоминаем и показываем уведомление
+            try { achStore.poll().forEach { hud?.say("★ Достижение: $it", 3500) } } catch (_: Throwable) {}
+            // нажатие на «Достижения» в паузе: открываем своё окно со списком
+            val a = try { File(File(filesDir, "maps"), "_achclick").readText().trim() } catch (_: Throwable) { "" }
+            if (lastAch == null) lastAch = a
+            else if (a != lastAch) { lastAch = a; try { AchievementsWindow(this, GameUi(this)).show() } catch (t: Throwable) { BLog.e("окно достижений", t) } }
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 150)
         }
     }

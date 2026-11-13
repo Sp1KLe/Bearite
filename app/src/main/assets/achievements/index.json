@@ -1,0 +1,40 @@
+{
+ "achievements": [
+  {
+   "id": "first_coin",
+   "name": "Первая монета",
+   "desc": "Подбери монету на карте",
+   "icon": "first_coin.png"
+  },
+  {
+   "id": "coins_10",
+   "name": "Коллекционер",
+   "desc": "Собери 10 монет",
+   "icon": "coins_10.png"
+  },
+  {
+   "id": "builder",
+   "name": "Строитель",
+   "desc": "Поставь объект на своей карте",
+   "icon": "builder.png"
+  },
+  {
+   "id": "modeler",
+   "name": "Модельер",
+   "desc": "Добавь на карту модель из каталога",
+   "icon": "modeler.png"
+  },
+  {
+   "id": "finish",
+   "name": "Финишная прямая",
+   "desc": "Выиграй мини-игру на карте",
+   "icon": "finish.png"
+  },
+  {
+   "id": "curious",
+   "name": "Любопытный",
+   "desc": "Загляни в список достижений",
+   "icon": "curious.png"
+  }
+ ]
+}
