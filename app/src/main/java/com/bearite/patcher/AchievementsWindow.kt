@@ -15,8 +15,7 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Свои достижения. Встроенные (мод Bearite) лежат в репозитории: app/src/main/assets/achievements/index.json,
- * рядом — картинки-аватарки (png). Моды описывают их в mod.json ("achievements": [{"id","name","desc"}]); код мода открывает их
+ * Свои достижения. Встроенные (мод Bearite) описаны в коде (builtin), аватарки — по желанию. Моды описывают их в mod.json ("achievements": [{"id","name","desc"}]); код мода открывает их
  * через api->unlock_achievement(mod_id, id). Полученные хранятся в filesDir/achievements.txt (строки «мод:id»).
  */
 class AchievementStore(private val ctx: Context) {
@@ -40,14 +39,15 @@ class AchievementStore(private val ctx: Context) {
 
     fun unlocked(): Set<String> = try { if (file.isFile) file.readLines().map { it.trim() }.filter { it.isNotEmpty() }.toSet() else emptySet() } catch (_: Throwable) { emptySet() }
 
-    /** Достижения самого Bearite (встроенный мод): список в assets/achievements/index.json. */
-    private val builtin: List<Def> by lazy {
-        try {
-            val arr = JSONObject(ctx.assets.open("achievements/index.json").use { it.readBytes().toString(Charsets.UTF_8) }).getJSONArray("achievements")
-            (0 until arr.length()).map { arr.getJSONObject(it) }.filter { it.optString("id").isNotEmpty() }
-                .map { Def("bearite:" + it.getString("id"), "Bearite", it.optString("name"), it.optString("desc"), it.optString("icon")) }
-        } catch (_: Throwable) { emptyList() }
-    }
+    /** Достижения самого Bearite (встроенный мод): добавляются прямо здесь. */
+    private val builtin: List<Def> = listOf(
+        Def("bearite:first_coin", "Bearite", "Первая монета", "Подбери монету на карте"),
+        Def("bearite:coins_10", "Bearite", "Коллекционер", "Собери 10 монет"),
+        Def("bearite:builder", "Bearite", "Строитель", "Поставь объект на своей карте"),
+        Def("bearite:modeler", "Bearite", "Модельер", "Добавь на карту модель из каталога"),
+        Def("bearite:finish", "Bearite", "Финишная прямая", "Выиграй мини-игру на карте"),
+        Def("bearite:curious", "Bearite", "Любопытный", "Загляни в список достижений"),
+    )
 
     /** Открывает достижение из лаунчера; возвращает его название, если оно только что открыто. */
     fun unlockKey(key: String): String? {
