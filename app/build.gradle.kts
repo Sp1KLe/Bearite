@@ -41,6 +41,14 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 
+// Папка achievements/ в корне репозитория (список, иконки, анимация) попадает в assets APK как achievements/
+val syncAchievements = tasks.register<Copy>("syncAchievements") {
+    from(rootProject.file("achievements")) { exclude("README.md") }
+    into(layout.buildDirectory.dir("generated/achAssets/achievements"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/achAssets"))
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { dependsOn(syncAchievements) }
+
 dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
