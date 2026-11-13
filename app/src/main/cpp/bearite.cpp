@@ -259,6 +259,17 @@ static void* api_module_base(const char* part) {
 
 static int api_hook(void* target, void* replacement, void** original) {
     if (!target || !replacement) return -1;
+    {   // диагноз для авари: где лежит перехваченный код (смещение в модуле) и его первые байты; бит Thumb (младший) отбрасываем
+        uintptr_t a = reinterpret_cast<uintptr_t>(target) & ~(uintptr_t)1;
+        Dl_info di;
+        const unsigned char* b = reinterpret_cast<const unsigned char*>(a);
+        if (dladdr(reinterpret_cast<void*>(a), &di) && di.dli_fbase) {
+            const char* fn = strrchr(di.dli_fname ? di.dli_fname : "?", '/');
+            blog("hook: %s+0x%lx%s байты %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", fn ? fn + 1 : di.dli_fname,
+                 (unsigned long)(a - reinterpret_cast<uintptr_t>(di.dli_fbase)), (reinterpret_cast<uintptr_t>(target) & 1) ? " thumb" : "",
+                 b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9]);
+        }
+    }
     return call_dobby(DobbyHook, target, replacement, reinterpret_cast<void*>(original));
 }
 
