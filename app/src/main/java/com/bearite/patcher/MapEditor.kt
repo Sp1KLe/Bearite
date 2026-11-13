@@ -379,10 +379,6 @@ class MapEditor(
     }
 
     /** Ставит модель игры в карту. pos/rot — в координатах карты; без них — перед камерой редактора. */
-    private fun achieve(key: String) {
-        try { AchievementStore(act).unlockKey(key)?.let { toast("★ Достижение: $it") } } catch (_: Throwable) {}
-    }
-
     private fun addProp(name: String, pos: DoubleArray? = null, rot: DoubleArray? = null) {
         val o = MapObj(name, "prop:$name")
         o.solid = true
@@ -393,7 +389,6 @@ class MapEditor(
         commit()
         select(map.objects.size - 1)
         vp.invalidate()
-        achieve("bearite:modeler")
     }
 
     private val shop = PropShop(File(store.dirPath()), store)
@@ -565,7 +560,6 @@ class MapEditor(
         commit()
         select(map.objects.size - 1)
         vp.invalidate()
-        achieve("bearite:builder")
     }
 
     private fun duplicateSelected() {

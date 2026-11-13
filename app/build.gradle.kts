@@ -12,11 +12,12 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 2
-        versionName = "0.2.0"
+        versionName = "0.2.0" + (if (project.findProperty("abi") == "armeabi-v7a") "-v7a" else "")
 
         // Игра грузится в процесс лаунчера, ABI должны совпадать.
         // У Unity IL2CPP-игр на современных телефонах это arm64-v8a.
-        ndk { abiFilters += "arm64-v8a" }
+        // Для телефонов с 32-битным процессором: gradle -Pabi=armeabi-v7a (отдельный APK, applicationId тот же).
+        ndk { abiFilters += (project.findProperty("abi") as String? ?: "arm64-v8a") }
 
         externalNativeBuild {
             cmake { arguments += listOf("-DANDROID_STL=c++_static") }

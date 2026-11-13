@@ -354,22 +354,11 @@ static int api_tag_count(const char* tag) { tag_resolve(); return g_tagQuery ? g
 static int api_tag_get(const char* tag, int index, float* pos3, float* size3) { tag_resolve(); return g_tagQuery && index >= 0 ? g_tagQuery(tag, index, pos3, size3) : 0; }
 static void api_tag_set_visible(const char* tag, int index, int visible) { tag_resolve(); if (g_tagVis) g_tagVis(tag, index, visible); }
 
-// ------------------------------------------------------------------ достижения модов
-// Мод открывает своё достижение: команда дописывается в filesDir/_ach, лаунчер запоминает его и показывает уведомление.
-static void api_unlock_achievement(const char* mod, const char* id) {
-    if (!mod || !id || !*id) return;
-    std::string a = id, m = mod;
-    if (a.find('\t') != std::string::npos || a.find('\n') != std::string::npos || m.find('\t') != std::string::npos) return;
-    std::string path = std::string(api_data_dir()) + "/_ach";
-    if (FILE* f = fopen(path.c_str(), "a")) { fputs((m + "\t" + a + "\n").c_str(), f); fclose(f); }
-}
-
 static const BeariteApi g_api = {
     BEARITE_API_VERSION, api_log,      api_il2cpp_symbol, api_module_base, api_hook,
     api_get_bool,        api_get_int,  api_get_float,     api_get_string,   api_data_dir,
     api_play_sound,      api_stop_sound,
     api_tag_count,       api_tag_get,  api_tag_set_visible,
-    api_unlock_achievement,
 };
 
 // id модов живут до конца процесса: мод вправе запомнить указатель mod_id и пользоваться им позже

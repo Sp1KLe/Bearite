@@ -4,7 +4,7 @@
 
 - Скачать лаунчер: [Bearite-debug.apk](https://github.com/Sp1KLe/Bearite/releases/download/latest/Bearite-debug.apk) (заменяется при каждой сборке на `main`).
 - Скачать приложение для отправки модов на сервер: [Bearite-Mods.apk](https://github.com/Sp1KLe/Bearite/releases/download/latest/Bearite-Mods.apk).
-- Нужна установленная игра из Google Play (проверено на версии 13.0.8) и телефон с arm64.
+- Нужна установленная игра из Google Play (проверено на версии 13.0.8) и телефон с arm64 (для 32-битных телефонов armeabi-v7a — отдельный APK Bearite-debug-armeabi-v7a).
 
 ## Лаунчер коротко
 
@@ -172,10 +172,6 @@ if (api->tag_count) {
 ```
 
 Вызывай из игрового потока (из своих хуков). Правила, таймер, победа — код мода; редактор только расставляет объекты.
-
-### Свои достижения
-
-В `mod.json`: `"achievements": [{"id":"first_coin","name":"Первая монета","desc":"Подбери монету"}]`. В коде мода: `if (api->unlock_achievement) api->unlock_achievement(mod_id, "first_coin");` — игрок увидит уведомление, а список появится в паузе по кнопке «Достижения» (она открывает наше окно, не окно Google Play). Повторный вызов ничего не делает; открыть можно только то, что описано в `mod.json`.
 
 ### Сюжетные моды без кода
 

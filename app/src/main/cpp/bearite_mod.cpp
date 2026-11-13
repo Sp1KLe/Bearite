@@ -79,9 +79,9 @@ void logf_(const char* fmt, ...) {
 
 int g_exc_logged = 0;
 bool g_in_sync = false;       // идёт построение объектов: каждый вызов пишем в _guard
-// Il2CppArray на 64 битах: заголовок объекта 16 + bounds 8 + max_length 8, дальше элементы
-inline uintptr_t arr_len(void* a) { return *(const uintptr_t*)((const uint8_t*)a + 24); }
-inline void* arr_elem(void* a, size_t size, uintptr_t i) { return (uint8_t*)a + 32 + size * i; }
+// Il2CppArray: klass, monitor, bounds, max_length (по размеру указателя: 16 байт на arm32, 32 на arm64), дальше элементы
+inline uintptr_t arr_len(void* a) { return *(const uintptr_t*)((const uint8_t*)a + 3 * sizeof(void*)); }
+inline void* arr_elem(void* a, size_t size, uintptr_t i) { return (uint8_t*)a + 4 * sizeof(void*) + size * i; }
 bool g_crumbs = true;         // false: в длинных циклах не пишем хлебную крошку на каждый вызов
 std::string g_guardPath;      // maps/_guard
 std::string g_ctx;            // "карта/объект" для хлебных крошек
@@ -2076,11 +2076,6 @@ void coin_load() {
     }
 }
 
-/** Достижение самого Bearite: строка «bearite<TAB>id» в filesDir/_ach (лаунчер покажет «★ Достижение»). */
-void bearite_ach(const char* id) {
-    if (FILE* f = fopen((g_mapsDir + "/../_ach").c_str(), "a")) { fprintf(f, "bearite\t%s\n", id); fclose(f); }
-}
-
 void coin_save() {
     std::string tmp = g_mapsDir + "/.coins.tmp", fin = g_mapsDir + "/_coins";
     if (FILE* f = fopen(tmp.c_str(), "w")) {
@@ -2150,7 +2145,6 @@ void mini_tick(const float* pp, void* tr, long long now) {
         if (win || lose) {
             g.ended = true; g.win = win; g.endT = now;
             std::string msg = win ? (m.winMsg.empty() ? "Победа!" : m.winMsg) : (m.loseMsg.empty() ? "Время вышло!" : m.loseMsg);
-            if (win) bearite_ach("finish");
             mg_write("_mgevent", std::string(win ? "win" : "lose") + "\t" + msg + "\n");
             logf_("мини-игра «%s»: %s", m.name.c_str(), win ? "победа" : "поражение");
         }
@@ -2185,8 +2179,6 @@ void coins_tick(const float* pp, void* tr, long long now) {
                 g_coinGot.insert(key);
                 L.hidden = true;
                 coin_save();
-                bearite_ach("first_coin");
-                if (g_coinGot.size() >= 10) bearite_ach("coins_10");
                 logf_("монета собрана: всего %d", (int)g_coinGot.size());
             }
         }
@@ -3854,7 +3846,7 @@ void (*o_btn_click)(void*, void*, const void*) = nullptr;
 void (*o_btn_submit)(void*, void*, const void*) = nullptr;
 int g_pmClicks = 0;
 
-/** Нажата ли наша копия кнопки. Нажатие не отдаём игре (иначе откроются «Достижения»), а сообщаем лаунчеру. */
+/** Нажата ли наша копия кнопки. Нажатие не отдаём игре, а сообщаем лаунчеру. */
 bool pm_is_ours(void* btn) {
     if (!btn || !F.get_gameobject) return false;
     void* go = inv(F.get_gameobject, btn);
@@ -3866,28 +3858,12 @@ void pm_clicked() {
     if (FILE* f = fopen(tmp.c_str(), "w")) { fprintf(f, "%d", g_pmClicks); fclose(f); rename(tmp.c_str(), path.c_str()); }
     logf_("нажата кнопка «Меню» в паузе");
 }
-int g_achClicks = 0;
-/** Кнопка «Достижения» в паузе: вместо окна Google Play открываем своё (лаунчер следит за maps/_achclick). */
-bool pm_is_ach_button(void* btn) {
-    if (!btn || !F.get_gameobject) return false;
-    void* go = inv(F.get_gameobject, btn);
-    if (!go || name_of(go) == "BeariteMenuButton") return false;
-    return pm_is_achievements(pm_get_text(go));
-}
-void pm_ach_clicked() {
-    ++g_achClicks;
-    std::string path = g_mapsDir + "/_achclick", tmp = g_mapsDir + "/.achclick.tmp";
-    if (FILE* f = fopen(tmp.c_str(), "w")) { fprintf(f, "%d", g_achClicks); fclose(f); rename(tmp.c_str(), path.c_str()); }
-    logf_("нажата кнопка «Достижения» в паузе");
-}
 void h_btn_click(void* self, void* ev, const void* mi) {
     if (pm_is_ours(self)) { pm_clicked(); return; }
-    if (pm_is_ach_button(self)) { pm_ach_clicked(); return; }
     if (o_btn_click) o_btn_click(self, ev, mi);
 }
 void h_btn_submit(void* self, void* ev, const void* mi) {
     if (pm_is_ours(self)) { pm_clicked(); return; }
-    if (pm_is_ach_button(self)) { pm_ach_clicked(); return; }
     if (o_btn_submit) o_btn_submit(self, ev, mi);
 }
 

@@ -65,10 +65,6 @@ typedef struct BeariteApi {
     int (*tag_get)(const char* tag, int index, float* pos3, float* size3);
     void (*tag_set_visible)(const char* tag, int index, int visible);
 
-    /* Достижения мода. Описываются в mod.json: "achievements": [{"id":"first_coin","name":"Первая монета","desc":"Подбери монету"}].
-     * unlock_achievement открывает достижение id (повторный вызов ничего не делает): игрок видит уведомление,
-     * а в паузе по кнопке «Достижения» — список своих достижений мода. Перед вызовом проверь указатель на NULL. */
-    void (*unlock_achievement)(const char* mod_id, const char* achievement_id);
 } BeariteApi;
 
 typedef void (*BeariteModInitFn)(const BeariteApi* api, const char* mod_id);
