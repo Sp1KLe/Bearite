@@ -201,3 +201,7 @@ if (api->tag_count) {
 Любой пуш в `main` собирает APK через GitHub Actions (`.github/workflows/build.yml`) и обновляет релиз `latest`; моды из `sdk/mods/` собираются там же и публикуются в каталог. Локально нужны Android Studio / Gradle 8.5, NDK 26.1 и CMake 3.22, а перед первой сборкой `scripts/build_dobby.sh` (хуки).
 
 Устройство лаунчера: `GameActivity` в отдельном процессе `:game` собирает загрузчик классов из APK игры и запускает Unity; нативная `libbearite.so` ждёт IL2CPP и подключает моды, встроенный мод `libbearite_mod.so` отвечает за карты, мини-игры и окно уровня.
+
+## Лицензия
+
+MIT, автор: Sp1KLe в тг и гитхабе. См. файл `LICENSE`.
