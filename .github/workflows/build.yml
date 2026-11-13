@@ -18,10 +18,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [arm64-v8a, armeabi-v7a]
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +35,7 @@ jobs:
 
       - name: Build Dobby
         env:
-          DOBBY_ABIS: ${{ matrix.abi }}
+          DOBBY_ABIS: "arm64-v8a armeabi-v7a"
         run: |
           set +e
           bash scripts/build_dobby.sh 2>&1 | tee dobby_build.log
@@ -76,7 +72,7 @@ jobs:
       - name: Build debug APK
         run: |
           set +e
-          gradle :app:assembleDebug -Pabi=${{ matrix.abi }} --no-daemon --stacktrace 2>&1 | tee gradle_build.log
+          gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
             # ошибки компиляции и ресурсов дублируем в аннотации
@@ -102,7 +98,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Bearite-debug-${{ matrix.abi }}
+          name: Bearite-debug
           path: |
             app/build/outputs/apk/debug/*.apk
 
@@ -133,5 +129,5 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           gh release delete Zzz --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
-          for f in apks/*/*.apk; do d=$(basename "$(dirname "$f")"); cp "$f" "Bearite-${d#Bearite-debug-}.apk"; done
-          gh release create Zzz Bearite-*.apk -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Zzz" --notes "Временный релиз"
+          cp apks/*/*.apk Bearite.apk
+          gh release create Zzz Bearite.apk -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Zzz" --notes "Временный релиз"

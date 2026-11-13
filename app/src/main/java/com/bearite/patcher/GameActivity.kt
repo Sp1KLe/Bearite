@@ -96,11 +96,14 @@ class GameActivity : Activity() {
                 "(например, та, что стоит на телефоне, где Bearite уже работает).")
         }
 
-        val abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: Build.SUPPORTED_32_BIT_ABIS.first()
         val gameApks = ArrayList<String>()
         gameApks.add(info.sourceDir)
         gameApkPaths = info.sourceDir
         info.splitSourceDirs?.let { gameApks.addAll(it) }
+        // ABI берём по самой игре (в APK есть lib/<abi>/libil2cpp.so); не нашли — по телефону
+        val abi = listOf("arm64-v8a", "armeabi-v7a").firstOrNull { a ->
+            Build.SUPPORTED_ABIS.contains(a) && gameApks.any { apk -> try { java.util.zip.ZipFile(apk).use { it.getEntry("lib/$a/libil2cpp.so") != null } } catch (_: Throwable) { false } }
+        } ?: (Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: Build.SUPPORTED_32_BIT_ABIS.first())
         val ourApk = applicationInfo.sourceDir
 
         val libPaths = ArrayList<String>()

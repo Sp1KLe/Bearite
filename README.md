@@ -4,7 +4,7 @@
 
 - Скачать лаунчер: [Bearite-debug.apk](https://github.com/Sp1KLe/Bearite/releases/download/latest/Bearite-debug.apk) (заменяется при каждой сборке на `main`).
 - Скачать приложение для отправки модов на сервер: [Bearite-Mods.apk](https://github.com/Sp1KLe/Bearite/releases/download/latest/Bearite-Mods.apk).
-- Нужна установленная игра из Google Play (проверено на версии 13.0.8) и телефон с arm64 (для 32-битных телефонов armeabi-v7a — отдельный APK Bearite-debug-armeabi-v7a).
+- Нужна установленная игра из Google Play (проверено на версии 13.0.8) и телефон с arm64 или arm32 (armeabi-v7a): сборка универсальная.
 
 ## Лаунчер коротко
 
