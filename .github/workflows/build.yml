@@ -105,3 +105,33 @@ jobs:
           name: Bearite-debug-${{ matrix.abi }}
           path: |
             app/build/outputs/apk/debug/*.apk
+
+  # Релиз «Zzz» — только по явной метке в репозитории (иначе CI ничего не публикует):
+  #   файл RELEASE_ZZZ в корне  -> создать/обновить релиз Zzz с APK из этой сборки
+  #   файл DELETE_ZZZ в корне   -> удалить релиз Zzz вместе с файлами и тегом (ничего не сохраняется)
+  zzz:
+    needs: build
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Решаем, что делать
+        id: mark
+        run: |
+          if [ -f DELETE_ZZZ ]; then echo "act=delete" >> "$GITHUB_OUTPUT"
+          elif [ -f RELEASE_ZZZ ] && [ "${{ needs.build.result }}" != "failure" ]; then echo "act=release" >> "$GITHUB_OUTPUT"
+          else echo "act=none" >> "$GITHUB_OUTPUT"; fi
+      - name: Удалить релиз Zzz
+        if: steps.mark.outputs.act == 'delete'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release delete Zzz --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
+      - uses: actions/download-artifact@v4
+        if: steps.mark.outputs.act == 'release'
+        with: { path: apks }
+      - name: Создать релиз Zzz
+        if: steps.mark.outputs.act == 'release'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release delete Zzz --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
+          for f in apks/*/*.apk; do d=$(basename "$(dirname "$f")"); cp "$f" "Bearite-${d#Bearite-debug-}.apk"; done
+          gh release create Zzz Bearite-*.apk -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Zzz" --notes "Временный релиз"
