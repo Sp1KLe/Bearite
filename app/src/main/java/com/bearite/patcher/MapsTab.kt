@@ -123,6 +123,17 @@ class MapsTab(private val act: Activity, private val ui: GameUi, private val sto
 
     private fun buildMapDetails(d: LinearLayout, m: GameMap, st: EngineState) {
         d.addView(ui.pill("Открыть редактор карты", primary = true) { hideMenu?.invoke(true); MapEditor(act, ui, store, m) { hideMenu?.invoke(false); rebuild?.invoke() }.show() }, rowLp())
+        val isHub = m.world && m.scene == "hub" && m.enabled
+        d.addView(ui.pill(if (isHub) "Вернуть оригинальный хаб" else "Заменить хаб этой картой", sizeSp = 14f) {
+            if (isHub) { m.enabled = false }
+            else {  // карта становится отдельным миром в сцене hub: оригинальный хаб скрывается, игрок переносится на карту
+                m.world = true; m.scene = "hub"; m.enabled = true
+                store.list().filter { it.world && it.enabled && it.id != m.id }.forEach { it.enabled = false; store.save(it) }
+            }
+            store.save(m)
+            toast(if (isHub) "Оригинальный хаб возвращён" else "Хаб заменён. Зайди в игру: карта загрузится вместо хаба")
+            rebuild?.invoke()
+        }, rowLp())
         d.addView(ui.pill("Удалить карту", sizeSp = 14f) {
             ui.dialog("Удалить «${m.name}»?", null, listOf(GameUi.Btn("Отмена"), GameUi.Btn("Удалить", danger = true) {
                 store.delete(m); rebuild?.invoke()
