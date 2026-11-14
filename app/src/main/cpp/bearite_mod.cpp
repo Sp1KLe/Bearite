@@ -4305,6 +4305,18 @@ void h_load_level(void* self, const void* mi) {
 }
 
 int hook_time(const char* name, void* repl, void** orig) {
+#if defined(__arm__)
+    // arm32: управляемая обёртка icall начинается с «ldr r0,[pc,#N]; ldr r0,[pc,r0]» — Dobby такое не переносит (аварийный SIGILL).
+    // Вместо обёртки перехватываем сам icall из libunity: он вызывается теми же вызовами и ничего лишнего не принимает.
+    if (auto resolve = sym<void* (*)(const char*)>("il2cpp_resolve_icall")) {
+        std::string full = std::string("UnityEngine.Time::") + name;
+        if (void* fn = resolve(full.c_str())) {
+            int rc = A->hook(fn, repl, orig);
+            logf_("перехват icall %s: %s", full.c_str(), rc == 0 ? "готово" : "не удался");
+            return rc;
+        }
+    }
+#endif
     return bearite_hook_method(A, ID, "UnityEngine", "Time", name, 0, repl, orig);
 }
 
