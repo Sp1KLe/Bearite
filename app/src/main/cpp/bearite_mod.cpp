@@ -4412,6 +4412,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         logf_("движок карт не запущен, нет методов:%s", missing.c_str());
         dump_class("UnityEngine", "GameObject");
         dump_class("UnityEngine", "Transform");
+        // гардероб: разбираем классы косметики, чтобы потом добавить свою вкладку и свои аксессуары
+        for (const char* cn : {"CosmeticGridController", "OutfitGridController", "CosmeticDisplayer", "CosmeticShopGenerator",
+                               "CosmeticWithLevelV2", "CosmeticLevelMeshChanger", "SkinLevelPreview", "BearSkinLevelApplier"})
+            dump_class("", cn);
     } else {
         g_status = "ok";
         if (!F.get_component || !F.get_material || !F.set_color || !F.type_renderer)
