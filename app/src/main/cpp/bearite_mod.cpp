@@ -4412,10 +4412,6 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         logf_("движок карт не запущен, нет методов:%s", missing.c_str());
         dump_class("UnityEngine", "GameObject");
         dump_class("UnityEngine", "Transform");
-        // гардероб: разбираем классы косметики, чтобы потом добавить свою вкладку и свои аксессуары
-        for (const char* cn : {"CosmeticGridController", "OutfitGridController", "CosmeticDisplayer", "CosmeticShopGenerator",
-                               "CosmeticWithLevelV2", "CosmeticLevelMeshChanger", "SkinLevelPreview", "BearSkinLevelApplier"})
-            dump_class("", cn);
     } else {
         g_status = "ok";
         if (!F.get_component || !F.get_material || !F.set_color || !F.type_renderer)
@@ -4463,6 +4459,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     dump_class("Photon.Realtime", "AppSettings");
     dump_class("Photon.Realtime", "RoomOptions");
     dump_class("Photon.Realtime", "Room");
+    // гардероб: разбираем классы косметики, чтобы потом добавить свою вкладку и свои аксессуары
+    for (const char* cn : {"CosmeticGridController", "OutfitGridController", "CosmeticDisplayer", "CosmeticShopGenerator",
+                           "CosmeticWithLevelV2", "CosmeticLevelMeshChanger", "SkinLevelPreview", "BearSkinLevelApplier"})
+        dump_class("", cn);
     {
         int r1 = bearite_hook_method(A, ID, "", "PlayerBearController", "Update", 0, (void*)h_bs_update, (void**)&o_bs_update);
         int r2 = bearite_hook_method(A, ID, "", "SaveGame", "IsBearGateOpened", 1, (void*)h_bs_gate, (void**)&o_bs_gate);
