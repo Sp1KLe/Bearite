@@ -67,6 +67,7 @@ class GameActivity : Activity() {
         super.onCreate(savedInstanceState)
         gamePkg = intent.getStringExtra(EXTRA_PKG) ?: GAME_PKG
         BLog.init(this)
+        Thread { SceneReplace.sync(this) }.start()
         BLog.i("GameActivity: старт, pid=${Process.myPid()}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
         // маркер «игра идёт»: если он остался после выхода, процесс убили аварийно
         try { File(filesDir, RUNNING_MARKER).writeText(System.currentTimeMillis().toString()) } catch (_: Throwable) {}

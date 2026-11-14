@@ -48,6 +48,14 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 
+// Папка replace_scenes/ в корне репозитория (карты на замену сцен) попадает в assets APK
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/replaceAssets"))
+val syncReplaceScenes = tasks.register<Copy>("syncReplaceScenes") {
+    from(rootProject.file("replace_scenes")) { exclude("README.md", ".gitkeep") }
+    into(layout.buildDirectory.dir("generated/replaceAssets/replace_scenes"))
+}
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach { dependsOn(syncReplaceScenes) }
+
 dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
