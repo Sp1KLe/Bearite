@@ -4437,9 +4437,14 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         if (rc != 0) logf_("перехват меню паузы: не вышло (%d)", rc);
     }
     {
+#if defined(__arm__)
+        // arm32: диагностика аварии на экране выбора сохранения (Button.Press, null this) — пока без перехвата нажатий кнопок
+        logf_("arm32: перехват нажатий кнопок UI пропущен (диагностика)");
+#else
         int r1 = bearite_hook_method(A, ID, "UnityEngine.UI", "Button", "OnPointerClick", 1, (void*)h_btn_click, (void**)&o_btn_click);
         int r2 = bearite_hook_method(A, ID, "UnityEngine.UI", "Button", "OnSubmit", 1, (void*)h_btn_submit, (void**)&o_btn_submit);
         if (r1 != 0 || r2 != 0) logf_("перехват нажатий кнопок UI: OnPointerClick=%d OnSubmit=%d", r1, r2);
+#endif
     }
     {
         int r1 = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "CreateRoom", 4, (void*)h_create_room, (void**)&o_create_room);
