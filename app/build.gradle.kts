@@ -24,6 +24,13 @@ android {
         }
     }
 
+    // Постоянная подпись debug-сборок: без неё каждая сборка CI подписывается новым ключом и не ставится поверх прежней
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android"
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
