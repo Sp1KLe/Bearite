@@ -4516,7 +4516,8 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     dump_class("Photon.Realtime", "Room");
     // гардероб: разбираем классы косметики, чтобы потом добавить свою вкладку и свои аксессуары
     for (const char* cn : {"CosmeticGridController", "OutfitGridController", "CosmeticDisplayer", "CosmeticShopGenerator",
-                           "CosmeticWithLevelV2", "CosmeticLevelMeshChanger", "SkinLevelPreview", "BearSkinLevelApplier"})
+                           "CosmeticWithLevelV2", "CosmeticLevelMeshChanger", "SkinLevelPreview", "BearSkinLevelApplier",
+                           "BearTransformReferences", "BearCosmetics", "CosmeticDataV2", "CosmeticComponent", "StudioUI"})
         dump_class("", cn);
     {
         int r1 = bearite_hook_method(A, ID, "", "PlayerBearController", "Update", 0, (void*)h_bs_update, (void**)&o_bs_update);
