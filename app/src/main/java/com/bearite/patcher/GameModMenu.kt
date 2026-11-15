@@ -282,6 +282,8 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
         colv.addView(ui.gameBtn("Магазин карт", GameUi.YELLOW, 20f, 20) { dlg?.dismiss(); ui.soon("Магазин карт") },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)).apply { topMargin = dp(10) })
+        colv.addView(ui.gameBtn("Каталог аксессуаров", GameUi.RUST, 20f, 20) { dlg?.dismiss(); try { WardrobeWindow(act, ui).show() } catch (t: Throwable) { BLog.e("каталог аксессуаров", t) } },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)).apply { topMargin = dp(10) })
         dlg = ui.dialog("Магазин", colv, listOf(GameUi.Btn("Закрыть")), widthDp = 360)
         dlg.show()
     }

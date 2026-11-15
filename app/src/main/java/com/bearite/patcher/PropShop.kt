@@ -14,7 +14,29 @@ import java.nio.ByteOrder
  * Скачанная модель переводится в простой файл maps/props/<id>.mesh (его читает мод), текстура кладётся в maps/textures/cp_<id>.
  */
 class PropShop(private val dir: File, private val store: MapStore) {
-    class Entry(val id: String, val name: String, val author: String, val file: String, val size: Long)
+    class Entry(val id: String, val name: String, val author: String, val file: String, val size: Long, val acc: Acc? = null)
+
+    /** Аксессуар для гардероба: слот (head, face, back, hand_l, hand_r, foot_l, foot_r), смещение, масштаб, поворот, цвет. */
+    class Acc(val slot: String, val off: FloatArray, val scale: Float, val rot: FloatArray, val color: Int) {
+        fun toLine(): String = listOf(slot, off[0], off[1], off[2], scale, rot[0], rot[1], rot[2], "%06X".format(color and 0xFFFFFF)).joinToString("|")
+        companion object {
+            fun fromLine(l: String): Acc? = try {
+                val p = l.trim().split('|')
+                Acc(p[0], floatArrayOf(p[1].toFloat(), p[2].toFloat(), p[3].toFloat()), p[4].toFloat(), floatArrayOf(p[5].toFloat(), p[6].toFloat(), p[7].toFloat()), p[8].toInt(16))
+            } catch (_: Throwable) { null }
+            fun fromJson(o: JSONObject): Acc? {
+                val slot = o.optString("slot")
+                if (slot !in SLOTS) return null
+                fun v3(k: String): FloatArray { val a = o.optJSONArray(k); return floatArrayOf(a?.optDouble(0, 0.0)?.toFloat() ?: 0f, a?.optDouble(1, 0.0)?.toFloat() ?: 0f, a?.optDouble(2, 0.0)?.toFloat() ?: 0f) }
+                val col = try { o.optString("color", "FFFFFF").trimStart('#').toInt(16) } catch (_: Throwable) { 0xFFFFFF }
+                return Acc(slot, v3("offset"), o.optDouble("scale", 1.0).toFloat(), v3("rot"), col)
+            }
+        }
+    }
+
+    /** Аксессуар установленной модели (сохраняется при скачивании) или null. */
+    fun accOf(id: String): Acc? = try { File(propsDir, "$id.acc").takeIf { it.isFile }?.let { Acc.fromLine(it.readText()) } } catch (_: Throwable) { null }
+    fun saveAcc(id: String, a: Acc) { try { File(propsDir, "$id.acc").writeText(a.toLine()) } catch (_: Throwable) {} }
 
     private val main = Handler(Looper.getMainLooper())
     private val propsDir get() = File(dir, "props").also { it.mkdirs() }
@@ -36,7 +58,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
     fun isInstalled(id: String) = File(propsDir, "$id.mesh").isFile
 
     fun remove(id: String) {
-        File(propsDir, "$id.mesh").delete(); File(propsDir, "$id.name").delete(); File(propsDir, "$id.anim").delete()
+        File(propsDir, "$id.mesh").delete(); File(propsDir, "$id.name").delete(); File(propsDir, "$id.acc").delete(); File(propsDir, "$id.anim").delete()
         store.deleteTexture("cp_$id")
     }
 
@@ -146,7 +168,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
                     if (file.isEmpty() || file.contains('/')) continue
                     val id = o.optString("id").ifEmpty { file.removeSuffix(".glb") }.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40)
                     if (id.isEmpty()) continue
-                    list.add(Entry(id, o.optString("name", id), o.optString("author"), file, o.optLong("size", 0)))
+                    list.add(Entry(id, o.optString("name", id), o.optString("author"), file, o.optLong("size", 0), Acc.fromJson(o)))
                 }
                 main.post { cb(list, null) }
             } catch (t: Throwable) { main.post { cb(null, t.message ?: "нет связи") } }
@@ -157,13 +179,14 @@ class PropShop(private val dir: File, private val store: MapStore) {
         Thread {
             val err = try {
                 val b = get("$BASE/${e.file}", 40_000_000)
-                if (e.file.endsWith(".zip", true)) installZip(b).second else install(e.id, e.name, b)
+                (if (e.file.endsWith(".zip", true)) installZip(b).second else install(e.id, e.name, b)).also { r -> if (r == null && e.acc != null) saveAcc(e.id, e.acc) }
             } catch (t: Throwable) { t.message ?: "не скачалось" }
             main.post { cb(err) }
         }.start()
     }
 
     companion object {
+        val SLOTS = listOf("head", "face", "back", "hand_l", "hand_r", "foot_l", "foot_r")
         const val BASE = "https://github.com/Sp1KLe/Bearite/releases/download/props"
     }
 }

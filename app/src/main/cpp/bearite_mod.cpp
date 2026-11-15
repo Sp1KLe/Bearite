@@ -4090,6 +4090,141 @@ void pm_tick(long long now) {
 long long g_lastTick = 0, g_lastSlow = 0;
 std::string g_lastCam;
 
+
+// ------------------------------------------------------------------ гардероб: свои аксессуары на медведе
+// Лаунчер пишет filesDir/wardrobe.cfg: по строке на аксессуар «id<TAB>meshId<TAB>слот<TAB>ox<TAB>oy<TAB>oz<TAB>масштаб<TAB>цвет<TAB>rx<TAB>ry<TAB>rz».
+// Слоты: head, face, back, hand_l, hand_r, foot_l, foot_r. Меш — как у пропов сообщества (maps/props/<meshId>.mesh).
+struct WAcc { std::string id, mesh, slot; float off[3], sc, rot[3]; unsigned color; uintptr_t h = 0; int parentId = 0; };
+std::vector<WAcc> g_wDesired;
+std::vector<WAcc> g_wLive;
+long long g_wMtime = -1, g_wLast = 0;
+
+void* field_obj(void* obj, const char* name) {
+    static auto ff = sym<void* (*)(void*, const char*)>("il2cpp_class_get_field_from_name");
+    static auto fg = sym<void (*)(void*, void*, void*)>("il2cpp_field_get_value");
+    if (!obj || !ff || !fg) return nullptr;
+    void* fl = ff(obj_class(obj), name);
+    if (!fl) return nullptr;
+    void* out = nullptr;
+    fg(obj, fl, &out);
+    return out;
+}
+
+void w_kill(WAcc& a) {
+    if (a.h) { if (void* go = target(a.h)) { void* d[1] = {go}; inv(F.destroy, nullptr, d); } gch_free(a.h); a.h = 0; }
+}
+void w_drop_all() { for (auto& a : g_wLive) w_kill(a); g_wLive.clear(); }
+
+void w_read_cfg() {
+    std::string path = g_mapsDir + "/../wardrobe.cfg";
+    struct stat st{};
+    long long mt = stat(path.c_str(), &st) == 0 ? (long long)st.st_mtime * 1000 + st.st_mtim.tv_nsec / 1000000 : 0;
+    if (mt == g_wMtime) return;
+    g_wMtime = mt;
+    g_wDesired.clear();
+    std::vector<unsigned char> raw;
+    if (mt && read_file(path, raw)) {
+        std::string t(raw.begin(), raw.end()); size_t pos = 0;
+        while (pos < t.size()) {
+            size_t e = t.find('\n', pos); if (e == std::string::npos) e = t.size();
+            std::string line = t.substr(pos, e - pos); pos = e + 1;
+            std::vector<std::string> f; size_t q = 0;
+            while (true) { size_t z = line.find('\t', q); if (z == std::string::npos) { f.push_back(line.substr(q)); break; } f.push_back(line.substr(q, z - q)); q = z + 1; }
+            if (f.size() < 8) continue;
+            WAcc a; a.id = f[0]; a.mesh = f[1]; a.slot = f[2];
+            a.off[0] = (float)atof(f[3].c_str()); a.off[1] = (float)atof(f[4].c_str()); a.off[2] = (float)atof(f[5].c_str());
+            a.sc = (float)atof(f[6].c_str()); if (a.sc <= 0) a.sc = 1;
+            a.color = (unsigned)strtoul(f[7].c_str(), nullptr, 16);
+            for (int i = 0; i < 3; ++i) a.rot[i] = f.size() > 8 + i ? (float)atof(f[8 + i].c_str()) : 0.f;
+            g_wDesired.push_back(a);
+        }
+    }
+    logf_("гардероб: аксессуаров в конфиге %d", (int)g_wDesired.size());
+    w_drop_all();   // пересоздадим по новому списку
+}
+
+/** Transform, к которому крепится слот: у BearCosmetics — голова и тело, у BearTransformReferences — руки и ноги. */
+void* w_anchor(void* playerTr, const std::string& slot) {
+    static void *tCos = nullptr, *tRef = nullptr;
+    if (!tCos) tCos = type_of("", "BearCosmetics");
+    if (!tRef) tRef = type_of("", "BearTransformReferences");
+    if (!playerTr || !F.get_comps_children || !F.get_gameobject) return nullptr;
+    void* roots[2] = {playerTr, F.get_root ? inv(F.get_root, playerTr) : nullptr};
+    bool wantRef = slot.rfind("hand", 0) == 0 || slot.rfind("foot", 0) == 0;
+    void* ty = wantRef ? tRef : tCos;
+    if (!ty) return nullptr;
+    for (void* r : roots) {
+        void* go = r ? inv(F.get_gameobject, r) : nullptr;
+        if (!go) continue;
+        uint8_t inc = 1; void* a[2] = {ty, &inc};
+        void* arr = inv(F.get_comps_children, go, a);
+        if (!arr || !arr_len(arr)) continue;
+        void* comp = *(void**)arr_elem(arr, sizeof(void*), 0);
+        const char* fn = slot == "back" ? "bodyTransform" : (wantRef ? (slot == "hand_l" ? "leftHand" : slot == "hand_r" ? "rightHand" : slot == "foot_l" ? "leftFoot" : "rightFoot") : "headTransform");
+        if (void* t = field_obj(comp, fn)) return t;
+    }
+    return nullptr;
+}
+
+void w_tick(long long now) {
+    if (now - g_wLast < 700) return;
+    g_wLast = now;
+    w_read_cfg();
+    static std::string lastScene;
+    if (lastScene != g_scene) { lastScene = g_scene; w_drop_all(); }
+    if (g_wDesired.empty()) { if (!g_wLive.empty()) w_drop_all(); return; }
+    void* ptr = g_player ? target(g_player) : nullptr;
+    if (!ptr) ptr = pick_player(now);
+    if (!ptr) return;
+    static void *mLP = nullptr, *mLE = nullptr, *mLS = nullptr, *mSP = nullptr;
+    if (!mLP) if (void* trk = bearite_find_class("UnityEngine", "Transform")) {
+        mLP = bearite_il2.class_get_method_from_name(trk, "set_localPosition", 1);
+        mLE = bearite_il2.class_get_method_from_name(trk, "set_localEulerAngles", 1);
+        mLS = bearite_il2.class_get_method_from_name(trk, "set_localScale", 1);
+    }
+    if (!mLP || !mLS || !F.create_primitive || !F.go_transform || !F.set_parent) return;
+    for (auto& d : g_wDesired) {
+        WAcc* live = nullptr;
+        for (auto& l : g_wLive) if (l.id == d.id) live = &l;
+        void* anchor = w_anchor(ptr, d.slot);
+        if (!anchor) continue;
+        void* go = live && live->h ? target(live->h) : nullptr;
+        void* tr = go ? inv(F.go_transform, go) : nullptr;
+        if (live && !tr) { w_kill(*live); for (size_t i = 0; i < g_wLive.size(); ++i) if (&g_wLive[i] == live) { g_wLive.erase(g_wLive.begin() + i); break; } live = nullptr; }
+        if (!live) {
+            int t = 3; void* a[1] = {&t}; bool ok = false;
+            go = inv(F.create_primitive, nullptr, a, &ok);
+            if (!go) continue;
+            if (!apply_custom_mesh(go, d.mesh)) { void* da[1] = {go}; inv(F.destroy, nullptr, da); continue; }
+            if (F.type_collider && F.get_component && F.destroy_imm) {   // аксессуар не должен толкаться: убираем коллайдер
+                void* b[1] = {F.type_collider};
+                if (void* col = inv(F.get_component, go, b)) { void* da[1] = {col}; bool ok2 = false; inv(F.destroy_imm, nullptr, da, &ok2); }
+            }
+            if (F.type_renderer && F.get_component && F.get_material && F.set_color) {
+                void* b[1] = {F.type_renderer};
+                void* rend = inv(F.get_component, go, b);
+                void* mat = rend ? inv(F.get_material, rend) : nullptr;
+                if (mat) { Col c{((d.color >> 16) & 255) / 255.f, ((d.color >> 8) & 255) / 255.f, (d.color & 255) / 255.f, 1.f}; void* a2[1] = {&c}; inv(F.set_color, mat, a2); }
+            }
+            g_wLive.push_back(d);
+            live = &g_wLive.back();
+            live->h = gch_new(go, 0);
+            tr = inv(F.go_transform, go);
+            logf_("гардероб: «%s» создан (слот %s)", d.id.c_str(), d.slot.c_str());
+        }
+        if (!tr) continue;
+        int aid = inst_id(anchor);
+        if (live->parentId != aid) {
+            void* a[1] = {anchor}; inv(F.set_parent, tr, a);
+            live->parentId = aid;
+            { void* b[1] = {const_cast<float*>(d.off)}; inv(mLP, tr, b); }
+            if (mLE) { void* b[1] = {const_cast<float*>(d.rot)}; inv(mLE, tr, b); }
+            float sc3[3] = {d.sc, d.sc, d.sc}; void* b3[1] = {sc3}; inv(mLS, tr, b3);
+        }
+    }
+    // убрать то, чего больше нет в конфиге (конфиг при изменении и так пересоздаётся целиком)
+}
+
 void update() {
     long long now = now_ms();
     reload_maps();
@@ -4097,6 +4232,7 @@ void update() {
     publish_positions(now);
     try { replay_tick(now); } catch (...) {}
     try { pm_tick(now); } catch (...) {}
+    try { w_tick(now); } catch (...) {}
 #if defined(__arm__)
     try { pm_poll(); } catch (...) {}
 #endif
