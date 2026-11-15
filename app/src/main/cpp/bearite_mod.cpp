@@ -4204,24 +4204,35 @@ void w_dump_studio() {
 
 /** Открыт ли экран гардероба игры (активное главное окно StudioUI): лаунчер по файлу maps/_studio рисует свою кнопку «Каталог». */
 int g_studioOn = 0;
+bool ws_alive(void* go);
+void* tr_child(void* t, int i);
+int tr_children(void* t);
 void w_studio_flag(long long now) {
     static long long last = 0; static int cur = -1;
-    if (now - last < 600) return;
+    static uintptr_t hMain = 0;   // кэш: объект «Main» экрана гардероба (искать FindObjectsOfType каждый раз — тяжело и лагает)
+    if (now - last < 700) return;
     last = now;
+    if (g_pmOpen) return;   // пока открыта пауза, в сцене ничего не трогаем
     static void* tSt = nullptr; static void* mAH = nullptr;
     if (!tSt) tSt = type_of("", "StudioUI");
     if (!mAH) if (void* gk = goClass_()) mAH = bearite_il2.class_get_method_from_name(gk, "get_activeInHierarchy", 0);
     int on = 0;
-    if (tSt && mAH && F.get_gameobject) {
-        void* arr = find_objects(tSt);
-        uintptr_t n = arr ? arr_len(arr) : 0;
-        for (uintptr_t i = 0; i < n && i < 4 && !on; ++i) {
-            void* ui = *(void**)arr_elem(arr, sizeof(void*), i);
-            void* win = ui ? field_obj(ui, "mainScreen") : nullptr;
-            void* go = win ? inv(F.get_gameobject, win) : nullptr;
-            void* r = go ? inv(mAH, go) : nullptr;
-            if (r && *(const uint8_t*)obj_unbox(r)) on = 1;
+    if (g_scene == "hub" && tSt && mAH) {
+        void* mainGo = hMain ? target(hMain) : nullptr;
+        if (mainGo && !ws_alive(mainGo)) { gch_free(hMain); hMain = 0; mainGo = nullptr; }
+        static long long lastFind = 0;
+        if (!mainGo && now - lastFind > 2500) {
+            lastFind = now;
+            void* arr = find_objects(tSt);
+            void* ui = arr && arr_len(arr) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
+            void* tr = ui && F.get_transform ? inv(F.get_transform, ui) : nullptr;
+            for (int i = 0, n = tr_children(tr); i < n && !mainGo; ++i) {
+                void* c = tr_child(tr, i);
+                if (c && name_of(c) == "Main") mainGo = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+            }
+            if (mainGo) hMain = gch_new(mainGo, 0);
         }
+        if (mainGo) { void* r = inv(mAH, mainGo); on = r && *(const uint8_t*)obj_unbox(r) ? 1 : 0; }
     }
     g_studioOn = on;
     if (on && cur != 1) w_dump_studio();
@@ -4234,6 +4245,7 @@ void w_studio_flag(long long now) {
 
 void w_tick(long long now) {
     w_studio_flag(now);
+    if (g_pmOpen) return;
     if (now - g_wLast < 700) return;
     g_wLast = now;
     w_read_cfg();
@@ -4672,6 +4684,7 @@ void ws_poll_register(const std::string& name, void* go, int kind) {
 }
 
 void ws_tick(long long now) {
+    if (g_pmOpen) return;
     if (now - g_wsLast < (g_wsMode ? 250 : 400)) return;
     g_wsLast = now;
     if (!g_studioOn) { if (g_wsMode) ws_exit_mode(); return; }
