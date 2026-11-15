@@ -3936,6 +3936,51 @@ void pm_set_icon(void* clone) {
     if (setAspect) { uint8_t on = 1; void* aa[1] = {&on}; inv(setAspect, pick, aa); }
 }
 
+#if defined(__arm__)
+// arm32: перехват Button.OnPointerClick/OnSubmit через Dobby валит игру, поэтому нажатия ловим опросом:
+// у кнопки спрашиваем Selectable.IsPressed() каждый кадр; «нажата → отпущена» = клик. Родной onClick кнопки заменяем пустым событием.
+struct PmPoll { void* go = nullptr; bool pressed = false; bool ach = false; };
+PmPoll g_poll[2];
+void* pm_button_comp(void* go) {
+    if (!go || !F.get_comps_children || !PM.tButton) return nullptr;
+    bool inc = true; void* a[2] = {PM.tButton, &inc};
+    void* arr = inv(F.get_comps_children, go, a);
+    return (arr && arr_len(arr) > 0) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
+}
+void pm_neutralize(void* go) {
+    static void* kBtn = bearite_find_class("UnityEngine.UI", "Button");
+    static void* getOn = kBtn ? bearite_il2.class_get_method_from_name(kBtn, "get_onClick", 0) : nullptr;
+    static void* setOn = kBtn ? bearite_il2.class_get_method_from_name(kBtn, "set_onClick", 1) : nullptr;
+    void* b = pm_button_comp(go);
+    if (!b || !getOn || !setOn || !obj_new) return;
+    void* ev = inv(getOn, b); if (!ev) return;
+    void* k = obj_class(ev); void* ctor = k ? bearite_il2.class_get_method_from_name(k, ".ctor", 0) : nullptr;
+    if (!ctor) return;
+    void* ne = obj_new(k); if (!ne) return;
+    inv(ctor, ne); void* a[1] = {ne}; inv(setOn, b, a);
+}
+void pm_register(int slot, void* go, bool ach) {
+    if (g_poll[slot].go == go) return;
+    g_poll[slot].go = go; g_poll[slot].pressed = false; g_poll[slot].ach = ach;
+    pm_neutralize(go);
+    logf_("кнопка %s: нажатия ловим опросом", ach ? "«Достижения»" : "«Меню»");
+}
+void pm_poll() {
+    static void* kSel = bearite_find_class("UnityEngine.UI", "Selectable");
+    static void* isPressed = kSel ? bearite_il2.class_get_method_from_name(kSel, "IsPressed", 0) : nullptr;
+    if (!g_pmOpen || !isPressed) { for (auto& p : g_poll) { p.go = nullptr; p.pressed = false; } return; }
+    for (auto& p : g_poll) {
+        if (!p.go) continue;
+        void* b = pm_button_comp(p.go);
+        if (!b) { p.pressed = false; continue; }
+        void* r = inv(isPressed, b);
+        bool now = r && *(const bool*)obj_unbox(r);
+        if (p.pressed && !now) { if (p.ach) pm_ach_clicked(); else pm_clicked(); }
+        p.pressed = now;
+    }
+}
+#endif
+
 void pm_tick(long long now) {
     if (!g_pmOpen || now - g_pmOpenAt < 250 || now - g_pmLast < 300) return;
     g_pmLast = now;
@@ -3956,6 +4001,10 @@ void pm_tick(long long now) {
         if (b.name == "BeariteMenuButton") mine = &b;
         else if (!tgt && pm_is_achievements(b.text)) tgt = &b;
     }
+#if defined(__arm__)
+    if (tgt) pm_register(1, tgt->go, true);
+    if (mine) pm_register(0, mine->go, false);
+#endif
     if (mine) { pm_set_text(mine->go, "Меню"); return; }
     if (!tgt) {
         if (g_pmTries < 4) {
@@ -4004,6 +4053,9 @@ void pm_tick(long long now) {
     }
     pm_set_text(clone, "Меню");
     pm_set_icon(clone);
+#if defined(__arm__)
+    pm_register(0, clone, false);
+#endif
     if (F.set_active) { bool on = true; void* sa[1] = {&on}; inv(F.set_active, clone, sa); }
     char buf[160];
     snprintf(buf, sizeof buf, "ok\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", np.x, np.y, tgt->p[0], tgt->p[1], step);
@@ -4021,6 +4073,9 @@ void update() {
     publish_positions(now);
     try { replay_tick(now); } catch (...) {}
     try { pm_tick(now); } catch (...) {}
+#if defined(__arm__)
+    try { pm_poll(); } catch (...) {}
+#endif
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
