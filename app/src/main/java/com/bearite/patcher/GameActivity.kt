@@ -189,6 +189,7 @@ class GameActivity : Activity() {
         updateModButton()
         menuPoll.run()
         // иконка-пазл для кнопки «Меню» в паузе игры: мод берёт её из maps/textures/_puzzle.tex
+        Thread { try { MapStore(this).saveTextureBytes("_refresh", resources.openRawResource(R.drawable.ic_refresh).use { it.readBytes() }) } catch (_: Throwable) {} }.start()
         Thread { try { MapStore(this).saveTextureBytes("_hanger", resources.openRawResource(R.drawable.ic_hanger).use { it.readBytes() }) } catch (_: Throwable) {} }.start()
         Thread { try { MapStore(this).saveTextureBytes("_puzzle", resources.openRawResource(R.drawable.ic_puzzle_menu).use { it.readBytes() }) } catch (_: Throwable) {} }.start()
         sounds.start()

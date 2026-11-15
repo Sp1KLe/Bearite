@@ -132,7 +132,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
             val name = m.optString("name").ifEmpty { base }
             val id = (m.optString("id").ifEmpty { base }).filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40).ifEmpty { "prop" + System.currentTimeMillis() % 100000 }
             val err = install(id, name, glb, find(m.optString("texture")))
-            if (err == null) { ok++; Acc.fromJson(m)?.let { saveAcc(id, it) } } else lastErr = "$name: $err"
+            if (err == null) { ok++; Acc.fromJson(m)?.let { saveAcc(id, it) }; find(m.optString("icon"))?.let { ic -> try { store.saveTextureBytes("ico_$id", ic) } catch (_: Throwable) {} } } else lastErr = "$name: $err"
         }
         return ok to (if (ok == 0) lastErr ?: "ничего не установилось" else null)
     }

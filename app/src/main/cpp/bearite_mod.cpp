@@ -4449,22 +4449,65 @@ void ws_kill_comps(void* go, const char* cls) {
 
 void ws_set_active(void* go, bool on) { if (go && F.set_active) { void* sa[1] = {&on}; inv(F.set_active, go, sa); } }
 
-/** Выключает детей клона по ключевым словам в имени (замок, предпросмотр, значок экипировки); пишет имена детей в лог один раз. */
-void ws_clean_cell(void* go) {
-    void* tr = inv(F.go_transform, go);
+/** Выключает у копии ячейки замок, значок экипировки и т.п. (на любой глубине); имена потомков пишем в лог один раз. */
+void ws_clean_walk(void* tr, int depth, std::string& names) {
     int n = tr_children(tr);
-    std::string names;
-    for (int i = 0; i < n && i < 20; ++i) {
+    for (int i = 0; i < n && i < 24; ++i) {
         void* c = tr_child(tr, i);
         void* cg = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
         if (!cg) continue;
         std::string nm = name_of(c), low = nm;
         for (char& ch : low) ch = (char)tolower((unsigned char)ch);
-        names += nm + " | ";
-        if (low.find("lock") != std::string::npos || low.find("preview") != std::string::npos || low.find("equipped") != std::string::npos || low.find("shine") != std::string::npos || low.find("new") != std::string::npos)
-            ws_set_active(cg, false);
+        names += std::string(depth * 2, ' ') + nm + " | ";
+        bool bad = false;
+        for (const char* k : {"lock", "equipped", "shine", "new", "padlock", "selected", "burst", "sunburst", "ray"})
+            if (low.find(k) != std::string::npos) bad = true;
+        if (bad) { ws_set_active(cg, false); continue; }
+        if (depth < 3) ws_clean_walk(c, depth + 1, names);
     }
-    if (!g_wsLogged) { g_wsLogged = true; logf_("ячейка гардероба: дети [%s]", names.c_str()); }
+}
+
+void ws_clean_cell(void* go) {
+    void* tr = inv(F.go_transform, go);
+    std::string names;
+    ws_clean_walk(tr, 0, names);
+    if (!g_wsLogged) { g_wsLogged = true; logf_("ячейка гардероба: потомки [%s]", names.c_str()); }
+}
+
+void ws_set_sprite(void* iconGo, const char* texId);
+
+/** Картинка вещи в карточке: ico_<id> из архива кладём в RawImage/Image карточки; нет картинки — родное превью прячем. */
+void ws_cell_icon(void* go, const std::string& id) {
+    static void* kRaw = bearite_find_class("UnityEngine.UI", "RawImage");
+    static void* tRaw = type_of("UnityEngine.UI", "RawImage");
+    static void* setTex = kRaw ? bearite_il2.class_get_method_from_name(kRaw, "set_texture", 1) : nullptr;
+    static void* setCol = nullptr; static void* gColor = nullptr;
+    if (!F.get_comps_children || !tRaw) return;
+    std::string texId = id == "_refresh" ? std::string("_refresh") : "ico_" + id;
+    std::vector<unsigned char> head;
+    bool have = read_file(g_mapsDir + "/textures/" + texId + ".tex", head) && head.size() > 8;
+    bool inc = true; void* a[2] = {tRaw, &inc};
+    void* arr = inv(F.get_comps_children, go, a);
+    uintptr_t n = arr ? arr_len(arr) : 0;
+    void* pick = nullptr;
+    std::string seen;
+    for (uintptr_t i = 0; i < n && i < 12; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        void* cg = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!cg) continue;
+        std::string nm = name_of(cg), low = nm;
+        for (char& ch : low) ch = (char)tolower((unsigned char)ch);
+        seen += nm + " | ";
+        bool bg = low.find("back") != std::string::npos || low.find("frame") != std::string::npos || low.find("border") != std::string::npos;
+        if (!pick && !bg) pick = c;
+    }
+    static bool logged = false;
+    if (!logged) { logged = true; logf_("ячейка гардероба: RawImage [%s]", seen.c_str()); }
+    if (!pick) return;
+    void* pg = inv(F.get_gameobject, pick);
+    if (have && setTex) {
+        if (void* tex = make_texture(texId.c_str())) { void* sa[1] = {tex}; inv(setTex, pick, sa); ws_set_active(pg, true); }
+    } else ws_set_active(pg, false);
 }
 
 void ws_neutralize(void* go) {
@@ -4505,7 +4548,7 @@ void ws_set_sprite(void* iconGo, const char* texId) {
     if (setAspect) { uint8_t on = 1; void* aa[1] = {&on}; inv(setAspect, img, aa); }
 }
 
-struct WsBtns { void *help = nullptr, *exitB = nullptr, *undo = nullptr, *mine = nullptr, *tmpl = nullptr; std::vector<void*> tabs, cells; };
+struct WsBtns { void *help = nullptr, *exitB = nullptr, *undo = nullptr, *mine = nullptr, *tmpl = nullptr, *random = nullptr, *refresh = nullptr; std::vector<void*> tabs, cells; };
 
 void ws_collect(WsBtns& o) {
     pm_init();
@@ -4520,10 +4563,12 @@ void ws_collect(WsBtns& o) {
         if (nm == "Help") o.help = go;
         else if (nm == "BeariteWardrobeBtn") o.mine = go;
         else if (nm == "Undo") o.undo = go;
+        else if (nm == "Random") o.random = go;
+        else if (nm == "BeariteRefreshBtn") o.refresh = go;
         else if (nm == "Exit" && !o.exitB) o.exitB = go;
         else if (nm.rfind("BeariteCell_", 0) == 0) o.cells.push_back(go);
         else if (nm.rfind("cosmetic_", 0) == 0) { if (!o.tmpl) o.tmpl = go; }
-        else if (nm.size() > 8 && (nm.compare(nm.size() - 8, 8, " Subcategory") == 0 || nm.size() > 9 && nm.compare(nm.size() - 9, 9, " Category") == 0)) o.tabs.push_back(go);
+        else if (nm.size() > 12 && nm.compare(nm.size() - 12, 12, " Subcategory") == 0) o.tabs.push_back(go);
         else if (nm.size() > 9 && nm.compare(nm.size() - 9, 9, " Category") == 0) o.tabs.push_back(go);
     }
 }
@@ -4644,6 +4689,8 @@ void ws_rebuild() {
         ws_kill_comps(clone, "TranslateUI");
         ws_neutralize(clone);
         ws_clean_cell(clone);
+        if (id != "_refresh" && id != "_empty") ws_cell_icon(clone, id);
+        else ws_cell_icon(clone, id);   // нет картинки — родное превью прячем
         ws_set_active(clone, true);
         ++made;
     }
@@ -4665,6 +4712,36 @@ void ws_click_tab(const std::string& name) {
         if (ev) inv(invoke, ev);
         return;
     }
+}
+
+void ws_request_sync() {
+    if (g_wsSyncing) return;
+    g_wsSyncing = true;
+    if (FILE* f = fopen((g_mapsDir + "/_wardsync").c_str(), "w")) { fputs("1", f); fclose(f); }
+    if (g_wsMode) ws_refresh_labels();
+}
+
+/** Кнопка «Обновить» рядом с «Случайный»: копия «Random» в той же группе кнопок, на её месте слева. */
+void ws_make_refresh(WsBtns& b) {
+    if (!b.random || !F.instantiate_parent || !F.get_parent) return;
+    void* rtr = inv(F.go_transform, b.random);
+    void* parent = rtr ? inv(F.get_parent, rtr) : nullptr;
+    if (!parent) return;
+    void* a[2] = {b.random, parent};
+    void* clone = inv(F.instantiate_parent, nullptr, a);
+    void* ctr = clone ? inv(F.go_transform, clone) : nullptr;
+    if (!ctr) return;
+    if (F.set_name) { void* nb[1] = {bearite_il2.string_new("BeariteRefreshBtn")}; inv(F.set_name, clone, nb); }
+    if (PM.sibGet && PM.sibSet) { void* si = inv(PM.sibGet, rtr); if (si) { int idx = *(const int*)obj_unbox(si); void* sa[1] = {&idx}; inv(PM.sibSet, ctr, sa); } }
+    ws_kill_comps(clone, "TranslateUI");
+    ws_neutralize(clone);
+    ws_texts(clone, "Обновить", "");
+    for (int i = 0, n = tr_children(ctr); i < n; ++i) {
+        void* c = tr_child(ctr, i);
+        if (c && name_of(c) == "Image") if (void* cg = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr) ws_set_sprite(cg, "_refresh");
+    }
+    ws_set_active(clone, true);
+    logf_("гардероб: кнопка «Обновить» создана");
 }
 
 void ws_exit_mode() {
@@ -4695,15 +4772,17 @@ void ws_tick(long long now) {
     WsBtns b; ws_collect(b);
     if (!b.mine && b.help && b.exitB && b.undo) { ws_make_btn(b); ws_collect(b); }
     if (b.mine) ws_poll_register("", b.mine, 0);
+    if (!b.refresh && b.random) { ws_make_refresh(b); ws_collect(b); }
+    if (b.refresh) ws_poll_register("", b.refresh, 3);
     if (g_wsMode) {
         for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
         for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
         ws_hide_originals();   // игра может заново показать свои ячейки после смены вкладки
-        if (g_wsSyncing) {
-            std::string done = g_mapsDir + "/_wardsync_done";
-            struct stat st{};
-            if (stat(done.c_str(), &st) == 0) { remove(done.c_str()); g_wsSyncing = false; ws_rebuild(); }
-        }
+    }
+    if (g_wsSyncing) {
+        std::string done = g_mapsDir + "/_wardsync_done";
+        struct stat st{};
+        if (stat(done.c_str(), &st) == 0) { remove(done.c_str()); g_wsSyncing = false; if (g_wsMode) ws_rebuild(); }
     }
 }
 
@@ -4725,15 +4804,10 @@ void ws_poll() {
     }
     if (click < 0) return;
     WsPoll p = g_ws[click];
-    if (p.kind == 0) { if (g_wsMode) ws_exit_mode(); else ws_enter_mode(); }
+    if (p.kind == 3) ws_request_sync();
+    else if (p.kind == 0) { if (g_wsMode) ws_exit_mode(); else ws_enter_mode(); }
     else if (p.kind == 1) {
-        if (p.id == "_refresh") {   // лаунчер заново скачает архивы из релиза; по готовности пересоберём список
-            if (!g_wsSyncing) {
-                g_wsSyncing = true;
-                if (FILE* f = fopen((g_mapsDir + "/_wardsync").c_str(), "w")) { fputs("1", f); fclose(f); }
-                ws_refresh_labels();
-            }
-        } else if (p.id != "_empty") { ws_toggle(p.id); ws_refresh_labels(); }
+        if (p.id == "_refresh") ws_request_sync(); else if (p.id != "_empty") { ws_toggle(p.id); ws_refresh_labels(); }
     }
     else if (p.kind == 2 && g_wsMode) {
         if (p.id.size() > 12 && p.id.compare(p.id.size() - 12, 12, " Subcategory") == 0) g_wsSub = p.id;
