@@ -293,7 +293,7 @@ static bool arm_hook(void* target, void* repl, void** orig) {
             uint32_t imm = i & 0xFFF; uintptr_t lit = addr + 8 + ((i >> 23 & 1) ? imm : (uintptr_t)(-(int)imm));
             uint32_t rt = (i >> 12) & 15; if (rt == 15) return false;
             lits.push_back({code.size(), *reinterpret_cast<uint32_t*>(lit)});
-            code.push_back(0xE59F0000u | (rt << 12));                // ldr rt,[pc,#?] — смещение допишем ниже
+            code.push_back(0xE51F0000u | (rt << 12));                // ldr rt,[pc,#?] — смещение и бит U допишем ниже
         } else if (k == 1 && (i >> 28) == 0xE && (i & 0x0F000000) == 0x0B000000) {   // bl
             int32_t off = (int32_t)(i << 8) >> 6; tail_bl = true; bl_target = (uint32_t)(addr + 8 + off);
         } else if (arm_plain_ok(i)) {
@@ -302,15 +302,16 @@ static bool arm_hook(void* target, void* repl, void** orig) {
     }
     // хвост: либо bl (lr = t+8, переход на цель), либо переход на t+8
     if (tail_bl) {
-        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE59FE000u);   // ldr lr,[pc,#?]
-        lits.push_back({code.size(), bl_target});         code.push_back(0xE59FF000u);   // ldr pc,[pc,#?]
+        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE51FE000u);   // ldr lr,[pc,#?]
+        lits.push_back({code.size(), bl_target});         code.push_back(0xE51FF000u);   // ldr pc,[pc,#?]
     } else {
-        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE59FF000u);   // ldr pc,[pc,#?]
+        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE51FF000u);   // ldr pc,[pc,#?]
     }
     size_t n = code.size();
     for (size_t li = 0; li < lits.size(); ++li) {
         size_t w = lits[li].first, m = n + li;                      // слово константы идёт после кода
-        code[w] |= (uint32_t)((m - w) * 4 - 8);
+        int d = (int)((m - w) * 4) - 8;                              // может быть -4, когда константа сразу за командой
+        if (d >= 0) code[w] |= (uint32_t)d | (1u << 23); else code[w] |= (uint32_t)(-d);
         code.push_back(lits[li].second);
     }
     size_t bytes = code.size() * 4;
