@@ -157,6 +157,30 @@ void dump_class(const char* ns, const char* name) {
         s += ' ';
     }
     logf_("методы %s.%s: %s", ns, name, s.c_str());
+    // поля (имя:тип) и вложенные типы с их константами (перечисления)
+    auto cls_fields = sym<void* (*)(void*, void**)>("il2cpp_class_get_fields");
+    auto cls_nested = sym<void* (*)(void*, void**)>("il2cpp_class_get_nested_types");
+    auto fld_name = sym<const char* (*)(void*)>("il2cpp_field_get_name");
+    auto fld_type = sym<void* (*)(void*)>("il2cpp_field_get_type");
+    auto type_name = sym<const char* (*)(void*)>("il2cpp_type_get_name");
+    auto cname = sym<const char* (*)(void*)>("il2cpp_class_get_name");
+    auto dump_fields = [&](void* c, const std::string& head) {
+        if (!cls_fields || !fld_name) return;
+        std::string f; void* fi = nullptr; int cnt = 0;
+        while (void* fl = cls_fields(c, &fi)) {
+            if (cnt++ > 80) break;
+            f += fld_name(fl);
+            if (fld_type && type_name) { void* t = fld_type(fl); if (t) { f += ':'; f += type_name(t); } }
+            f += ' ';
+        }
+        for (size_t pos = 0, part = 0; pos < f.size() && part < 8; pos += 300, ++part)
+            logf_("%s%s: %s", head.c_str(), part ? " (прод.)" : "", f.substr(pos, 300).c_str());
+    };
+    dump_fields(k, std::string("поля ") + ns + "." + name);
+    if (cls_nested && cname) {
+        void* ni = nullptr;
+        while (void* nc = cls_nested(k, &ni)) dump_fields(nc, std::string("вложенный ") + name + "/" + cname(nc));
+    }
 }
 
 /** Разведка: классы игры, в имени которых есть слова про уровни, запуск, переходы, окна. Пишет в лог методы и поля. */
