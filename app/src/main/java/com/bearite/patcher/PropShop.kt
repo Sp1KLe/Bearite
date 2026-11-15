@@ -132,7 +132,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
             val name = m.optString("name").ifEmpty { base }
             val id = (m.optString("id").ifEmpty { base }).filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40).ifEmpty { "prop" + System.currentTimeMillis() % 100000 }
             val err = install(id, name, glb, find(m.optString("texture")))
-            if (err == null) ok++ else lastErr = "$name: $err"
+            if (err == null) { ok++; Acc.fromJson(m)?.let { saveAcc(id, it) } } else lastErr = "$name: $err"
         }
         return ok to (if (ok == 0) lastErr ?: "ничего не установилось" else null)
     }
@@ -156,17 +156,17 @@ class PropShop(private val dir: File, private val store: MapStore) {
     }
 
     /** Список магазина. Колбэк приходит в главном потоке: (список, текст ошибки). */
-    fun fetchIndex(cb: (List<Entry>?, String?) -> Unit) {
+    fun fetchIndex(base: String = BASE, cb: (List<Entry>?, String?) -> Unit) {
         Thread {
             try {
-                val j = JSONObject(String(get("$BASE/index.json", 1_000_000), Charsets.UTF_8))
+                val j = JSONObject(String(get("$base/index.json", 1_000_000), Charsets.UTF_8))
                 val arr = j.optJSONArray("props")
                 val list = ArrayList<Entry>()
                 if (arr != null) for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
                     val file = o.optString("file")
                     if (file.isEmpty() || file.contains('/')) continue
-                    val id = o.optString("id").ifEmpty { file.removeSuffix(".glb") }.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40)
+                    val id = o.optString("id").ifEmpty { file.removeSuffix(".glb").removeSuffix(".zip") }.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(40)
                     if (id.isEmpty()) continue
                     list.add(Entry(id, o.optString("name", id), o.optString("author"), file, o.optLong("size", 0), Acc.fromJson(o)))
                 }
@@ -175,10 +175,10 @@ class PropShop(private val dir: File, private val store: MapStore) {
         }.start()
     }
 
-    fun download(e: Entry, cb: (String?) -> Unit) {
+    fun download(e: Entry, base: String = BASE, cb: (String?) -> Unit) {
         Thread {
             val err = try {
-                val b = get("$BASE/${e.file}", 40_000_000)
+                val b = get("$base/${e.file}", 40_000_000)
                 (if (e.file.endsWith(".zip", true)) installZip(b).second else install(e.id, e.name, b)).also { r -> if (r == null && e.acc != null) saveAcc(e.id, e.acc) }
             } catch (t: Throwable) { t.message ?: "не скачалось" }
             main.post { cb(err) }
@@ -187,6 +187,8 @@ class PropShop(private val dir: File, private val store: MapStore) {
 
     companion object {
         val SLOTS = listOf("head", "face", "back", "hand_l", "hand_r", "foot_l", "foot_r")
+        /** Отдельный релиз «accessories»: index.json со списком и .zip-архивы (внутри index.json и .glb) или просто .glb. */
+        const val ACC_BASE = "https://github.com/Sp1KLe/Bearite/releases/download/accessories"
         const val BASE = "https://github.com/Sp1KLe/Bearite/releases/download/props"
     }
 }
