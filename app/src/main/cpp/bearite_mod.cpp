@@ -32,6 +32,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_set>
+#include <functional>
 #include <vector>
 
 #include "bearite_api.h"
@@ -4167,6 +4168,40 @@ void* w_anchor(void* playerTr, const std::string& slot) {
 }
 
 
+
+/** Разведка экрана гардероба: дерево объектов от корня холста StudioUI (имя, активность, есть ли кнопка), чтобы встроить свою кнопку и вкладку прямо в игру. */
+void w_dump_studio() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    static void* tBtn = type_of("UnityEngine.UI", "Button");
+    void* tSt = type_of("", "StudioUI");
+    void* arr = tSt ? find_objects(tSt) : nullptr;
+    void* ui = arr && arr_len(arr) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
+    void* tr = ui && F.get_transform ? inv(F.get_transform, ui) : nullptr;
+    void* top = tr;
+    for (int i = 0; i < 12 && top && F.get_parent; ++i) { void* p = inv(F.get_parent, top); if (!p) break; top = p; }
+    static void* mChild = nullptr;
+    if (!mChild) if (void* trk = bearite_find_class("UnityEngine", "Transform")) mChild = bearite_il2.class_get_method_from_name(trk, "GetChild", 1);
+    if (!top || !mChild || !F.get_child_count) { logf_("разведка гардероба: нет корня/методов"); return; }
+    int lines = 0;
+    std::function<void(void*, int, const std::string&)> walk = [&](void* t, int depth, const std::string& path) {
+        if (lines >= 420 || depth > 7) return;
+        std::string nm = name_of(t);
+        std::string full = path + "/" + nm;
+        void* go = F.get_gameobject ? inv(F.get_gameobject, t) : nullptr;
+        bool act = false;
+        if (go && F.get_active) { void* r = inv(F.get_active, go); act = r && *(const uint8_t*)obj_unbox(r); }
+        bool btn = false;
+        if (go && tBtn && F.get_component) { void* b[1] = {tBtn}; btn = inv(F.get_component, go, b) != nullptr; }
+        void* cn = inv(F.get_child_count, t);
+        int n = cn ? *(const int*)obj_unbox(cn) : 0;
+        if (depth <= 4 || btn) { logf_("UI %s%s%s n=%d", full.c_str(), act ? "" : " [off]", btn ? " [Button]" : "", n); ++lines; }
+        for (int i = 0; i < n && i < 40; ++i) { void* a[1] = {&i}; void* c = inv(mChild, t, a); if (c) walk(c, depth + 1, full); }
+    };
+    walk(top, 0, "");
+}
+
 /** Открыт ли экран гардероба игры (активное главное окно StudioUI): лаунчер по файлу maps/_studio рисует свою кнопку «Каталог». */
 void w_studio_flag(long long now) {
     static long long last = 0; static int cur = -1;
@@ -4187,6 +4222,7 @@ void w_studio_flag(long long now) {
             if (r && *(const uint8_t*)obj_unbox(r)) on = 1;
         }
     }
+    if (on && cur != 1) w_dump_studio();
     if (on != cur) {
         cur = on;
         if (FILE* f = fopen((g_mapsDir + "/_studio").c_str(), "w")) { fputs(on ? "1" : "0", f); fclose(f); }

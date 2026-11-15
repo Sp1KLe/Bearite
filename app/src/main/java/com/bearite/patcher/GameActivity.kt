@@ -343,8 +343,8 @@ class GameActivity : Activity() {
                 hud?.root?.visibility = View.GONE
             }
             try {
-                val open = File(File(filesDir, "maps"), "_studio").let { it.isFile && it.readText().trim() == "1" }
-                wardrobeBtn?.visibility = if (open) View.VISIBLE else View.GONE
+                // плавающая кнопка отключена: она не затемнялась вместе с игрой; кнопка будет внутри самой игры
+                wardrobeBtn?.visibility = View.GONE
             } catch (_: Throwable) {}
             // новые достижения от модов: запоминаем и показываем уведомление
             try { achStore.poll().forEach { hud?.say("★ Достижение: $it", 3500) } } catch (_: Throwable) {}
