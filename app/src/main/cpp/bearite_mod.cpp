@@ -4267,7 +4267,15 @@ void w_tick(long long now) {
                 void* b[1] = {F.type_collider};
                 if (void* col = inv(F.get_component, go, b)) { void* da[1] = {col}; bool ok2 = false; inv(F.destroy_imm, nullptr, da, &ok2); }
             }
-            if (F.type_renderer && F.get_component && F.get_material && F.set_color) {
+            bool textured = false;
+            {   // у аксессуара есть текстура (из архива) — кладём её как у обычных пропов
+                std::vector<unsigned char> th;
+                if (read_file(g_mapsDir + "/textures/cp_" + d.mesh + ".tex", th) && th.size() > 8) {
+                    Live L; Obj o; o.tex = "cp_" + d.mesh; o.tile[0] = o.tile[1] = 1.f;
+                    apply_texture(L, go, o); textured = true;
+                }
+            }
+            if (!textured && F.type_renderer && F.get_component && F.get_material && F.set_color) {
                 void* b[1] = {F.type_renderer};
                 void* rend = inv(F.get_component, go, b);
                 void* mat = rend ? inv(F.get_material, rend) : nullptr;
