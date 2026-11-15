@@ -208,23 +208,12 @@ MIT, автор: Sp1KLe в тг и гитхабе. См. файл `LICENSE`.
 
 ## Каталог аксессуаров (гардероб)
 
-Аксессуары лежат в отдельном релизе `accessories` репозитория (https://github.com/Sp1KLe/Bearite/releases/tag/accessories). В нём:
+Аксессуары лежат в отдельном релизе `accessories` (https://github.com/Sp1KLe/Bearite/releases/tag/accessories). В релизе только `.zip`-архивы, по одному на аксессуар; в каждом архиве — `index.json` и модель `.glb`. Лаунчер при открытии каталога сам скачивает новые и изменённые архивы.
 
-- `index.json` — список;
-- по одному файлу на аксессуар: `.zip` (внутри свой `index.json` и `.glb`) или просто `.glb`.
-
-`index.json` релиза:
+`index.json` внутри архива:
 
 ```json
-{"props":[
-  {"id":"cap","name":"Кепка","author":"Sp1KLe","file":"cap.zip","slot":"head","offset":[0,0.3,0],"scale":1,"rot":[0,0,0],"color":"FFFFFF"}
-]}
-```
-
-`index.json` внутри `cap.zip` (поля `slot`, `offset`, `scale`, `rot`, `color` можно дублировать и здесь; `id` должен совпадать):
-
-```json
-{"props":[{"id":"cap","name":"Кепка","model":"cap.glb","slot":"head","offset":[0,0.3,0],"scale":1}]}
+{"props":[{"id":"cap","name":"Кепка","author":"Sp1KLe","model":"cap.glb","slot":"head","offset":[0,0.3,0],"scale":1,"rot":[0,0,0],"color":"FFFFFF"}]}
 ```
 
 Слоты: `head`, `face`, `back`, `hand_l`, `hand_r`, `foot_l`, `foot_r`. Всё бесплатно, в слоте надет один аксессуар. Каталог открывается кнопкой-вешалкой в гардеробе игры (и из меню мода: «Магазин» → «Каталог аксессуаров»).

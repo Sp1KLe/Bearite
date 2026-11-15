@@ -71,7 +71,7 @@ class WardrobeWindow(private val act: Activity, private val ui: GameUi) {
 
     private fun load() {
         busy = true; err = ""
-        shop.fetchIndex(PropShop.ACC_BASE) { list, e -> busy = false; remote = list?.filter { it.acc != null }; err = e ?: ""; draw() }
+        shop.syncAccessories { _, e -> busy = false; err = e ?: ""; draw() }
     }
 
     private fun matches(slot: String): Boolean { val f = slotTabs[filter].second; return f.isEmpty() || slot.startsWith(f) }
@@ -96,9 +96,9 @@ class WardrobeWindow(private val act: Activity, private val ui: GameUi) {
         remote?.forEach { e -> if (items.none { it.first == e.id }) items.add(Triple(e.id, e.name, e.acc!!)) }
         val shown = items.filter { matches(it.third.slot) }.sortedBy { it.second.lowercase() }
         val worn = ward.worn().toSet()
-        if (busy && remote == null) box.addView(ui.label("Загружаю список…", 14f, M3.VARIANT, bold = false).apply { gravity = Gravity.CENTER; setPadding(0, ui.dp(16), 0, ui.dp(8)) })
-        if (err.isNotEmpty()) box.addView(ui.label("Магазин недоступен: $err", 13f, M3.VARIANT, bold = false).apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
-        if (shown.isEmpty() && !busy) box.addView(ui.label("Здесь пока пусто. Аксессуары берутся из релиза «accessories» репозитория Bearite.", 13f, M3.VARIANT, bold = false).apply { setPadding(0, ui.dp(16), 0, ui.dp(8)) })
+        if (busy && remote == null) box.addView(ui.label("Загружаю аксессуары…", 14f, M3.VARIANT, bold = false).apply { gravity = Gravity.CENTER; setPadding(0, ui.dp(16), 0, ui.dp(8)) })
+        if (err.isNotEmpty()) box.addView(ui.label("Релиз недоступен: $err", 13f, M3.VARIANT, bold = false).apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
+        if (shown.isEmpty() && !busy) box.addView(ui.label("Здесь пока пусто. Аксессуары берутся из релиза «accessories»: положи туда .zip (index.json и модель .glb внутри).", 13f, M3.VARIANT, bold = false).apply { setPadding(0, ui.dp(16), 0, ui.dp(8)) })
         for ((id, name, acc) in shown) {
             val have = shop.isInstalled(id)
             val on = id in worn

@@ -175,6 +175,37 @@ class PropShop(private val dir: File, private val store: MapStore) {
         }.start()
     }
 
+    /**
+     * Синхронизация с релизом «accessories»: в нём лежат только .zip (внутри index.json и модель .glb).
+     * Скачиваем новые и изменившиеся архивы и ставим; колбэк в главном потоке: (сколько обработано, ошибка).
+     */
+    fun syncAccessories(cb: (Int, String?) -> Unit) {
+        Thread {
+            var done = 0; var err: String? = null
+            try {
+                val j = JSONObject(String(get(ACC_API, 2_000_000), Charsets.UTF_8))
+                val assets = j.optJSONArray("assets")
+                val stampFile = File(propsDir, ".acc_stamps")
+                val stamps = HashMap<String, String>()
+                try { if (stampFile.isFile) stampFile.readLines().forEach { l -> val k = l.indexOf('='); if (k > 0) stamps[l.substring(0, k)] = l.substring(k + 1) } } catch (_: Throwable) {}
+                if (assets != null) for (i in 0 until assets.length()) {
+                    val a = assets.getJSONObject(i)
+                    val name = a.optString("name")
+                    if (!name.endsWith(".zip", true)) continue
+                    val stamp = a.optLong("size").toString() + "/" + a.optString("updated_at")
+                    if (stamps[name] == stamp) continue
+                    val url = a.optString("browser_download_url").ifEmpty { "$ACC_BASE/$name" }
+                    try {
+                        val r = installZip(get(url, 40_000_000))
+                        if (r.second == null) { stamps[name] = stamp; done += r.first } else err = "$name: ${r.second}"
+                    } catch (t: Throwable) { err = "$name: ${t.message}" }
+                }
+                try { propsDir.mkdirs(); stampFile.writeText(stamps.entries.joinToString("\n") { it.key + "=" + it.value }) } catch (_: Throwable) {}
+            } catch (t: Throwable) { err = t.message ?: "нет связи" }
+            main.post { cb(done, err) }
+        }.start()
+    }
+
     fun download(e: Entry, base: String = BASE, cb: (String?) -> Unit) {
         Thread {
             val err = try {
@@ -188,6 +219,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
     companion object {
         val SLOTS = listOf("head", "face", "back", "hand_l", "hand_r", "foot_l", "foot_r")
         /** Отдельный релиз «accessories»: index.json со списком и .zip-архивы (внутри index.json и .glb) или просто .glb. */
+        const val ACC_API = "https://api.github.com/repos/Sp1KLe/Bearite/releases/tags/accessories"
         const val ACC_BASE = "https://github.com/Sp1KLe/Bearite/releases/download/accessories"
         const val BASE = "https://github.com/Sp1KLe/Bearite/releases/download/props"
     }
