@@ -351,7 +351,7 @@ class GameActivity : Activity() {
                 val req = File(File(filesDir, "maps"), "_wardsync")
                 if (req.isFile && !wardSyncing) {
                     req.delete(); wardSyncing = true
-                    val st = MapStore(this)
+                    val st = MapStore(this@GameActivity)
                     PropShop(File(st.dirPath()), st).syncAccessories { _, _ ->
                         wardSyncing = false
                         try { File(File(filesDir, "maps"), "_wardsync_done").writeText("1") } catch (_: Throwable) {}
