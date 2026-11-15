@@ -4353,6 +4353,13 @@ std::vector<WsItem> ws_items() {
                 it.color = (unsigned)strtoul(f[8].c_str(), nullptr, 16);
             }
         }
+        {   // одна и та же модель, установленная под разными id (файлом и из релиза), — показываем один раз
+            struct stat st{};
+            long long sz = stat((dir + "/" + n).c_str(), &st) == 0 ? (long long)st.st_size : 0;
+            bool dup = false;
+            for (auto& o : out) { struct stat s2{}; if (o.name == it.name && stat((dir + "/" + o.id + ".mesh").c_str(), &s2) == 0 && (long long)s2.st_size == sz) dup = true; }
+            if (dup) continue;
+        }
         out.push_back(it);
     }
     closedir(d);
@@ -4541,7 +4548,15 @@ void ws_make_btn(WsBtns& b) {
             if (!cg) continue;
             void* ia[2] = {cg, ctr};
             void* icon = inv(F.instantiate_parent, nullptr, ia);
-            if (icon) { ws_set_active(icon, true); ws_set_sprite(icon, "_hanger"); iconOk = true; }
+            if (icon) {
+                ws_set_active(icon, true); ws_set_sprite(icon, "_hanger"); iconOk = true;
+                if (void* itr = inv(F.go_transform, icon)) {   // значок Undo маленький — увеличиваем
+                    static void* mLS = nullptr;
+                    if (!mLS) if (void* trk = bearite_find_class("UnityEngine", "Transform")) mLS = bearite_il2.class_get_method_from_name(trk, "set_localScale", 1);
+                    float sc[3] = {2.2f, 2.2f, 2.2f}; void* sa[1] = {sc};
+                    if (mLS) inv(mLS, itr, sa);
+                }
+            }
             break;
         }
     }
@@ -4549,16 +4564,36 @@ void ws_make_btn(WsBtns& b) {
     logf_("гардероб: кнопка-вешалка создана (%.0f; %.0f), шаг %.0f, иконка %d", np.x, np.y, step, iconOk);
 }
 
-void ws_exit_mode() {
-    if (!g_wsMode) return;
-    g_wsMode = false;
+std::string g_wsCat = "Head Category", g_wsSub = "Hat Subcategory";
+
+/** Какие слоты показывает выбранная вкладка гардероба игры. */
+bool ws_allowed(const std::string& slot) {
+    const std::string& t = g_wsSub;
+    auto is = [&](const char* k) { return t == k; };
+    if (is("Hat Subcategory")) return slot == "head";
+    if (is("Mask Subcategory") || is("Eyes Subcategory")) return slot == "face";
+    if (is("Accessory Subcategory")) return slot == "back";
+    if (is("Hands Feet Subcategory")) return slot.rfind("hand", 0) == 0 || slot.rfind("foot", 0) == 0;
+    return false;
+}
+
+void ws_hide_originals() {
+    void* arr = find_objects(PM.tButton);
+    for (uintptr_t i = 0, n = arr ? arr_len(arr) : 0; i < n && i < 500; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        void* go = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!go) continue;
+        if (name_of(go).rfind("cosmetic_", 0) == 0) {
+            if (g_wsHidden.size() < 400) g_wsHidden.push_back(gch_new(go, 0));
+            ws_set_active(go, false);
+        }
+    }
+}
+
+void ws_destroy_cells() {
     WsBtns b; ws_collect(b);
-    for (void* go : b.cells) if (F.destroy) { void* da[1] = {go}; inv(F.destroy, nullptr, da); }
-    for (uintptr_t h : g_wsHidden) { void* go = target(h); if (ws_alive(go)) ws_set_active(go, true); gch_free(h); }
-    g_wsHidden.clear();
-    for (auto& p : g_ws) if (p.kind != 0) { if (p.h) gch_free(p.h); p.h = 0; }
-    g_ws.erase(std::remove_if(g_ws.begin(), g_ws.end(), [](const WsPoll& p) { return p.kind != 0; }), g_ws.end());
-    logf_("гардероб: обычные предметы игры возвращены");
+    for (void* go : b.cells) if (F.destroy_imm) { void* da[1] = {go}; bool ok = false; inv(F.destroy_imm, nullptr, da, &ok); }
+    g_ws.erase(std::remove_if(g_ws.begin(), g_ws.end(), [](const WsPoll& p) { if (p.kind == 1 && p.h) gch_free(p.h); return p.kind == 1; }), g_ws.end());
 }
 
 void ws_refresh_labels() {
@@ -4567,32 +4602,28 @@ void ws_refresh_labels() {
     for (void* go : b.cells) {
         std::string nm = name_of(go);
         std::string id = nm.substr(12);
+        if (id == "_empty") { ws_texts(go, "Пусто", ""); continue; }
         for (auto& i : items) if (i.id == id) ws_texts(go, i.name, std::find(worn.begin(), worn.end(), id) != worn.end() ? "Надето" : "Бесплатно");
     }
 }
 
-void ws_enter_mode() {
+/** Пересобирает наши ячейки под выбранную вкладку; если подходящих нет — одна ячейка «Пусто». */
+void ws_rebuild() {
+    ws_destroy_cells();
     WsBtns b; ws_collect(b);
     if (!b.tmpl) { logf_("гардероб: нет ячейки-образца"); return; }
     void* ttr = inv(F.go_transform, b.tmpl);
     void* parent = ttr ? inv(F.get_parent, ttr) : nullptr;
     if (!parent) return;
-    auto items = ws_items();
-    // прячем все родные ячейки
-    void* arr = find_objects(PM.tButton);
-    for (uintptr_t i = 0, n = arr ? arr_len(arr) : 0; i < n && i < 500; ++i) {
-        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
-        void* go = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
-        if (!go) continue;
-        std::string nm = name_of(go);
-        if (nm.rfind("cosmetic_", 0) == 0) { g_wsHidden.push_back(gch_new(go, 0)); ws_set_active(go, false); }
-    }
+    std::vector<std::string> ids;
+    for (auto& it : ws_items()) if (ws_allowed(it.slot)) ids.push_back(it.id);
+    if (ids.empty()) ids.push_back("_empty");
     int made = 0;
-    for (auto& it : items) {
+    for (auto& id : ids) {
         void* a[2] = {b.tmpl, parent};
         void* clone = inv(F.instantiate_parent, nullptr, a);
         if (!clone) continue;
-        if (F.set_name) { void* nb[1] = {bearite_il2.string_new(("BeariteCell_" + it.id).c_str())}; inv(F.set_name, clone, nb); }
+        if (F.set_name) { void* nb[1] = {bearite_il2.string_new(("BeariteCell_" + id).c_str())}; inv(F.set_name, clone, nb); }
         ws_kill_comps(clone, "CosmeticDisplayer");
         ws_kill_comps(clone, "TranslateUI");
         ws_neutralize(clone);
@@ -4600,9 +4631,39 @@ void ws_enter_mode() {
         ws_set_active(clone, true);
         ++made;
     }
-    g_wsMode = true;
+    ws_hide_originals();
     ws_refresh_labels();
-    logf_("гардероб: каталог показан, ячеек %d", made);
+    logf_("гардероб: «%s» → ячеек %d", g_wsSub.c_str(), made);
+}
+
+/** Нажатие на родную вкладку: заставляем игру перерисовать её сетку (вызов onClick). */
+void ws_click_tab(const std::string& name) {
+    static void* kBtn = bearite_find_class("UnityEngine.UI", "Button");
+    static void* getOn = kBtn ? bearite_il2.class_get_method_from_name(kBtn, "get_onClick", 0) : nullptr;
+    static void* kUE = bearite_find_class("UnityEngine.Events", "UnityEvent");
+    static void* invoke = kUE ? bearite_il2.class_get_method_from_name(kUE, "Invoke", 0) : nullptr;
+    if (!getOn || !invoke) return;
+    WsBtns b; ws_collect(b);
+    for (void* go : b.tabs) if (name_of(go) == name) {
+        void* bc = ws_button(go); void* ev = bc ? inv(getOn, bc) : nullptr;
+        if (ev) inv(invoke, ev);
+        return;
+    }
+}
+
+void ws_exit_mode() {
+    if (!g_wsMode) return;
+    g_wsMode = false;
+    ws_destroy_cells();
+    for (uintptr_t h : g_wsHidden) { void* go = target(h); if (ws_alive(go)) ws_set_active(go, true); gch_free(h); }
+    g_wsHidden.clear();
+    ws_click_tab(g_wsSub);   // игра заново наполняет сетку своими предметами
+    logf_("гардероб: обычные предметы игры возвращены");
+}
+
+void ws_enter_mode() {
+    g_wsMode = true;
+    ws_rebuild();
 }
 
 void ws_poll_register(const std::string& name, void* go, int kind) {
@@ -4611,7 +4672,7 @@ void ws_poll_register(const std::string& name, void* go, int kind) {
 }
 
 void ws_tick(long long now) {
-    if (now - g_wsLast < 400) return;
+    if (now - g_wsLast < (g_wsMode ? 250 : 400)) return;
     g_wsLast = now;
     if (!g_studioOn) { if (g_wsMode) ws_exit_mode(); return; }
     WsBtns b; ws_collect(b);
@@ -4620,6 +4681,7 @@ void ws_tick(long long now) {
     if (g_wsMode) {
         for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
         for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
+        ws_hide_originals();   // игра может заново показать свои ячейки после смены вкладки
     }
 }
 
@@ -4642,8 +4704,15 @@ void ws_poll() {
     if (click < 0) return;
     WsPoll p = g_ws[click];
     if (p.kind == 0) { if (g_wsMode) ws_exit_mode(); else ws_enter_mode(); }
-    else if (p.kind == 1) { ws_toggle(p.id); ws_refresh_labels(); }
-    else if (p.kind == 2 && g_wsMode) ws_exit_mode();
+    else if (p.kind == 1) { if (p.id != "_empty") { ws_toggle(p.id); ws_refresh_labels(); } }
+    else if (p.kind == 2 && g_wsMode) {
+        if (p.id.size() > 12 && p.id.compare(p.id.size() - 12, 12, " Subcategory") == 0) g_wsSub = p.id;
+        else {   // вкладка категории: у каждой своя первая подвкладка
+            g_wsCat = p.id;
+            g_wsSub = p.id == "Head Category" ? "Hat Subcategory" : p.id == "Body Category" ? "Clothing Subcategory" : p.id == "Shicka Category" ? "Shicka Skin Subcategory" : p.id == "Special Category" ? "Trails Subcategory" : "Saved Subcategory";
+        }
+        ws_rebuild();
+    }
 }
 
 void update() {
