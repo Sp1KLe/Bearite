@@ -60,6 +60,7 @@ class GameActivity : Activity() {
     private var hud: GameHud? = null
     private var modButton: View? = null
     private var wardrobeBtn: View? = null
+    private var wardSyncing = false
     private var touchBtn: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -346,6 +347,16 @@ class GameActivity : Activity() {
             try {
                 // плавающая кнопка отключена: она не затемнялась вместе с игрой; кнопка будет внутри самой игры
                 wardrobeBtn?.visibility = View.GONE
+                // «Обновить список» из гардероба игры: скачиваем новые аксессуары из релиза и сообщаем моду
+                val req = File(File(filesDir, "maps"), "_wardsync")
+                if (req.isFile && !wardSyncing) {
+                    req.delete(); wardSyncing = true
+                    val st = MapStore(this)
+                    PropShop(File(st.dirPath()), st).syncAccessories { _, _ ->
+                        wardSyncing = false
+                        try { File(File(filesDir, "maps"), "_wardsync_done").writeText("1") } catch (_: Throwable) {}
+                    }
+                }
             } catch (_: Throwable) {}
             // новые достижения от модов: запоминаем и показываем уведомление
             try { achStore.poll().forEach { hud?.say("★ Достижение: $it", 3500) } } catch (_: Throwable) {}

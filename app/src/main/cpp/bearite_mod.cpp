@@ -4220,7 +4220,8 @@ void w_studio_flag(long long now) {
     if (g_scene == "hub" && tSt && mAH) {
         void* mainGo = hMain ? target(hMain) : nullptr;
         if (mainGo && !ws_alive(mainGo)) { gch_free(hMain); hMain = 0; mainGo = nullptr; }
-        static long long lastFind = 0;
+        static long long lastFind = 0; static std::string findScene;
+        if (findScene != g_scene) { findScene = g_scene; lastFind = 0; }   // вход в хаб: ищем сразу
         if (!mainGo && now - lastFind > 2500) {
             lastFind = now;
             void* arr = find_objects(tSt);
@@ -4576,6 +4577,7 @@ void ws_make_btn(WsBtns& b) {
     logf_("гардероб: кнопка-вешалка создана (%.0f; %.0f), шаг %.0f, иконка %d", np.x, np.y, step, iconOk);
 }
 
+bool g_wsSyncing = false;
 std::string g_wsCat = "Head Category", g_wsSub = "Hat Subcategory";
 
 /** Какие слоты показывает выбранная вкладка гардероба игры. */
@@ -4615,6 +4617,7 @@ void ws_refresh_labels() {
         std::string nm = name_of(go);
         std::string id = nm.substr(12);
         if (id == "_empty") { ws_texts(go, "Пусто", ""); continue; }
+        if (id == "_refresh") { ws_texts(go, "Обновить список", g_wsSyncing ? "Обновляю…" : "из релиза"); continue; }
         for (auto& i : items) if (i.id == id) ws_texts(go, i.name, std::find(worn.begin(), worn.end(), id) != worn.end() ? "Надето" : "Бесплатно");
     }
 }
@@ -4630,6 +4633,7 @@ void ws_rebuild() {
     std::vector<std::string> ids;
     for (auto& it : ws_items()) if (ws_allowed(it.slot)) ids.push_back(it.id);
     if (ids.empty()) ids.push_back("_empty");
+    ids.insert(ids.begin(), "_refresh");
     int made = 0;
     for (auto& id : ids) {
         void* a[2] = {b.tmpl, parent};
@@ -4695,6 +4699,11 @@ void ws_tick(long long now) {
         for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
         for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
         ws_hide_originals();   // игра может заново показать свои ячейки после смены вкладки
+        if (g_wsSyncing) {
+            std::string done = g_mapsDir + "/_wardsync_done";
+            struct stat st{};
+            if (stat(done.c_str(), &st) == 0) { remove(done.c_str()); g_wsSyncing = false; ws_rebuild(); }
+        }
     }
 }
 
@@ -4717,7 +4726,15 @@ void ws_poll() {
     if (click < 0) return;
     WsPoll p = g_ws[click];
     if (p.kind == 0) { if (g_wsMode) ws_exit_mode(); else ws_enter_mode(); }
-    else if (p.kind == 1) { if (p.id != "_empty") { ws_toggle(p.id); ws_refresh_labels(); } }
+    else if (p.kind == 1) {
+        if (p.id == "_refresh") {   // лаунчер заново скачает архивы из релиза; по готовности пересоберём список
+            if (!g_wsSyncing) {
+                g_wsSyncing = true;
+                if (FILE* f = fopen((g_mapsDir + "/_wardsync").c_str(), "w")) { fputs("1", f); fclose(f); }
+                ws_refresh_labels();
+            }
+        } else if (p.id != "_empty") { ws_toggle(p.id); ws_refresh_labels(); }
+    }
     else if (p.kind == 2 && g_wsMode) {
         if (p.id.size() > 12 && p.id.compare(p.id.size() - 12, 12, " Subcategory") == 0) g_wsSub = p.id;
         else {   // вкладка категории: у каждой своя первая подвкладка
