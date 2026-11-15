@@ -4203,6 +4203,7 @@ void w_dump_studio() {
 }
 
 /** Открыт ли экран гардероба игры (активное главное окно StudioUI): лаунчер по файлу maps/_studio рисует свою кнопку «Каталог». */
+int g_studioOn = 0;
 void w_studio_flag(long long now) {
     static long long last = 0; static int cur = -1;
     if (now - last < 600) return;
@@ -4222,6 +4223,7 @@ void w_studio_flag(long long now) {
             if (r && *(const uint8_t*)obj_unbox(r)) on = 1;
         }
     }
+    g_studioOn = on;
     if (on && cur != 1) w_dump_studio();
     if (on != cur) {
         cur = on;
@@ -4290,6 +4292,352 @@ void w_tick(long long now) {
     // убрать то, чего больше нет в конфиге (конфиг при изменении и так пересоздаётся целиком)
 }
 
+// ------------------------------------------------------------------ свой каталог внутри гардероба игры
+// Кнопка-вешалка — копия родной кнопки «?» (Help) под ней; по нажатию сетка предметов показывает наши аксессуары (копии родных ячеек),
+// нажатие на ячейку надевает/снимает, нажатие на любую вкладку игры возвращает её обычные предметы. Нажатия ловим опросом IsPressed.
+struct WsPoll { uintptr_t h = 0; bool pressed = false; int kind = 0; std::string id; };   // kind: 0 вешалка, 1 ячейка, 2 вкладка игры
+std::vector<WsPoll> g_ws;
+bool g_wsMode = false;
+std::vector<uintptr_t> g_wsHidden;
+long long g_wsLast = 0;
+bool g_wsLogged = false;
+
+bool ws_alive(void* go) { return go && F.go_transform && inv(F.go_transform, go) != nullptr; }
+
+void* tr_child(void* t, int i) {
+    static void* m = nullptr;
+    if (!m) if (void* trk = bearite_find_class("UnityEngine", "Transform")) m = bearite_il2.class_get_method_from_name(trk, "GetChild", 1);
+    if (!m || !t) return nullptr;
+    void* a[1] = {&i};
+    return inv(m, t, a);
+}
+int tr_children(void* t) { void* c = t && F.get_child_count ? inv(F.get_child_count, t) : nullptr; return c ? *(const int*)obj_unbox(c) : 0; }
+
+void* ws_button(void* go) {
+    pm_init();
+    if (!go || !F.get_comps_children || !PM.tButton) return nullptr;
+    bool inc = true; void* a[2] = {PM.tButton, &inc};
+    void* arr = inv(F.get_comps_children, go, a);
+    return (arr && arr_len(arr) > 0) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
+}
+
+struct WsItem { std::string id, name, slot; float off[3]; float sc; float rot[3]; unsigned color; };
+
+std::vector<WsItem> ws_items() {
+    std::vector<WsItem> out;
+    std::string dir = g_mapsDir + "/props";
+    DIR* d = opendir(dir.c_str());
+    if (!d) return out;
+    while (dirent* e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n.size() < 6 || n.substr(n.size() - 5) != ".mesh") continue;
+        WsItem it; it.id = n.substr(0, n.size() - 5); it.name = it.id; it.slot = "head";
+        it.off[0] = 0; it.off[1] = 0.6f; it.off[2] = 0; it.sc = 1; it.rot[0] = it.rot[1] = it.rot[2] = 0; it.color = 0xFFFFFF;
+        std::vector<unsigned char> b;
+        if (read_file(dir + "/" + it.id + ".name", b) && !b.empty()) { std::string t(b.begin(), b.end()); while (!t.empty() && (t.back() == '\n' || t.back() == '\r' || t.back() == ' ')) t.pop_back(); if (!t.empty()) it.name = t; }
+        if (read_file(dir + "/" + it.id + ".acc", b) && !b.empty()) {
+            std::string t(b.begin(), b.end()); std::vector<std::string> f; size_t q = 0;
+            while (true) { size_t z = t.find('|', q); if (z == std::string::npos) { f.push_back(t.substr(q)); break; } f.push_back(t.substr(q, z - q)); q = z + 1; }
+            if (f.size() >= 9) {
+                it.slot = f[0];
+                for (int i = 0; i < 3; ++i) { it.off[i] = (float)atof(f[1 + i].c_str()); it.rot[i] = (float)atof(f[5 + i].c_str()); }
+                it.sc = (float)atof(f[4].c_str()); if (it.sc <= 0) it.sc = 1;
+                it.color = (unsigned)strtoul(f[8].c_str(), nullptr, 16);
+            }
+        }
+        out.push_back(it);
+    }
+    closedir(d);
+    std::sort(out.begin(), out.end(), [](const WsItem& a, const WsItem& b) { return a.name < b.name; });
+    return out;
+}
+
+std::vector<std::string> ws_worn() {
+    std::vector<std::string> v; std::vector<unsigned char> b;
+    if (read_file(g_mapsDir + "/../wardrobe.sel", b)) {
+        std::string t(b.begin(), b.end()); size_t pos = 0;
+        while (pos < t.size()) { size_t e = t.find('\n', pos); if (e == std::string::npos) e = t.size(); std::string l = t.substr(pos, e - pos); pos = e + 1; while (!l.empty() && (l.back() == '\r' || l.back() == ' ')) l.pop_back(); if (!l.empty()) v.push_back(l); }
+    }
+    return v;
+}
+
+void ws_toggle(const std::string& id) {
+    auto items = ws_items();
+    auto worn = ws_worn();
+    const WsItem* me = nullptr;
+    for (auto& i : items) if (i.id == id) me = &i;
+    if (!me) return;
+    auto it = std::find(worn.begin(), worn.end(), id);
+    if (it != worn.end()) worn.erase(it);
+    else {
+        for (size_t k = worn.size(); k-- > 0;) for (auto& i : items) if (i.id == worn[k] && i.slot == me->slot) { worn.erase(worn.begin() + k); break; }
+        worn.push_back(id);
+    }
+    std::string sel, cfg;
+    for (auto& w : worn) {
+        for (auto& i : items) if (i.id == w) {
+            sel += w + "\n";
+            char line[512];
+            snprintf(line, sizeof line, "%s\t%s\t%s\t%g\t%g\t%g\t%g\t%06X\t%g\t%g\t%g\n", w.c_str(), w.c_str(), i.slot.c_str(), i.off[0], i.off[1], i.off[2], i.sc, i.color & 0xFFFFFF, i.rot[0], i.rot[1], i.rot[2]);
+            cfg += line;
+        }
+    }
+    if (FILE* f = fopen((g_mapsDir + "/../wardrobe.sel").c_str(), "w")) { fputs(sel.c_str(), f); fclose(f); }
+    if (FILE* f = fopen((g_mapsDir + "/../wardrobe.cfg").c_str(), "w")) { fputs(cfg.c_str(), f); fclose(f); }
+    logf_("гардероб: %s %s", it != worn.end() ? "снят" : "надет", id.c_str());
+}
+
+/** Тексты внутри копии: первый — название, второй — подпись, остальные пустые. */
+void ws_texts(void* go, const std::string& name, const std::string& sub) {
+    pm_init();
+    if (!F.get_comps_children) return;
+    int idx = 0;
+    for (int kind = 0; kind < 2; ++kind) {
+        void* t = kind == 0 ? PM.tText : PM.tTmp; void* m = kind == 0 ? PM.setText : PM.setTmp;
+        if (!t || !m) continue;
+        bool inc = true; void* a[2] = {t, &inc};
+        void* arr = inv(F.get_comps_children, go, a);
+        if (!arr) continue;
+        uintptr_t n = arr_len(arr);
+        for (uintptr_t i = 0; i < n && i < 8; ++i) {
+            void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+            if (!c) continue;
+            void* b[1] = {bearite_il2.string_new(idx == 0 ? name.c_str() : idx == 1 ? sub.c_str() : "")};
+            inv(m, c, b); ++idx;
+        }
+    }
+}
+
+void ws_kill_comps(void* go, const char* cls) {
+    void* t = type_of("", cls);
+    if (!t || !F.get_comps_children || !F.destroy_imm) return;
+    bool inc = true; void* a[2] = {t, &inc};
+    void* arr = inv(F.get_comps_children, go, a);
+    if (!arr) return;
+    std::vector<void*> list; uintptr_t n = arr_len(arr);
+    for (uintptr_t i = 0; i < n && i < 16; ++i) if (void* c = *(void**)arr_elem(arr, sizeof(void*), i)) list.push_back(c);
+    for (void* c : list) { void* da[1] = {c}; inv(F.destroy_imm, nullptr, da); }
+}
+
+void ws_set_active(void* go, bool on) { if (go && F.set_active) { void* sa[1] = {&on}; inv(F.set_active, go, sa); } }
+
+/** Выключает детей клона по ключевым словам в имени (замок, предпросмотр, значок экипировки); пишет имена детей в лог один раз. */
+void ws_clean_cell(void* go) {
+    void* tr = inv(F.go_transform, go);
+    int n = tr_children(tr);
+    std::string names;
+    for (int i = 0; i < n && i < 20; ++i) {
+        void* c = tr_child(tr, i);
+        void* cg = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!cg) continue;
+        std::string nm = name_of(c), low = nm;
+        for (char& ch : low) ch = (char)tolower((unsigned char)ch);
+        names += nm + " | ";
+        if (low.find("lock") != std::string::npos || low.find("preview") != std::string::npos || low.find("equipped") != std::string::npos || low.find("shine") != std::string::npos || low.find("new") != std::string::npos)
+            ws_set_active(cg, false);
+    }
+    if (!g_wsLogged) { g_wsLogged = true; logf_("ячейка гардероба: дети [%s]", names.c_str()); }
+}
+
+void ws_neutralize(void* go) {
+    static void* kBtn = bearite_find_class("UnityEngine.UI", "Button");
+    static void* getOn = kBtn ? bearite_il2.class_get_method_from_name(kBtn, "get_onClick", 0) : nullptr;
+    static void* setOn = kBtn ? bearite_il2.class_get_method_from_name(kBtn, "set_onClick", 1) : nullptr;
+    void* b = ws_button(go);
+    if (!b || !getOn || !setOn || !obj_new) return;
+    void* ev = inv(getOn, b); if (!ev) return;
+    void* k = obj_class(ev); void* ctor = k ? bearite_il2.class_get_method_from_name(k, ".ctor", 0) : nullptr;
+    if (!ctor) return;
+    void* ne = obj_new(k); if (!ne) return;
+    inv(ctor, ne); void* a[1] = {ne}; inv(setOn, b, a);
+}
+
+void ws_set_sprite(void* iconGo, const char* texId) {
+    void* tImg = type_of("UnityEngine.UI", "Image");
+    void* imgK = bearite_find_class("UnityEngine.UI", "Image");
+    void* spK = bearite_find_class("UnityEngine", "Sprite");
+    if (!tImg || !imgK || !spK || !F.get_comps_children) return;
+    std::vector<unsigned char> head;
+    if (!read_file(g_mapsDir + std::string("/textures/") + texId + ".tex", head) || head.size() < 8) { logf_("гардероб: нет иконки %s", texId); return; }
+    int w = 0, h = 0; memcpy(&w, head.data(), 4); memcpy(&h, head.data() + 4, 4);
+    void* tex = make_texture(texId);
+    void* create = find_method_types(spK, "Create", {"Texture2D", "Rect", "Vector2"});
+    void* setSprite = bearite_il2.class_get_method_from_name(imgK, "set_sprite", 1);
+    void* setAspect = bearite_il2.class_get_method_from_name(imgK, "set_preserveAspect", 1);
+    if (!tex || !create || !setSprite) { logf_("гардероб: не создать спрайт иконки"); return; }
+    float rect[4] = {0, 0, (float)w, (float)h}, pivot[2] = {0.5f, 0.5f};
+    void* ca[3] = {tex, rect, pivot};
+    void* sprite = inv(create, nullptr, ca);
+    if (!sprite) return;
+    bool inc = true; void* ta[2] = {tImg, &inc};
+    void* arr = inv(F.get_comps_children, iconGo, ta);
+    if (!arr || !arr_len(arr)) return;
+    void* img = *(void**)arr_elem(arr, sizeof(void*), 0);
+    void* sa[1] = {sprite}; inv(setSprite, img, sa);
+    if (setAspect) { uint8_t on = 1; void* aa[1] = {&on}; inv(setAspect, img, aa); }
+}
+
+struct WsBtns { void *help = nullptr, *exitB = nullptr, *undo = nullptr, *mine = nullptr, *tmpl = nullptr; std::vector<void*> tabs, cells; };
+
+void ws_collect(WsBtns& o) {
+    pm_init();
+    void* arr = find_objects(PM.tButton);
+    if (!arr) return;
+    uintptr_t n = arr_len(arr);
+    for (uintptr_t i = 0; i < n && i < 500; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        void* go = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!go) continue;
+        std::string nm = name_of(go);
+        if (nm == "Help") o.help = go;
+        else if (nm == "BeariteWardrobeBtn") o.mine = go;
+        else if (nm == "Undo") o.undo = go;
+        else if (nm == "Exit" && !o.exitB) o.exitB = go;
+        else if (nm.rfind("BeariteCell_", 0) == 0) o.cells.push_back(go);
+        else if (nm.rfind("cosmetic_", 0) == 0) { if (!o.tmpl) o.tmpl = go; }
+        else if (nm.size() > 8 && (nm.compare(nm.size() - 8, 8, " Subcategory") == 0 || nm.size() > 9 && nm.compare(nm.size() - 9, 9, " Category") == 0)) o.tabs.push_back(go);
+        else if (nm.size() > 9 && nm.compare(nm.size() - 9, 9, " Category") == 0) o.tabs.push_back(go);
+    }
+}
+
+void ws_make_btn(WsBtns& b) {
+    if (!b.help || !b.exitB || !F.instantiate_parent || !F.get_parent) return;
+    void* htr = inv(F.go_transform, b.help); void* etr = inv(F.go_transform, b.exitB);
+    void* parent = htr ? inv(F.get_parent, htr) : nullptr;
+    if (!htr || !etr || !parent) return;
+    float hp[3] = {0}, ep[3] = {0};
+    if (void* pv = inv(F.get_position, htr)) memcpy(hp, obj_unbox(pv), sizeof hp);
+    if (void* pv = inv(F.get_position, etr)) memcpy(ep, obj_unbox(pv), sizeof ep);
+    float step = ep[1] - hp[1];
+    if (fabsf(step) < 1.f) { logf_("гардероб: шаг между «Exit» и «Help» не определён"); return; }
+    void* a[2] = {b.help, parent};
+    void* clone = inv(F.instantiate_parent, nullptr, a);
+    void* ctr = clone ? inv(F.go_transform, clone) : nullptr;
+    if (!ctr) return;
+    if (F.set_name) { void* nb[1] = {bearite_il2.string_new("BeariteWardrobeBtn")}; inv(F.set_name, clone, nb); }
+    if (PM.sibGet && PM.sibSet) { void* si = inv(PM.sibGet, htr); if (si) { int idx = *(const int*)obj_unbox(si) + 1; void* sa[1] = {&idx}; inv(PM.sibSet, ctr, sa); } }
+    V3 np{hp[0], hp[1] - step, hp[2]};
+    void* pa[1] = {&np}; inv(F.set_position, ctr, pa);
+    ws_kill_comps(clone, "TranslateUI");
+    ws_neutralize(clone);
+    // «?» внутри копии прячем, на его место — значок из кнопки «Undo» (у неё есть дочерний Image), в него кладём вешалку
+    int n = tr_children(ctr);
+    for (int i = 0; i < n; ++i) if (void* c = tr_child(ctr, i)) if (void* cg = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr) ws_set_active(cg, false);
+    bool iconOk = false;
+    if (b.undo) {
+        void* utr = inv(F.go_transform, b.undo);
+        for (int i = 0, m = tr_children(utr); i < m; ++i) {
+            void* c = tr_child(utr, i);
+            if (!c || name_of(c) != "Image") continue;
+            void* cg = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+            if (!cg) continue;
+            void* ia[2] = {cg, ctr};
+            void* icon = inv(F.instantiate_parent, nullptr, ia);
+            if (icon) { ws_set_active(icon, true); ws_set_sprite(icon, "_hanger"); iconOk = true; }
+            break;
+        }
+    }
+    ws_set_active(clone, true);
+    logf_("гардероб: кнопка-вешалка создана (%.0f; %.0f), шаг %.0f, иконка %d", np.x, np.y, step, iconOk);
+}
+
+void ws_exit_mode() {
+    if (!g_wsMode) return;
+    g_wsMode = false;
+    WsBtns b; ws_collect(b);
+    for (void* go : b.cells) if (F.destroy) { void* da[1] = {go}; inv(F.destroy, nullptr, da); }
+    for (uintptr_t h : g_wsHidden) { void* go = target(h); if (ws_alive(go)) ws_set_active(go, true); gch_free(h); }
+    g_wsHidden.clear();
+    for (auto& p : g_ws) if (p.kind != 0) { if (p.h) gch_free(p.h); p.h = 0; }
+    g_ws.erase(std::remove_if(g_ws.begin(), g_ws.end(), [](const WsPoll& p) { return p.kind != 0; }), g_ws.end());
+    logf_("гардероб: обычные предметы игры возвращены");
+}
+
+void ws_refresh_labels() {
+    WsBtns b; ws_collect(b);
+    auto items = ws_items(); auto worn = ws_worn();
+    for (void* go : b.cells) {
+        std::string nm = name_of(go);
+        std::string id = nm.substr(12);
+        for (auto& i : items) if (i.id == id) ws_texts(go, i.name, std::find(worn.begin(), worn.end(), id) != worn.end() ? "Надето" : "Бесплатно");
+    }
+}
+
+void ws_enter_mode() {
+    WsBtns b; ws_collect(b);
+    if (!b.tmpl) { logf_("гардероб: нет ячейки-образца"); return; }
+    void* ttr = inv(F.go_transform, b.tmpl);
+    void* parent = ttr ? inv(F.get_parent, ttr) : nullptr;
+    if (!parent) return;
+    auto items = ws_items();
+    // прячем все родные ячейки
+    void* arr = find_objects(PM.tButton);
+    for (uintptr_t i = 0, n = arr ? arr_len(arr) : 0; i < n && i < 500; ++i) {
+        void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+        void* go = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!go) continue;
+        std::string nm = name_of(go);
+        if (nm.rfind("cosmetic_", 0) == 0) { g_wsHidden.push_back(gch_new(go, 0)); ws_set_active(go, false); }
+    }
+    int made = 0;
+    for (auto& it : items) {
+        void* a[2] = {b.tmpl, parent};
+        void* clone = inv(F.instantiate_parent, nullptr, a);
+        if (!clone) continue;
+        if (F.set_name) { void* nb[1] = {bearite_il2.string_new(("BeariteCell_" + it.id).c_str())}; inv(F.set_name, clone, nb); }
+        ws_kill_comps(clone, "CosmeticDisplayer");
+        ws_kill_comps(clone, "TranslateUI");
+        ws_neutralize(clone);
+        ws_clean_cell(clone);
+        ws_set_active(clone, true);
+        ++made;
+    }
+    g_wsMode = true;
+    ws_refresh_labels();
+    logf_("гардероб: каталог показан, ячеек %d", made);
+}
+
+void ws_poll_register(const std::string& name, void* go, int kind) {
+    for (auto& p : g_ws) if (p.h && target(p.h) == go) return;
+    WsPoll p; p.h = gch_new(go, 0); p.kind = kind; p.id = name; g_ws.push_back(p);
+}
+
+void ws_tick(long long now) {
+    if (now - g_wsLast < 400) return;
+    g_wsLast = now;
+    if (!g_studioOn) { if (g_wsMode) ws_exit_mode(); return; }
+    WsBtns b; ws_collect(b);
+    if (!b.mine && b.help && b.exitB && b.undo) { ws_make_btn(b); ws_collect(b); }
+    if (b.mine) ws_poll_register("", b.mine, 0);
+    if (g_wsMode) {
+        for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
+        for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
+    }
+}
+
+void ws_poll() {
+    static void* kSel = bearite_find_class("UnityEngine.UI", "Selectable");
+    static void* isPressed = kSel ? bearite_il2.class_get_method_from_name(kSel, "IsPressed", 0) : nullptr;
+    if (!isPressed || g_ws.empty()) return;
+    int click = -1;
+    for (size_t i = 0; i < g_ws.size(); ++i) {
+        auto& p = g_ws[i];
+        void* go = p.h ? target(p.h) : nullptr;
+        if (!go || !ws_alive(go)) { p.pressed = false; continue; }
+        void* bc = ws_button(go);
+        if (!bc) continue;
+        void* r = inv(isPressed, bc);
+        bool now = r && *(const bool*)obj_unbox(r);
+        if (p.pressed && !now && click < 0) click = (int)i;
+        p.pressed = now;
+    }
+    if (click < 0) return;
+    WsPoll p = g_ws[click];
+    if (p.kind == 0) { if (g_wsMode) ws_exit_mode(); else ws_enter_mode(); }
+    else if (p.kind == 1) { ws_toggle(p.id); ws_refresh_labels(); }
+    else if (p.kind == 2 && g_wsMode) ws_exit_mode();
+}
+
 void update() {
     long long now = now_ms();
     reload_maps();
@@ -4298,6 +4646,7 @@ void update() {
     try { replay_tick(now); } catch (...) {}
     try { pm_tick(now); } catch (...) {}
     try { w_tick(now); } catch (...) {}
+    try { ws_tick(now); ws_poll(); } catch (...) {}
 #if defined(__arm__)
     try { pm_poll(); } catch (...) {}
 #endif
