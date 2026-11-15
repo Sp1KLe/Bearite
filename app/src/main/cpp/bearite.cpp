@@ -16,6 +16,7 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <link.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -257,6 +258,81 @@ static void* api_module_base(const char* part) {
     return q.base;
 }
 
+#if defined(__arm__)
+// ---------------------------------------------------------------------------------------------------------
+// Собственный перехватчик для ARM32 (режим ARM, не Thumb). Dobby неверно переносит «ldr rX,[pc,#N]» в начале функции
+// (после этого игра падает на мусорном указателе), а такой пролог у многих методов il2cpp. Здесь первые две инструкции
+// копируются в трамплин с учётом PC: «ldr rX,[pc,#N]» превращается в загрузку той же константы, «bl» — в вызов по
+// абсолютному адресу. Остальное (push, mov, cmp, bx lr …) копируется как есть. Не вышло — вызывающий код берёт Dobby.
+static bool arm_plain_ok(uint32_t i) {
+    uint32_t cls = (i >> 25) & 7;
+    if ((i & 0x0FFFFFF0) == 0x012FFF10) return (i & 15) != 15;      // bx/blx регистр
+    if (cls == 5) return false;                                       // b/bl обрабатываются отдельно
+    if (cls <= 3) {
+        if (((i >> 16) & 15) == 15) return false;                      // Rn = pc
+        if (((i >> 12) & 15) == 15) return false;                      // Rd = pc
+        if (cls == 0 && (i & 15) == 15) return false;                  // Rm = pc
+        if (cls == 3 && (i & 15) == 15) return false;
+    }
+    if (cls == 6 && ((i >> 16) & 15) == 15) return false;             // vldr [pc]
+    return true;
+}
+static uint8_t* g_armPool = nullptr;
+static size_t g_armPoolUsed = 0;
+static bool arm_hook(void* target, void* repl, void** orig) {
+    uintptr_t t = reinterpret_cast<uintptr_t>(target);
+    if (t & 1) return false;                                          // Thumb — это не наш случай
+    uint32_t* c = reinterpret_cast<uint32_t*>(t);
+    uint32_t ins[2] = {c[0], c[1]};
+    std::vector<uint32_t> code;           // слова трамплина
+    std::vector<std::pair<size_t, uint32_t>> lits;   // (индекс слова-загрузки, значение константы)
+    bool tail_bl = false; uint32_t bl_target = 0;
+    for (int k = 0; k < 2; ++k) {
+        uint32_t i = ins[k]; uintptr_t addr = t + 4 * k;
+        if ((i >> 28) == 0xE && (i & 0x0C5F0000) == 0x041F0000 && !(i & (1u << 25)) && (i & (1u << 24)) && !(i & (1u << 21))) {
+            uint32_t imm = i & 0xFFF; uintptr_t lit = addr + 8 + ((i >> 23 & 1) ? imm : (uintptr_t)(-(int)imm));
+            uint32_t rt = (i >> 12) & 15; if (rt == 15) return false;
+            lits.push_back({code.size(), *reinterpret_cast<uint32_t*>(lit)});
+            code.push_back(0xE59F0000u | (rt << 12));                // ldr rt,[pc,#?] — смещение допишем ниже
+        } else if (k == 1 && (i >> 28) == 0xE && (i & 0x0F000000) == 0x0B000000) {   // bl
+            int32_t off = (int32_t)(i << 8) >> 6; tail_bl = true; bl_target = (uint32_t)(addr + 8 + off);
+        } else if (arm_plain_ok(i)) {
+            code.push_back(i);
+        } else return false;
+    }
+    // хвост: либо bl (lr = t+8, переход на цель), либо переход на t+8
+    if (tail_bl) {
+        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE59FE000u);   // ldr lr,[pc,#?]
+        lits.push_back({code.size(), bl_target});         code.push_back(0xE59FF000u);   // ldr pc,[pc,#?]
+    } else {
+        lits.push_back({code.size(), (uint32_t)(t + 8)}); code.push_back(0xE59FF000u);   // ldr pc,[pc,#?]
+    }
+    size_t n = code.size();
+    for (size_t li = 0; li < lits.size(); ++li) {
+        size_t w = lits[li].first, m = n + li;                      // слово константы идёт после кода
+        code[w] |= (uint32_t)((m - w) * 4 - 8);
+        code.push_back(lits[li].second);
+    }
+    size_t bytes = code.size() * 4;
+    if (!g_armPool || g_armPoolUsed + bytes > 4096) {
+        void* m = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (m == MAP_FAILED) return false;
+        g_armPool = static_cast<uint8_t*>(m); g_armPoolUsed = 0;
+    }
+    uint8_t* tr = g_armPool + g_armPoolUsed; g_armPoolUsed += (bytes + 15) & ~size_t(15);
+    memcpy(tr, code.data(), bytes);
+    __builtin___clear_cache(reinterpret_cast<char*>(tr), reinterpret_cast<char*>(tr + bytes));
+    uintptr_t page = t & ~uintptr_t(4095); size_t len = (t + 8 - page) > 4096 ? 8192 : 4096;
+    if (mprotect(reinterpret_cast<void*>(page), len, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return false;
+    c[0] = 0xE51FF004u;                                               // ldr pc,[pc,#-4]
+    c[1] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(repl));  // адрес замены (бит Thumb допустим: ldr pc переключает режим)
+    mprotect(reinterpret_cast<void*>(page), len, PROT_READ | PROT_EXEC);
+    __builtin___clear_cache(reinterpret_cast<char*>(t), reinterpret_cast<char*>(t + 8));
+    if (orig) *orig = tr;
+    return true;
+}
+#endif
+
 static int api_hook(void* target, void* replacement, void** original) {
     if (!target || !replacement) return -1;
     {   // диагноз для авари: где лежит перехваченный код (смещение в модуле) и его первые байты; бит Thumb (младший) отбрасываем
@@ -270,6 +346,9 @@ static int api_hook(void* target, void* replacement, void** original) {
                  b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9]);
         }
     }
+#if defined(__arm__)
+    if (arm_hook(target, replacement, original)) { blog("hook: собственный перехватчик ARM (Dobby не нужен)"); return 0; }
+#endif
     return call_dobby(DobbyHook, target, replacement, reinterpret_cast<void*>(original));
 }
 
