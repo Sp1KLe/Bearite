@@ -4166,7 +4166,36 @@ void* w_anchor(void* playerTr, const std::string& slot) {
     return nullptr;
 }
 
+
+/** Открыт ли экран гардероба игры (активное главное окно StudioUI): лаунчер по файлу maps/_studio рисует свою кнопку «Каталог». */
+void w_studio_flag(long long now) {
+    static long long last = 0; static int cur = -1;
+    if (now - last < 600) return;
+    last = now;
+    static void* tSt = nullptr; static void* mAH = nullptr;
+    if (!tSt) tSt = type_of("", "StudioUI");
+    if (!mAH) if (void* gk = goClass_()) mAH = bearite_il2.class_get_method_from_name(gk, "get_activeInHierarchy", 0);
+    int on = 0;
+    if (tSt && mAH && F.get_gameobject) {
+        void* arr = find_objects(tSt);
+        uintptr_t n = arr ? arr_len(arr) : 0;
+        for (uintptr_t i = 0; i < n && i < 4 && !on; ++i) {
+            void* ui = *(void**)arr_elem(arr, sizeof(void*), i);
+            void* win = ui ? field_obj(ui, "mainScreen") : nullptr;
+            void* go = win ? inv(F.get_gameobject, win) : nullptr;
+            void* r = go ? inv(mAH, go) : nullptr;
+            if (r && *(const uint8_t*)obj_unbox(r)) on = 1;
+        }
+    }
+    if (on != cur) {
+        cur = on;
+        if (FILE* f = fopen((g_mapsDir + "/_studio").c_str(), "w")) { fputs(on ? "1" : "0", f); fclose(f); }
+        logf_("гардероб игры: %s", on ? "открыт" : "закрыт");
+    }
+}
+
 void w_tick(long long now) {
+    w_studio_flag(now);
     if (now - g_wLast < 700) return;
     g_wLast = now;
     w_read_cfg();

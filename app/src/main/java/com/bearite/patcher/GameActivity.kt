@@ -59,6 +59,7 @@ class GameActivity : Activity() {
     private var modMenu: GameModMenu? = null
     private var hud: GameHud? = null
     private var modButton: View? = null
+    private var wardrobeBtn: View? = null
     private var touchBtn: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -170,6 +171,16 @@ class GameActivity : Activity() {
         modButton = btn
         root.addView(btn)
         root.addView(menu.root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // кнопка «Каталог» в гардеробе игры: под «?», появляется, пока мод видит открытый экран гардероба
+        val dm0 = resources.displayMetrics
+        val hs = (dm0.heightPixels * 0.15f).toInt()
+        val wardBtn = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.btn_wardrobe); scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            visibility = View.GONE
+            setOnClickListener { try { WardrobeWindow(this@GameActivity, GameUi(this@GameActivity)).show(side = true) } catch (t: Throwable) { BLog.e("каталог из гардероба", t) } }
+        }
+        root.addView(wardBtn, FrameLayout.LayoutParams(hs, hs).apply { leftMargin = (dm0.heightPixels * 0.028f).toInt(); topMargin = (dm0.heightPixels * 0.369f).toInt() })
+        wardrobeBtn = wardBtn
         setContentView(root)
         levelPrompt = LevelPrompt(this).also { it.start() }
         mapSync = MapSync(this).also { it.start() }
@@ -331,6 +342,10 @@ class GameActivity : Activity() {
                 modMenu?.show()
                 hud?.root?.visibility = View.GONE
             }
+            try {
+                val open = File(File(filesDir, "maps"), "_studio").let { it.isFile && it.readText().trim() == "1" }
+                wardrobeBtn?.visibility = if (open) View.VISIBLE else View.GONE
+            } catch (_: Throwable) {}
             // новые достижения от модов: запоминаем и показываем уведомление
             try { achStore.poll().forEach { hud?.say("★ Достижение: $it", 3500) } } catch (_: Throwable) {}
             // нажатие на «Достижения» в паузе: открываем своё окно со списком

@@ -54,9 +54,17 @@ class WardrobeWindow(private val act: Activity, private val ui: GameUi) {
 
     private val slotTabs = listOf("Все" to "", "Голова" to "head", "Лицо" to "face", "Спина" to "back", "Руки" to "hand", "Ноги" to "foot")
 
-    fun show() {
-        ui.dialog("Каталог аксессуаров", ScrollView(act).apply { addView(box) },
-            listOf(GameUi.Btn("Снять всё", danger = true) { ward.clear() }, GameUi.Btn("Закрыть")), widthDp = 560).show()
+    /** side = true: панель справа (поверх синего поля гардероба), медведь слева остаётся виден. */
+    fun show(side: Boolean = false) {
+        val dlg = ui.dialog("Каталог аксессуаров", ScrollView(act).apply { addView(box) },
+            listOf(GameUi.Btn("Снять всё", danger = true) { ward.clear() }, GameUi.Btn("Закрыть")), widthDp = if (side) 420 else 560)
+        if (side) dlg.window?.apply {
+            val dm = act.resources.displayMetrics
+            setGravity(Gravity.END or Gravity.CENTER_VERTICAL)
+            setLayout((dm.widthPixels * 0.40f).toInt(), (dm.heightPixels * 0.96f).toInt())
+            setDimAmount(0f)
+        }
+        dlg.show()
         draw()
         load()
     }
