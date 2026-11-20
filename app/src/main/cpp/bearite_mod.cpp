@@ -3987,7 +3987,7 @@ void pm_neutralize(void* go) {
 void pm_register(int slot, void* go, bool ach) {
     if (g_poll[slot].h && target(g_poll[slot].h) == go) return;
     if (g_poll[slot].h) gch_free(g_poll[slot].h);
-    g_poll[slot].h = gch_new(go); g_poll[slot].go = go; g_poll[slot].pressed = false; g_poll[slot].ach = ach;
+    g_poll[slot].h = gch_new(go, 0); g_poll[slot].go = go; g_poll[slot].pressed = false; g_poll[slot].ach = ach;
     pm_neutralize(go);
     logf_("кнопка %s: нажатия ловим опросом", ach ? "«Достижения»" : "«Меню»");
 }
