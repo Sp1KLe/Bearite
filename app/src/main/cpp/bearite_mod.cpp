@@ -3964,7 +3964,7 @@ void pm_set_icon(void* clone) {
 #if defined(__arm__)
 // arm32: перехват Button.OnPointerClick/OnSubmit через Dobby валит игру, поэтому нажатия ловим опросом:
 // у кнопки спрашиваем Selectable.IsPressed() каждый кадр; «нажата → отпущена» = клик. Родной onClick кнопки заменяем пустым событием.
-struct PmPoll { void* go = nullptr; bool pressed = false; bool ach = false; };
+struct PmPoll { uintptr_t h = 0; void* go = nullptr; bool pressed = false; bool ach = false; };
 PmPoll g_poll[2];
 void* pm_button_comp(void* go) {
     if (!go || !F.get_comps_children || !PM.tButton) return nullptr;
@@ -3985,17 +3985,20 @@ void pm_neutralize(void* go) {
     inv(ctor, ne); void* a[1] = {ne}; inv(setOn, b, a);
 }
 void pm_register(int slot, void* go, bool ach) {
-    if (g_poll[slot].go == go) return;
-    g_poll[slot].go = go; g_poll[slot].pressed = false; g_poll[slot].ach = ach;
+    if (g_poll[slot].h && target(g_poll[slot].h) == go) return;
+    if (g_poll[slot].h) gch_free(g_poll[slot].h);
+    g_poll[slot].h = gch_new(go); g_poll[slot].go = go; g_poll[slot].pressed = false; g_poll[slot].ach = ach;
     pm_neutralize(go);
     logf_("кнопка %s: нажатия ловим опросом", ach ? "«Достижения»" : "«Меню»");
 }
 void pm_poll() {
     static void* kSel = bearite_find_class("UnityEngine.UI", "Selectable");
     static void* isPressed = kSel ? bearite_il2.class_get_method_from_name(kSel, "IsPressed", 0) : nullptr;
-    if (!g_pmOpen || !isPressed) { for (auto& p : g_poll) { p.go = nullptr; p.pressed = false; } return; }
+    if (!g_pmOpen || !isPressed) { for (auto& p : g_poll) { if (p.h) gch_free(p.h); p.h = 0; p.go = nullptr; p.pressed = false; } return; }
     for (auto& p : g_poll) {
-        if (!p.go) continue;
+        if (!p.h) continue;
+        p.go = target(p.h);
+        if (!p.go || !F.go_transform || !inv(F.go_transform, p.go)) { gch_free(p.h); p.h = 0; p.go = nullptr; p.pressed = false; continue; }
         void* b = pm_button_comp(p.go);
         if (!b) { p.pressed = false; continue; }
         void* r = inv(isPressed, b);
