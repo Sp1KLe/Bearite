@@ -11,7 +11,7 @@ android {
         applicationId = "com.bearite.patcher"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
+        versionCode = 1000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
         versionName = "0.2.0"
 
         // Игра грузится в процесс лаунчера, ABI должны совпадать.
