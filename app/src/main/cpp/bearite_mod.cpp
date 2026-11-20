@@ -3769,6 +3769,7 @@ void replay_tick(long long now) {
 // меняем надпись на «Меню» и отключаем компонент Button. Нажатие ловит прозрачная область лаунчера (maps/_menubtn).
 bool g_pmOpen = false;
 long long g_pmOpenAt = 0, g_pmLast = 0;
+int g_pmMiss = 0;
 int g_pmTries = 0;
 
 struct PmBtn { void* go = nullptr; void* tr = nullptr; float p[3] = {0, 0, 0}; std::string text, name; };
@@ -4033,8 +4034,17 @@ void pm_tick(long long now) {
     if (tgt) pm_register(1, tgt->go, true);
     if (mine) pm_register(0, mine->go, false);
 #endif
+    if (mine || tgt) g_pmMiss = 0;
     if (mine) { pm_set_text(mine->go, "Меню"); return; }
     if (!tgt) {
+        // игра закрывает паузу без EnablePauseMenu(false): панель просто гаснет, и кнопок паузы в сцене больше нет
+        if (++g_pmMiss >= 3) {
+            g_pmOpen = false; g_pmMiss = 0;
+            std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";
+            if (FILE* f = fopen(tmp.c_str(), "w")) { fputs("0", f); fclose(f); rename(tmp.c_str(), path.c_str()); }
+            logf_("меню паузы игры: закрыто (панель исчезла)");
+            return;
+        }
         if (g_pmTries < 4) {
             logf_("кнопка «Достижения» не найдена; кнопок в сцене: %d", (int)v.size());
             for (auto& b : v) logf_("  кнопка «%s» объект «%s» (%.0f; %.0f)", b.text.c_str(), b.name.c_str(), b.p[0], b.p[1]);
@@ -5083,7 +5093,7 @@ void h_pause_menu(void* self, uint8_t en, const void* mi) {
     static int lastV = -1;
     int v = en ? 1 : 0;
     g_pmOpen = v != 0;
-    if (v) { g_pmOpenAt = now_ms(); g_pmTries = 0; pm_status("wait"); }
+    if (v) { g_pmOpenAt = now_ms(); g_pmTries = 0; g_pmMiss = 0; pm_status("wait"); }
     if (v != lastV) {
         lastV = v;
         std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";
