@@ -4226,11 +4226,10 @@ void w_studio_flag(long long now) {
             lastFind = now;
             void* arr = find_objects(tSt);
             void* ui = arr && arr_len(arr) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
-            void* tr = ui && F.get_transform ? inv(F.get_transform, ui) : nullptr;
-            for (int i = 0, n = tr_children(tr); i < n && !mainGo; ++i) {
-                void* c = tr_child(tr, i);
-                if (c && name_of(c) == "Main") mainGo = F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
-            }
+            void* win = ui ? field_obj(ui, "mainScreen") : nullptr;   // главное окно гардероба (как в версии, где это работало)
+            mainGo = win && F.get_gameobject ? inv(F.get_gameobject, win) : nullptr;
+            if (!mainGo && ui && F.get_gameobject) mainGo = inv(F.get_gameobject, ui);
+            { static int nl = 0; if (mainGo || nl++ < 3) logf_("гардероб: поиск экрана — %s", mainGo ? "найден" : "пока не найден"); }
             if (mainGo) hMain = gch_new(mainGo, 0);
         }
         if (mainGo) { void* r = inv(mAH, mainGo); on = r && *(const uint8_t*)obj_unbox(r) ? 1 : 0; }
