@@ -4161,7 +4161,7 @@ void* w_anchor(void* playerTr, const std::string& slot) {
         void* arr = inv(F.get_comps_children, go, a);
         if (!arr || !arr_len(arr)) continue;
         void* comp = *(void**)arr_elem(arr, sizeof(void*), 0);
-        const char* fn = slot == "back" ? "bodyTransform" : (wantRef ? (slot == "hand_l" ? "leftHand" : slot == "hand_r" ? "rightHand" : slot == "foot_l" ? "leftFoot" : "rightFoot") : "headTransform");
+        const char* fn = (slot == "back" || slot == "body") ? "bodyTransform" : (wantRef ? (slot == "hand_l" ? "leftHand" : slot == "hand_r" ? "rightHand" : slot == "foot_l" ? "leftFoot" : "rightFoot") : "headTransform");
         if (void* t = field_obj(comp, fn)) return t;
     }
     return nullptr;
@@ -4632,6 +4632,7 @@ bool ws_allowed(const std::string& slot) {
     if (is("Hat Subcategory")) return slot == "head";
     if (is("Mask Subcategory") || is("Eyes Subcategory")) return slot == "face";
     if (is("Accessory Subcategory")) return slot == "back";
+    if (is("Clothing Subcategory")) return slot == "body";
     if (is("Hands Feet Subcategory")) return slot.rfind("hand", 0) == 0 || slot.rfind("foot", 0) == 0;
     return false;
 }
@@ -4678,7 +4679,6 @@ void ws_rebuild() {
     std::vector<std::string> ids;
     for (auto& it : ws_items()) if (ws_allowed(it.slot)) ids.push_back(it.id);
     if (ids.empty()) ids.push_back("_empty");
-    ids.insert(ids.begin(), "_refresh");
     int made = 0;
     for (auto& id : ids) {
         void* a[2] = {b.tmpl, parent};

@@ -217,7 +217,7 @@ class PropShop(private val dir: File, private val store: MapStore) {
     }
 
     companion object {
-        val SLOTS = listOf("head", "face", "back", "hand_l", "hand_r", "foot_l", "foot_r")
+        val SLOTS = listOf("head", "face", "back", "body", "hand_l", "hand_r", "foot_l", "foot_r")
         /** Отдельный релиз «accessories»: index.json со списком и .zip-архивы (внутри index.json и .glb) или просто .glb. */
         const val ACC_API = "https://api.github.com/repos/Sp1KLe/Bearite/releases/tags/accessories"
         const val ACC_BASE = "https://github.com/Sp1KLe/Bearite/releases/download/accessories"

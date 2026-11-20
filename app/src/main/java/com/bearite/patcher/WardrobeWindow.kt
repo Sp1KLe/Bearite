@@ -77,7 +77,7 @@ class WardrobeWindow(private val act: Activity, private val ui: GameUi) {
     private fun matches(slot: String): Boolean { val f = slotTabs[filter].second; return f.isEmpty() || slot.startsWith(f) }
 
     private fun slotName(slot: String) = when {
-        slot == "head" -> "голова"; slot == "face" -> "лицо"; slot == "back" -> "спина"
+        slot == "head" -> "голова"; slot == "face" -> "лицо"; slot == "back" -> "спина"; slot == "body" -> "тело"
         slot.startsWith("hand") -> "рука"; slot.startsWith("foot") -> "нога"; else -> slot
     }
 
