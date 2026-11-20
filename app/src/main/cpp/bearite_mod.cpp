@@ -5012,7 +5012,7 @@ void bind_unity() {
     if (void* trk = bearite_find_class("UnityEngine", "Transform")) F.set_parent = find_method_types(trk, "SetParent", {"Transform"});
     F.instantiate_parent = find_method_types(ob, "Instantiate", {"Object", "Transform"});
     F.destroy_imm = m0(ob, "DestroyImmediate", 1);
-    scan_classes();
+    if (access((g_mapsDir + "/_dumpclasses").c_str(), F_OK) == 0) scan_classes();   // разведка классов — только по флаг-файлу (иначе лог тонет в тысячах строк)
     F.get_component = find_method_p0(go, "GetComponent", 1, "Type");
     F.get_material = m0(rd, "get_material", 0);
     F.set_color = m0(mt, "set_color", 1);
