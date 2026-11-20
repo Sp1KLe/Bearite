@@ -4010,8 +4010,9 @@ void pm_poll() {
 }
 #endif
 
-void pm_tick(long long now) {
-    if (!g_pmOpen || now - g_pmOpenAt < 250 || now - g_pmLast < 300) return;
+bool g_pmSetup = false;   // пока наша кнопка не поставлена, шагаем часто, чтобы перестройка паузы была незаметной
+void pm_tick(long long now, bool force) {
+    if (!g_pmOpen || (!force && now - g_pmLast < (g_pmSetup ? 30 : 300))) return;
     g_pmLast = now;
     pm_init();
     if (!PM.tButton || !F.instantiate_parent || !F.get_parent) { if (g_pmTries++ == 0) pm_status("fail\tнет нужных методов"); return; }
@@ -4035,7 +4036,7 @@ void pm_tick(long long now) {
     if (mine) pm_register(0, mine->go, false);
 #endif
     if (mine || tgt) g_pmMiss = 0;
-    if (mine) { pm_set_text(mine->go, "Меню"); return; }
+    if (mine) { g_pmSetup = false; pm_set_text(mine->go, "Меню"); return; }
     if (!tgt) {
         // игра закрывает паузу без EnablePauseMenu(false): панель просто гаснет, и кнопок паузы в сцене больше нет
         if (++g_pmMiss >= 3) {
@@ -4097,6 +4098,7 @@ void pm_tick(long long now) {
     if (F.set_active) { bool on = true; void* sa[1] = {&on}; inv(F.set_active, clone, sa); }
     char buf[160];
     snprintf(buf, sizeof buf, "ok\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", np.x, np.y, tgt->p[0], tgt->p[1], step);
+    g_pmSetup = false;
     pm_status(buf);
     logf_("кнопка «Меню» скопирована из «%s»: (%.0f; %.0f), шаг %.0f", tgt->text.c_str(), np.x, np.y, step);
 }
@@ -4217,14 +4219,19 @@ void w_dump_studio() {
 
 /** Открыт ли экран гардероба игры (активное главное окно StudioUI): лаунчер по файлу maps/_studio рисует свою кнопку «Каталог». */
 int g_studioOn = 0;
+volatile long long g_studioKick = 0;   // StudioUI.OnEnable: экран гардероба только что включили
+void (*o_studio_enable)(void*, const void*) = nullptr;
+void h_studio_enable(void* self, const void* mi) { if (o_studio_enable) o_studio_enable(self, mi); g_studioKick = now_ms(); }
 bool ws_alive(void* go);
 void* tr_child(void* t, int i);
 int tr_children(void* t);
 void w_studio_flag(long long now) {
     static long long last = 0; static int cur = -1;
     static uintptr_t hMain = 0;   // кэш: объект «Main» экрана гардероба (искать FindObjectsOfType каждый раз — тяжело и лагает)
-    if (now - last < 700) return;
+    bool kicked = g_studioKick != 0;
+    if (!kicked && now - last < 700) return;
     last = now;
+    if (kicked) { g_studioKick = 0;  }
     if (g_pmOpen) return;   // пока открыта пауза, в сцене ничего не трогаем
     static void* tSt = nullptr; static void* mAH = nullptr;
     if (!tSt) tSt = type_of("", "StudioUI");
@@ -4235,7 +4242,7 @@ void w_studio_flag(long long now) {
         if (mainGo && !ws_alive(mainGo)) { gch_free(hMain); hMain = 0; mainGo = nullptr; }
         static long long lastFind = 0; static std::string findScene;
         if (findScene != g_scene) { findScene = g_scene; lastFind = 0; }   // вход в хаб: ищем сразу
-        if (!mainGo && now - lastFind > 2500) {
+        if (!mainGo && (kicked || now - lastFind > 2500)) {
             lastFind = now;
             void* arr = find_objects(tSt);
             void* ui = arr && arr_len(arr) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
@@ -4836,14 +4843,16 @@ void ws_poll_register(const std::string& name, void* go, int kind) {
 
 void ws_tick(long long now) {
     if (g_pmOpen) return;
-    if (now - g_wsLast < (g_wsMode ? 250 : 400)) return;
+    static bool ready = false;
+    if (now - g_wsLast < (g_wsMode ? 250 : (g_studioOn && !ready ? 40 : 400))) return;
     g_wsLast = now;
-    if (!g_studioOn) { if (g_wsMode) ws_exit_mode(); return; }
+    if (!g_studioOn) { ready = false; if (g_wsMode) ws_exit_mode(); return; }
     WsBtns b; ws_collect(b);
     if (!b.mine && b.help && b.exitB && b.undo) { ws_make_btn(b); ws_collect(b); }
     if (b.mine) ws_poll_register("", b.mine, 0);
     if (!b.refresh && b.random) { ws_make_refresh(b); ws_collect(b); }
     if (b.refresh) ws_poll_register("", b.refresh, 3);
+    ready = b.mine && b.refresh;
     if (g_wsMode) {
         for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
         for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
@@ -4895,7 +4904,7 @@ void update() {
     cmd_poll();
     publish_positions(now);
     try { replay_tick(now); } catch (...) {}
-    try { pm_tick(now); } catch (...) {}
+    try { pm_tick(now, false); } catch (...) {}
     try { w_tick(now); } catch (...) {}
     try { ws_tick(now); ws_poll(); } catch (...) {}
 #if defined(__arm__)
@@ -5150,15 +5159,16 @@ void (*o_pause_menu)(void*, uint8_t, const void*) = nullptr;
 void h_pause_menu(void* self, uint8_t en, const void* mi) {
     static int lastV = -1;
     int v = en ? 1 : 0;
+    if (o_pause_menu) o_pause_menu(self, en, mi);   // сперва игра включает панель, потом дорабатываем её в том же кадре
     g_pmOpen = v != 0;
-    if (v) { g_pmOpenAt = now_ms(); g_pmTries = 0; g_pmMiss = 0; pm_status("wait"); }
+    if (v) { g_pmOpenAt = now_ms(); g_pmTries = 0; g_pmMiss = 0; g_pmSetup = true; pm_status("wait"); }
     if (v != lastV) {
         lastV = v;
         std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";
         if (FILE* f = fopen(tmp.c_str(), "w")) { fputs(v ? "1" : "0", f); fclose(f); rename(tmp.c_str(), path.c_str()); }
         logf_("меню паузы игры: %s", v ? "открыто" : "закрыто");
     }
-    if (o_pause_menu) o_pause_menu(self, en, mi);
+    if (v) { try { pm_tick(now_ms(), true); pm_tick(now_ms(), true); } catch (...) {} }
 }
 
 void (*o_load_level)(void*, const void*) = nullptr;
@@ -5311,6 +5321,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     {
         int rc = bearite_hook_method(A, ID, "", "LevelEntrance", "LoadLevel", 0, (void*)h_load_level, (void**)&o_load_level);
         if (rc != 0) logf_("перехват запуска уровня платформой: не вышло (%d)", rc);
+    }
+    {
+        int rc = bearite_hook_method(A, ID, "", "StudioUI", "OnEnable", 0, (void*)h_studio_enable, (void**)&o_studio_enable);
+        if (rc != 0) logf_("перехват включения гардероба: не вышло (%d)", rc);
     }
     {
         int rc = bearite_hook_method(A, ID, "", "PauseMenuManager", "EnablePauseMenu", 1, (void*)h_pause_menu, (void**)&o_pause_menu);
