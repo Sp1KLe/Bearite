@@ -4674,10 +4674,63 @@ void ws_refresh_labels() {
     for (void* go : b.cells) {
         std::string nm = name_of(go);
         std::string id = nm.substr(12);
-        if (id == "_empty") { ws_texts(go, "Пусто", ""); continue; }
+        if (id == "_empty") continue;
         if (id == "_refresh") { ws_texts(go, "Обновить список", g_wsSyncing ? "Обновляю…" : "из релиза"); continue; }
         for (auto& i : items) if (i.id == id) ws_texts(go, i.name, std::find(worn.begin(), worn.end(), id) != worn.end() ? "Надето" : "Бесплатно");
     }
+}
+
+/** Пустая вкладка: ни одной карточки, только надпись «Здесь пока пусто» по центру панели. */
+void ws_keep_text_walk(void* tr, const std::vector<void*>& keep, int depth) {
+    int n = tr_children(tr);
+    for (int i = 0; i < n && i < 24; ++i) {
+        void* c = tr_child(tr, i);
+        void* cg = c && F.get_gameobject ? inv(F.get_gameobject, c) : nullptr;
+        if (!cg) continue;
+        bool has = false;
+        for (void* k : keep) { void* kt = inv(F.go_transform, k); for (void* t = kt; t && !has; t = inv(F.get_parent, t)) { if (t == c) has = true; if (t == tr) break; } if (has) break; }
+        if (!has) ws_set_active(cg, false);
+        else if (depth < 4) ws_keep_text_walk(c, keep, depth + 1);
+    }
+}
+void ws_show_empty(void* tmpl, void* gridParent) {
+    // панель выбора: поднимаемся от сетки до «Item Selection Panel» (не больше 6 уровней)
+    void* panel = gridParent;
+    for (int i = 0; i < 6 && panel; ++i) {
+        void* g = F.get_gameobject ? inv(F.get_gameobject, panel) : nullptr;
+        if (g && name_of(g) == "Item Selection Panel") break;
+        panel = inv(F.get_parent, panel);
+    }
+    if (!panel) panel = gridParent;
+    void* a[2] = {tmpl, panel};
+    void* clone = inv(F.instantiate_parent, nullptr, a);
+    if (!clone) return;
+    if (F.set_name) { void* nb[1] = {bearite_il2.string_new("BeariteCell__empty")}; inv(F.set_name, clone, nb); }
+    ws_kill_comps(clone, "CosmeticDisplayer");
+    ws_kill_comps(clone, "TranslateUI");
+    ws_neutralize(clone);
+    ws_texts(clone, "Здесь пока пусто", "");
+    // оставляем только объекты с текстом, фон и картинки гасим
+    std::vector<void*> keep;
+    pm_init();
+    for (int kind = 0; kind < 2; ++kind) {
+        void* t = kind == 0 ? PM.tText : PM.tTmp;
+        if (!t || !F.get_comps_children) continue;
+        bool inc = true; void* ca[2] = {t, &inc};
+        void* arr = inv(F.get_comps_children, clone, ca);
+        for (uintptr_t i = 0, n = arr ? arr_len(arr) : 0; i < n && i < 8; ++i)
+            if (void* c = *(void**)arr_elem(arr, sizeof(void*), i)) if (void* cg = inv(F.get_gameobject, c)) keep.push_back(cg);
+    }
+    if (void* ctr = inv(F.go_transform, clone)) ws_keep_text_walk(ctr, keep, 0);
+    if (void* ti = type_of("UnityEngine.UI", "Image")) if (F.get_comps_children && F.destroy_imm) {
+        bool inc = false; void* ia[2] = {ti, &inc};
+        if (void* arr = inv(F.get_comps_children, clone, ia))
+            for (uintptr_t i = 0, n = arr_len(arr); i < n && i < 4; ++i) if (void* c = *(void**)arr_elem(arr, sizeof(void*), i)) { void* da[1] = {c}; inv(F.destroy_imm, nullptr, da); }
+    }
+    if (void* pg = F.get_gameobject ? inv(F.get_gameobject, panel) : nullptr) (void)pg;
+    void* ptr = panel, *ctr = inv(F.go_transform, clone);
+    if (void* pv = F.get_position ? inv(F.get_position, ptr) : nullptr) { V3 np = *(V3*)obj_unbox(pv); void* pa[1] = {&np}; inv(F.set_position, ctr, pa); }
+    ws_set_active(clone, true);
 }
 
 /** Пересобирает наши ячейки под выбранную вкладку; если подходящих нет — одна ячейка «Пусто». */
@@ -4690,7 +4743,12 @@ void ws_rebuild() {
     if (!parent) return;
     std::vector<std::string> ids;
     for (auto& it : ws_items()) if (ws_allowed(it.slot)) ids.push_back(it.id);
-    if (ids.empty()) ids.push_back("_empty");
+    if (ids.empty()) {
+        ws_hide_originals();
+        ws_show_empty(b.tmpl, parent);
+        logf_("гардероб: «%s» → пусто", g_wsSub.c_str());
+        return;
+    }
     int made = 0;
     for (auto& id : ids) {
         void* a[2] = {b.tmpl, parent};
