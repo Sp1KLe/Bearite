@@ -4090,8 +4090,8 @@ void pm_tick(long long now, bool force) {
     if (mine) { g_pmSetup = false; pm_set_text(mine->go, "Меню"); return; }
     if (!tgt) {
         // игра закрывает паузу без EnablePauseMenu(false): панель просто гаснет, и кнопок паузы в сцене больше нет
-        if (++g_pmMiss >= 3) {
-            g_pmOpen = false; g_pmMiss = 0;
+        if (++g_pmMiss >= 8) {
+            g_pmOpen = false; g_pmMiss = 0; g_pmSetup = false;
             std::string path = g_mapsDir + "/_menu", tmp = g_mapsDir + "/.menu.tmp";
             if (FILE* f = fopen(tmp.c_str(), "w")) { fputs("0", f); fclose(f); rename(tmp.c_str(), path.c_str()); }
             logf_("меню паузы игры: закрыто (панель исчезла)");
@@ -5059,12 +5059,17 @@ void on_tick() {
         t_busy = false;
     }
     // нажатия на наши кнопки ловим каждый кадр: быстрый тап короче 100 мс иначе пропадал, и кнопку приходилось жать дважды
-    t_busy = true;
-    try { ws_poll(); } catch (...) {}
+    // get_deltaTime/get_time зовут сотни раз за кадр, поэтому опрос не чаще раза в ~12 мс
+    static long long s_lastPoll = 0;
+    if (now - s_lastPoll >= 12) {
+        s_lastPoll = now;
+        t_busy = true;
+        try { ws_poll(); } catch (...) {}
 #if defined(__arm__)
-    try { pm_poll(); } catch (...) {}
+        try { pm_poll(); } catch (...) {}
 #endif
-    t_busy = false;
+        t_busy = false;
+    }
     if (now - g_lastTick < 100) return;
     g_lastTick = now;
     t_busy = true;
