@@ -4293,7 +4293,7 @@ void w_studio_flag(long long now) {
         if (mainGo && !ws_alive(mainGo)) { gch_free(hMain); hMain = 0; mainGo = nullptr; }
         static long long lastFind = 0; static std::string findScene;
         if (findScene != g_scene) { findScene = g_scene; lastFind = 0; }   // вход в хаб: ищем сразу
-        if (!mainGo && (kicked || now - lastFind > 2500)) {
+        if (!mainGo && (kicked || now - lastFind > 1000)) {
             lastFind = now;
             void* arr = find_objects(tSt);
             void* ui = arr && arr_len(arr) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
@@ -5378,10 +5378,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         int rc = bearite_hook_method(A, ID, "", "LevelEntrance", "LoadLevel", 0, (void*)h_load_level, (void**)&o_load_level);
         if (rc != 0) logf_("перехват запуска уровня платформой: не вышло (%d)", rc);
     }
-    {
-        int rc = bearite_hook_method(A, ID, "", "StudioUI", "OnEnable", 0, (void*)h_studio_enable, (void**)&o_studio_enable);
-        if (rc != 0) logf_("перехват включения гардероба: не вышло (%d)", rc);
-    }
+    // StudioUI.OnEnable не перехватываем: у него первая команда — ветвление, ARM-перехватчик такое не переносит, а Dobby роняет игру
     {
         int rc = bearite_hook_method(A, ID, "", "PauseMenuManager", "EnablePauseMenu", 1, (void*)h_pause_menu, (void**)&o_pause_menu);
         if (rc != 0) logf_("перехват меню паузы: не вышло (%d)", rc);
