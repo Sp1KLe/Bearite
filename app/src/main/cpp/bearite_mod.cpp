@@ -4530,7 +4530,7 @@ void ws_clean_walk(void* tr, int depth, std::string& names) {
         for (char& ch : low) ch = (char)tolower((unsigned char)ch);
         names += std::string(depth * 2, ' ') + nm + " | ";
         bool bad = false;
-        for (const char* k : {"lock", "equipped", "shine", "new", "padlock", "selected", "burst", "sunburst", "ray"})
+        for (const char* k : {"lock", "equipped", "shine", "new", "padlock", "selected", "burst", "sunburst", "ray", "preview", "placeholder"})
             if (low.find(k) != std::string::npos) bad = true;
         if (bad) { ws_set_active(cg, false); continue; }
         if (depth < 3) ws_clean_walk(c, depth + 1, names);
@@ -4618,7 +4618,7 @@ void ws_set_sprite(void* iconGo, const char* texId) {
     if (setAspect) { uint8_t on = 1; void* aa[1] = {&on}; inv(setAspect, img, aa); }
 }
 
-struct WsBtns { void *help = nullptr, *exitB = nullptr, *undo = nullptr, *mine = nullptr, *tmpl = nullptr, *random = nullptr, *refresh = nullptr; std::vector<void*> tabs, cells; };
+struct WsBtns { void *help = nullptr, *exitB = nullptr, *undo = nullptr, *mine = nullptr, *tmpl = nullptr, *random = nullptr, *refresh = nullptr; std::vector<void*> tabs, cells, origs; };
 
 void ws_collect(WsBtns& o) {
     pm_init();
@@ -4637,9 +4637,15 @@ void ws_collect(WsBtns& o) {
         else if (nm == "BeariteRefreshBtn") o.refresh = go;
         else if (nm == "Exit" && !o.exitB) o.exitB = go;
         else if (nm.rfind("BeariteCell_", 0) == 0) o.cells.push_back(go);
-        else if (nm.rfind("cosmetic_", 0) == 0) { if (!o.tmpl) o.tmpl = go; }
+        else if (nm.rfind("cosmetic_", 0) == 0) { o.origs.push_back(go); if (!o.tmpl) o.tmpl = go; }
         else if (nm.size() > 12 && nm.compare(nm.size() - 12, 12, " Subcategory") == 0) o.tabs.push_back(go);
         else if (nm.size() > 9 && nm.compare(nm.size() - 9, 9, " Category") == 0) o.tabs.push_back(go);
+    }
+    if (!o.tmpl) {   // родные ячейки спрятаны: образцом служит любая из спрятанных, пока жива
+        for (uintptr_t h : g_wsHidden) {
+            void* go = h ? target(h) : nullptr;
+            if (go && ws_alive(go)) { o.tmpl = go; break; }
+        }
     }
 }
 
@@ -4895,7 +4901,7 @@ void ws_poll_register(const std::string& name, void* go, int kind) {
 void ws_tick(long long now) {
     if (g_pmOpen) return;
     static bool ready = false;
-    if (now - g_wsLast < (g_wsMode ? 250 : (g_studioOn && !ready ? 40 : 400))) return;
+    if (now - g_wsLast < (g_wsMode ? 600 : (g_studioOn && !ready ? 40 : 1000))) return;
     g_wsLast = now;
     if (!g_studioOn) { ready = false; if (g_wsMode) ws_exit_mode(); return; }
     WsBtns b; ws_collect(b);
@@ -4907,7 +4913,10 @@ void ws_tick(long long now) {
     if (g_wsMode) {
         for (void* go : b.cells) ws_poll_register(name_of(go).substr(12), go, 1);
         for (void* go : b.tabs) ws_poll_register(name_of(go), go, 2);
-        ws_hide_originals();   // игра может заново показать свои ячейки после смены вкладки
+        for (void* go : b.origs) {   // игра может заново показать свои ячейки после смены вкладки
+            if (g_wsHidden.size() < 400) g_wsHidden.push_back(gch_new(go, 0));
+            ws_set_active(go, false);
+        }
     }
     if (g_wsSyncing) {
         std::string done = g_mapsDir + "/_wardsync_done";
