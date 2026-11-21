@@ -149,6 +149,14 @@ class MainActivity : AppCompatActivity() {
             if (LogcatCapture.hasCrash(lines)) {
                 BLog.e("прошлый запуск игры завершился аварийно")
                 BLog.i("--- logcat вокруг аварии (${lines.size} строк) ---\n" + lines.joinToString("\n"))
+                // смещения libil2cpp из бэктрейса: мод при следующем запуске назовёт методы игры, где упало
+                try {
+                    val offs = lines.mapNotNull { Regex("pc ([0-9a-f]{6,8})\\s+\\S*libil2cpp\\.so").find(it)?.groupValues?.get(1) }.distinct().take(40)
+                    if (offs.isNotEmpty()) {
+                        val dir = File(filesDir, "maps"); dir.mkdirs()
+                        File(dir, "_symoffs").writeText(offs.joinToString("\n"))
+                    }
+                } catch (_: Exception) {}
             } else {
                 BLog.i("прошлый запуск закончился без нормального выхода, но аварии в logcat нет: игру, скорее всего, закрыли из списка недавних или она зависла")
                 BLog.i("--- значимые строки logcat (${lines.size}) ---\n" + lines.joinToString("\n"))

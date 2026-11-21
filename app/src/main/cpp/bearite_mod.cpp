@@ -16,6 +16,7 @@
  * а Dobby не умеет вешать два хука на одну функцию.
  */
 #include <cmath>
+#include <dlfcn.h>
 #include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -181,6 +182,54 @@ void dump_class(const char* ns, const char* name) {
     if (cls_nested && cname) {
         void* ni = nullptr;
         while (void* nc = cls_nested(k, &ni)) dump_fields(nc, std::string("вложенный ") + name + "/" + cname(nc));
+    }
+}
+
+/** Названия методов по смещениям libil2cpp из прошлой аварии (лаунчер кладёт maps/_symoffs). */
+void resolve_symoffs() {
+    std::string path = g_mapsDir + "/_symoffs";
+    std::vector<unsigned char> raw;
+    if (access(path.c_str(), F_OK) != 0 || !read_file(path, raw)) return;
+    remove(path.c_str());
+    auto img_count = sym<size_t (*)(void*)>("il2cpp_image_get_class_count");
+    auto img_class = sym<void* (*)(void*, size_t)>("il2cpp_image_get_class");
+    auto asm_image = sym<void* (*)(void*)>("il2cpp_assembly_get_image");
+    auto dom_get = sym<void* (*)()>("il2cpp_domain_get");
+    auto dom_asms = sym<void** (*)(void*, size_t*)>("il2cpp_domain_get_assemblies");
+    auto cls_ns = sym<const char* (*)(void*)>("il2cpp_class_get_namespace");
+    void* anchor = (void*)sym<void* (*)()>("il2cpp_domain_get");
+    Dl_info di{};
+    if (!anchor || !dladdr(anchor, &di) || !di.dli_fbase || !img_count || !img_class || !asm_image || !dom_get || !dom_asms) { logf_("символы аварии: нет функций il2cpp"); return; }
+    uintptr_t base = (uintptr_t)di.dli_fbase;
+    struct Ent { uintptr_t addr; std::string name; };
+    std::vector<Ent> tab;
+    size_t na = 0; void** asms = dom_asms(dom_get(), &na);
+    for (size_t i = 0; i < na && asms; ++i) {
+        void* img = asm_image(asms[i]); if (!img) continue;
+        size_t n = img_count(img);
+        for (size_t c = 0; c < n; ++c) {
+            void* k = img_class(img, c); if (!k) continue;
+            const char* cn = class_name(k); if (!cn) continue;
+            void* it = nullptr;
+            while (void* m = class_methods(k, &it)) {
+                uintptr_t a = *(uintptr_t*)m;   // MethodInfo::methodPointer
+                if (a < base || a > base + 0x8000000) continue;
+                tab.push_back({a, std::string(cls_ns ? cls_ns(k) : "") + "." + cn + "::" + method_name(m)});
+            }
+        }
+    }
+    std::sort(tab.begin(), tab.end(), [](const Ent& x, const Ent& y) { return x.addr < y.addr; });
+    std::string t(raw.begin(), raw.end()); size_t pos = 0;
+    logf_("символы аварии: методов в таблице %zu", tab.size());
+    while (pos < t.size()) {
+        size_t e = t.find('\n', pos); if (e == std::string::npos) e = t.size();
+        std::string line = t.substr(pos, e - pos); pos = e + 1;
+        if (line.empty()) continue;
+        uintptr_t off = (uintptr_t)strtoul(line.c_str(), nullptr, 16), a = base + off;
+        auto ub = std::upper_bound(tab.begin(), tab.end(), a, [](uintptr_t v, const Ent& x) { return v < x.addr; });
+        if (ub == tab.begin()) { logf_("  il2cpp+0x%s: метод не найден", line.c_str()); continue; }
+        --ub;
+        logf_("  il2cpp+0x%s = %s (+0x%lx)", line.c_str(), ub->name.c_str(), (unsigned long)(a - ub->addr));
     }
 }
 
@@ -5092,6 +5141,7 @@ void bind_unity() {
     if (void* trk = bearite_find_class("UnityEngine", "Transform")) F.set_parent = find_method_types(trk, "SetParent", {"Transform"});
     F.instantiate_parent = find_method_types(ob, "Instantiate", {"Object", "Transform"});
     F.destroy_imm = m0(ob, "DestroyImmediate", 1);
+    try { resolve_symoffs(); } catch (...) {}
     if (access((g_mapsDir + "/_dumpclasses").c_str(), F_OK) == 0) scan_classes();   // разведка классов — только по флаг-файлу (иначе лог тонет в тысячах строк)
     F.get_component = find_method_p0(go, "GetComponent", 1, "Type");
     F.get_material = m0(rd, "get_material", 0);
