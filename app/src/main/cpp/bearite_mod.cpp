@@ -185,6 +185,8 @@ void dump_class(const char* ns, const char* name) {
     }
 }
 
+extern std::string g_mapsDir;
+bool read_file(const std::string& path, std::vector<unsigned char>& out);
 /** Названия методов по смещениям libil2cpp из прошлой аварии (лаунчер кладёт maps/_symoffs). */
 void resolve_symoffs() {
     std::string path = g_mapsDir + "/_symoffs";
