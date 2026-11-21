@@ -4955,10 +4955,7 @@ void update() {
     try { replay_tick(now); } catch (...) {}
     try { pm_tick(now, false); } catch (...) {}
     try { w_tick(now); } catch (...) {}
-    try { ws_tick(now); ws_poll(); } catch (...) {}
-#if defined(__arm__)
-    try { pm_poll(); } catch (...) {}
-#endif
+    try { ws_tick(now); } catch (...) {}
     bool slow = now - g_lastSlow >= 500;
     if (slow) {
         g_lastSlow = now;
@@ -5050,6 +5047,13 @@ void on_tick() {
         try { ed_cam_tick(); } catch (...) {}
         t_busy = false;
     }
+    // нажатия на наши кнопки ловим каждый кадр: быстрый тап короче 100 мс иначе пропадал, и кнопку приходилось жать дважды
+    t_busy = true;
+    try { ws_poll(); } catch (...) {}
+#if defined(__arm__)
+    try { pm_poll(); } catch (...) {}
+#endif
+    t_busy = false;
     if (now - g_lastTick < 100) return;
     g_lastTick = now;
     t_busy = true;
