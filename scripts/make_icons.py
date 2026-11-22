@@ -3,55 +3,59 @@
 
     python3 scripts/make_icons.py
 
+В исходнике - готовая плитка со скруглёнными углами (медведь на бежевом фоне) на белом поле.
+Иконка должна выглядеть ровно как эта картинка: без приближения и без уменьшения.
+
 Создаёт:
-  * адаптивную иконку Android 8+ (передний план + однотонный фон);
+  * адаптивную иконку Android 8+ (передний план; плитка точно во всём видимом окне);
   * обычные квадратные и круглые иконки для Android 7 и ниже.
+
+Файл drawable-nodpi/bear_hero.png (большой медведь на экране лаунчера) скрипт не трогает.
 """
 import os
-import sys
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "design", "icon-source.png")
 RES = os.path.join(ROOT, "app", "src", "main", "res")
 
 src = Image.open(SRC).convert("RGB")
-# В исходнике плитка со скруглёнными углами на белом поле: вырезаем её середину без белых углов.
-# Если у картинки нет белых полей, обрезка не нужна (поставь TILE = None).
-TILE = (65, 65, 1190, 1190)  # границы плитки в пикселях
-INSET = 95                    # отступ внутрь, чтобы углы не попали в кадр
-if TILE and src.width == 1254:
-    src = src.crop((TILE[0] + INSET, TILE[1] + INSET, TILE[2] - INSET, TILE[3] - INSET))
 W = src.width
 
-# цвет фона картинки: по краю, где нет рисунка
-bg = tuple(int(v) for v in src.resize((1, 1), Image.BOX).getpixel((0, 0)))
-px = src.load()
-bg = (244, 227, 209) if TILE else px[int(W * 0.04), W // 2]  # сливочный фон плитки
-BG_HEX = "#%02X%02X%02X" % bg
+# --- прозрачные углы: всё белое вокруг плитки убираем ---
+# Плитка бежевая (самый светлый пиксель ~ 241), поле белое (~ 253), поэтому порог 248 их делит.
+r, g, b = src.split()
+min_ch = ImageChops.darker(ImageChops.darker(r, g), b)  # самый тёмный из каналов
+white = Image.eval(min_ch, lambda v: 255 if v >= 248 else 0)
+mask = Image.eval(white, lambda v: 255 - v)
+# убираем светлую кайму по краю (сглаживание картинки смешало белое с бежевым)
+mask = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.GaussianBlur(0.8))
+
+tile = src.convert("RGBA")
+tile.putalpha(mask)
 
 
-def feathered_paste(canvas, img, feather):
-    """Вставляет img по центру canvas, края плавно растворяются в фон."""
-    mask = Image.new("L", img.size, 0)
-    ImageDraw.Draw(mask).rectangle(
-        (feather, feather, img.width - feather - 1, img.height - feather - 1), fill=255
-    )
-    mask = mask.filter(ImageFilter.GaussianBlur(feather / 2))
-    x = (canvas.width - img.width) // 2
-    y = (canvas.height - img.height) // 2
-    canvas.paste(img, (x, y), mask)
+def resized(img, size):
+    """Сжимает RGBA с прозрачными краями без светлой каймы (через предумноженный альфа-канал)."""
+    return img.convert("RGBa").resize((size, size), Image.LANCZOS).convert("RGBA")
 
 
-# --- адаптивная иконка: 108 dp, видимая часть ~72 dp, безопасная зона 66 dp ---
-FG = 432  # 108 dp при xxxhdpi
-inner = int(FG * 0.76)  # буква целиком в безопасной зоне, край рисунка за пределами видимой маски
-# вместо плоской заливки подложка - сильно размытая та же картинка: цвета по краям продолжаются
-fg = src.resize((FG, FG), Image.LANCZOS).filter(ImageFilter.GaussianBlur(FG * 0.06))
-feathered_paste(fg, src.resize((inner, inner), Image.LANCZOS), feather=int(inner * 0.035))
+# цвет фона плитки (сливочный), берём с чистого места у верхнего края
+BG = src.getpixel((W // 2, int(W * 0.10)))
+BG_HEX = "#%02X%02X%02X" % BG
+
+# --- адаптивная иконка: холст 108 dp, видимое окно 72 dp (две трети) ---
+FG = 432                 # 108 dp при xxxhdpi
+VIS = FG * 72 // 108     # 288 px - всё, что launcher точно покажет
+# подложка вокруг плитки: сильно размытая та же картинка (без белых углов), цвета продолжаются
+cut = int(W * 0.065)
+under = src.crop((cut, cut, W - cut, W - cut)).resize((FG, FG), Image.LANCZOS)
+under = under.filter(ImageFilter.GaussianBlur(FG * 0.05)).convert("RGBA")
+off = (FG - VIS) // 2
+under.alpha_composite(resized(tile, VIS), (off, off))
 os.makedirs(os.path.join(RES, "drawable-nodpi"), exist_ok=True)
-fg.save(os.path.join(RES, "drawable-nodpi", "ic_launcher_foreground.png"), optimize=True)
+under.save(os.path.join(RES, "drawable-nodpi", "ic_launcher_foreground.png"), optimize=True)
 
 os.makedirs(os.path.join(RES, "values"), exist_ok=True)
 with open(os.path.join(RES, "values", "ic_launcher_background.xml"), "w", encoding="utf-8") as f:
@@ -72,36 +76,20 @@ for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
     with open(os.path.join(RES, "mipmap-anydpi-v26", name), "w", encoding="utf-8") as f:
         f.write(adaptive)
 
-# --- обычные иконки (Android 7 и ниже) ---
-crop = int(W * 0.96)
-off = (W - crop) // 2
-legacy_src = src.crop((off, off, off + crop, off + crop))
+# --- обычные иконки (Android 7 и ниже): вся плитка целиком, как на картинке ---
 SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 for dens, size in SIZES.items():
     d = os.path.join(RES, "mipmap-" + dens)
     os.makedirs(d, exist_ok=True)
-    big = legacy_src.resize((size * 4, size * 4), Image.LANCZOS)  # рисуем крупно и сжимаем для гладких краёв
-    for kind in ("square", "round"):
-        m = Image.new("L", big.size, 0)
-        dr = ImageDraw.Draw(m)
-        if kind == "square":
-            dr.rounded_rectangle((0, 0, big.width - 1, big.height - 1), radius=int(big.width * 0.18), fill=255)
-        else:
-            dr.ellipse((0, 0, big.width - 1, big.height - 1), fill=255)
-        icon = big.convert("RGBA")
-        icon.putalpha(m)
-        icon = icon.resize((size, size), Image.LANCZOS)
-        icon.save(os.path.join(d, "ic_launcher.png" if kind == "square" else "ic_launcher_round.png"), optimize=True)
+    big = resized(tile, size * 4)  # рисуем крупно и сжимаем для гладких краёв
+    # квадратная: плитка как есть (скруглённые углы уже прозрачные)
+    resized(big, size).save(os.path.join(d, "ic_launcher.png"), optimize=True)
+    # круглая: тот же масштаб, обрезан кругом (медведь целиком помещается)
+    circle = Image.new("L", big.size, 0)
+    ImageDraw.Draw(circle).ellipse((0, 0, big.width - 1, big.height - 1), fill=255)
+    round_big = big.copy()
+    a = Image.composite(big.getchannel("A"), Image.new("L", big.size, 0), circle)
+    round_big.putalpha(a)
+    resized(round_big, size).save(os.path.join(d, "ic_launcher_round.png"), optimize=True)
 
 print("фон", BG_HEX, "- иконки готовы")
-
-# --- большая иконка для главного экрана лаунчера (плитка со скруглёнными углами, прозрачные углы) ---
-if TILE:
-    _tile = Image.open(SRC).convert("RGB").crop(TILE)
-    _s = 512
-    _big = _tile.resize((_s * 2, _s * 2), Image.LANCZOS)
-    _m = Image.new("L", _big.size, 0)
-    ImageDraw.Draw(_m).rounded_rectangle((0, 0, _big.width - 1, _big.height - 1), radius=int(_big.width * 0.235), fill=255)
-    _big = _big.convert("RGBA")
-    _big.putalpha(_m)
-    _big.resize((_s, _s), Image.LANCZOS).save(os.path.join(RES, "drawable-nodpi", "bear_hero.png"), optimize=True)
