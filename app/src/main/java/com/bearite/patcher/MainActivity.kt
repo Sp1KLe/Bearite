@@ -155,6 +155,32 @@ class MainActivity : AppCompatActivity() {
             repeatCount = ValueAnimator.INFINITE
             start()
         }
+
+        // вспышки: каждая мерцает со своим темпом и стартует не одновременно с остальными
+        fun twinkle(id: Int, ms: Long, delay: Long) {
+            val v = findViewById<View>(id) ?: return
+            v.alpha = 0f
+            v.scaleX = 0.4f
+            v.scaleY = 0.4f
+            val a = ObjectAnimator.ofFloat(v, View.ALPHA, 0f, 1f)
+            val x = ObjectAnimator.ofFloat(v, View.SCALE_X, 0.4f, 1.15f)
+            val y = ObjectAnimator.ofFloat(v, View.SCALE_Y, 0.4f, 1.15f)
+            val r = ObjectAnimator.ofFloat(v, View.ROTATION, -20f, 20f)
+            for (an in listOf(a, x, y, r)) an.apply {
+                duration = ms
+                startDelay = delay
+                repeatMode = ValueAnimator.REVERSE
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                start()
+            }
+        }
+        twinkle(R.id.hero_spark1, 1700, 0)
+        twinkle(R.id.hero_spark2, 2100, 500)
+        twinkle(R.id.hero_spark3, 1900, 1100)
+        twinkle(R.id.hero_spark4, 2400, 300)
+        twinkle(R.id.bg_spark1, 2600, 700)
+        twinkle(R.id.bg_spark2, 3000, 1500)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

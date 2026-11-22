@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bear_bg"
+    android:background="@drawable/bg_main"
     android:fitsSystemWindows="true">
 
     <com.bearite.patcher.DesignFrame
@@ -13,6 +13,52 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent">
+
+    <!-- мягкие засветы на фоне -->
+    <View
+        android:layout_width="520dp"
+        android:layout_height="520dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="-220dp"
+        android:layout_marginTop="-260dp"
+        android:alpha="0.75"
+        android:background="@drawable/bg_flare" />
+
+    <View
+        android:layout_width="460dp"
+        android:layout_height="460dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="-230dp"
+        android:layout_marginEnd="-120dp"
+        android:alpha="0.6"
+        android:background="@drawable/bg_flare" />
+
+    <View
+        android:layout_width="420dp"
+        android:layout_height="420dp"
+        android:layout_gravity="center"
+        android:alpha="0.55"
+        android:background="@drawable/bg_flare" />
+
+    <ImageView
+        android:id="@+id/bg_spark1"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="86dp"
+        android:layout_marginEnd="210dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_sparkle" />
+
+    <ImageView
+        android:id="@+id/bg_spark2"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="120dp"
+        android:layout_marginBottom="80dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_sparkle" />
 
     <!-- мягкие круги в правом нижнем углу, как в макете -->
     <View

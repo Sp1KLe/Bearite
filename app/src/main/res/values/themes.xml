@@ -13,7 +13,7 @@
         <item name="colorTertiary">@color/bear_rust</item>
         <item name="colorOnTertiary">@color/bear_cream</item>
         <item name="colorError">@color/bear_rust</item>
-        <item name="android:colorBackground">@color/bear_bg</item>
+        <item name="android:colorBackground">@color/bear_bg_mid</item>
         <item name="colorSurface">@color/bear_bg</item>
         <item name="colorOnSurface">@color/bear_cream</item>
         <item name="colorSurfaceVariant">@color/bear_surface2</item>
@@ -23,8 +23,8 @@
         <item name="colorSurfaceContainerHighest">@color/bear_surface3</item>
         <item name="colorOutline">@color/bear_dim</item>
         <item name="colorOutlineVariant">#33D6B18D</item>
-        <item name="android:statusBarColor">@color/bear_bg</item>
-        <item name="android:navigationBarColor">@color/bear_bg</item>
+        <item name="android:statusBarColor">@color/bear_bg_top</item>
+        <item name="android:navigationBarColor">@color/bear_bg_bottom</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="materialCardViewStyle">@style/Widget.Bearite.Card</item>
     </style>

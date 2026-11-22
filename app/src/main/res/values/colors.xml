@@ -2,6 +2,9 @@
 <resources>
     <!-- Палитра из концепта: кофейный фон, сливочный текст, карамель и терракота -->
     <color name="bear_bg">#17120F</color>
+    <color name="bear_bg_top">#4D372A</color>
+    <color name="bear_bg_mid">#3C2B21</color>
+    <color name="bear_bg_bottom">#2D2018</color>
     <color name="bear_surface">#241A15</color>
     <color name="bear_surface2">#30221A</color>
     <color name="bear_surface3">#493124</color>

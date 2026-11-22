@@ -129,6 +129,50 @@
                     android:contentDescription="@null"
                     android:elevation="10dp"
                     android:src="@drawable/bear_hero" />
+
+                <ImageView
+                    android:id="@+id/hero_spark1"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="top|start"
+                    android:layout_marginStart="26dp"
+                    android:layout_marginTop="34dp"
+                    android:contentDescription="@null"
+                    android:elevation="12dp"
+                    android:src="@drawable/ic_sparkle" />
+
+                <ImageView
+                    android:id="@+id/hero_spark2"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginStart="24dp"
+                    android:layout_marginTop="58dp"
+                    android:contentDescription="@null"
+                    android:elevation="12dp"
+                    android:src="@drawable/ic_sparkle" />
+
+                <ImageView
+                    android:id="@+id/hero_spark3"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginStart="14dp"
+                    android:layout_marginTop="46dp"
+                    android:contentDescription="@null"
+                    android:elevation="12dp"
+                    android:src="@drawable/ic_sparkle" />
+
+                <ImageView
+                    android:id="@+id/hero_spark4"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_gravity="bottom|start"
+                    android:layout_marginStart="34dp"
+                    android:layout_marginTop="64dp"
+                    android:contentDescription="@null"
+                    android:elevation="12dp"
+                    android:src="@drawable/ic_sparkle" />
             </FrameLayout>
 
             <!-- справа: карточки действий -->
