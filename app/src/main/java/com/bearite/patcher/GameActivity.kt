@@ -61,6 +61,7 @@ class GameActivity : Activity() {
     private var modButton: View? = null
     private var wardrobeBtn: View? = null
     private var wardSyncing = false
+    private var wardAutoSynced = false
     private var touchBtn: View? = null
     /** Класс Native из загрузчика игры: оттуда читаем состояние паузы. */
     private var nativeCls: Class<*>? = null
@@ -350,6 +351,8 @@ class GameActivity : Activity() {
                 wardrobeBtn?.visibility = View.GONE
                 // «Обновить список» из гардероба игры: скачиваем новые аксессуары из релиза и сообщаем моду
                 val req = File(File(filesDir, "maps"), "_wardsync")
+                // при первом запуске сами подтягиваем аксессуары из релиза «accessories», чтобы вещи были в гардеробе без нажатия «Обновить»
+                if (!wardAutoSynced && !wardSyncing) { wardAutoSynced = true; if (!req.isFile) { req.parentFile?.mkdirs(); req.writeText("1") } }
                 if (req.isFile && !wardSyncing) {
                     req.delete(); wardSyncing = true
                     val st = MapStore(this@GameActivity)
