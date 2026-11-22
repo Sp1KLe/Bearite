@@ -19,7 +19,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import java.io.File
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
@@ -31,7 +30,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pageGame: View
     private lateinit var pageMods: View
     private lateinit var pageLog: View
-    private lateinit var nav: BottomNavigationView
+    private lateinit var pageSettings: View
+    private lateinit var pageHelp: View
+    private val navIds = intArrayOf(R.id.nav_game, R.id.nav_mods, R.id.nav_log, R.id.nav_settings, R.id.nav_help)
+    private var curPage = R.id.nav_game
 
     private val pickZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) installMod(uri)
@@ -51,12 +53,11 @@ class MainActivity : AppCompatActivity() {
         pageGame = findViewById(R.id.page_game)
         pageMods = findViewById(R.id.page_mods)
         pageLog = findViewById(R.id.page_log)
-        nav = findViewById(R.id.nav)
+        pageSettings = findViewById(R.id.page_settings)
+        pageHelp = findViewById(R.id.page_help)
 
-        nav.setOnItemSelectedListener { item ->
-            showPage(item.itemId)
-            true
-        }
+        for (id in navIds) findViewById<View>(id).setOnClickListener { showPage(id) }
+        findViewById<View>(R.id.nav_exit).setOnClickListener { finishAffinity() }
         findViewById<MaterialButton>(R.id.btn_play).setOnClickListener { play() }
         findViewById<MaterialButton>(R.id.btn_load_save).setOnClickListener { pickSave.launch(arrayOf("*/*")) }
         // ник для мультиплеера: тот же, что в чате (prefs «chat», ключ «nick»)
@@ -83,25 +84,54 @@ class MainActivity : AppCompatActivity() {
             BLog.clear()
             refreshLog()
         }
+        findViewById<MaterialButton>(R.id.btn_set_log_clear).setOnClickListener {
+            BLog.clear()
+            refreshLog()
+            Toast.makeText(this, "Лог очищен", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialButton>(R.id.btn_set_log_copy).setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Bearite log", BLog.tail(1500)))
+            Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<MaterialButton>(R.id.btn_help_log).setOnClickListener { showPage(R.id.nav_log) }
+        findViewById<MaterialButton>(R.id.btn_help_site).setOnClickListener {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Sp1KLe/Bearite"))) }
+            catch (_: Throwable) { Toast.makeText(this, "Не удалось открыть ссылку", Toast.LENGTH_SHORT).show() }
+        }
+        findViewById<TextView>(R.id.help_steps).text =
+            "1. Установи Super Bear Adventure из магазина, оригинал мы не трогаем.\n" +
+            "2. На вкладке «Моды» поставь нужные моды zip-файлом и включи их.\n" +
+            "3. Нажми «Играть с модами». Включение и выключение модов действует после перезапуска игры.\n" +
+            "4. Старое сохранение можно перенести кнопкой «Загрузить сохранение»."
+        findViewById<TextView>(R.id.help_trouble).text =
+            "Если игра вылетела или что-то работает не так, открой вкладку «Лог» и скопируй его. " +
+            "Лог пригодится, чтобы найти причину. Мод пишет туда всё, что делает в игре."
 
         setupHero()
 
-        if (savedInstanceState == null) {
-            nav.selectedItemId = R.id.nav_game  // сработает и слушатель -> showPage
-        } else {
-            showPage(nav.selectedItemId)
-        }
+        showPage(savedInstanceState?.getInt("page", R.id.nav_game) ?: R.id.nav_game)
     }
 
-    /** Заголовок в два цвета, вращающиеся орбиты и парящие карточки, как в концепте. */
+    /** Заголовок в два цвета, вращающиеся орбиты и версия, как в макете. */
     private fun setupHero() {
         val title = SpannableStringBuilder("Твоё новое\nприключение.")
         title.setSpan(
             ForegroundColorSpan(getColor(R.color.bear_tan)), 11, title.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         findViewById<TextView>(R.id.hero_title).text = title
+        val subText = "Запускай Super Bear Adventure с модами и своими картами. Оригинальная игра остаётся нетронутой."
+        val sub = SpannableStringBuilder(subText)
+        val at = subText.indexOf("Оригинальная игра")
+        sub.setSpan(android.text.style.UnderlineSpan(), at, at + "Оригинальная игра".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sub.setSpan(ForegroundColorSpan(getColor(R.color.bear_cream)), at, at + "Оригинальная игра".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sub.setSpan(object : android.text.style.ClickableSpan() {
+            override fun onClick(w: View) { showPage(R.id.nav_help) }
+            override fun updateDrawState(ds: android.text.TextPaint) {}
+        }, at, at + "Оригинальная игра".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        findViewById<TextView>(R.id.hero_sub).apply { text = sub; movementMethod = android.text.method.LinkMovementMethod.getInstance(); highlightColor = 0 }
         val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Throwable) { "" }
-        findViewById<TextView>(R.id.header_chip).text = "v$ver"
+        findViewById<TextView>(R.id.header_chip).text = ver
 
         fun spin(id: Int, ms: Long, reverse: Boolean) {
             ObjectAnimator.ofFloat(findViewById<View>(id), View.ROTATION, if (reverse) 360f else 0f, if (reverse) 0f else 360f).apply {
@@ -111,26 +141,25 @@ class MainActivity : AppCompatActivity() {
                 start()
             }
         }
-        fun float(id: Int, ms: Long, delay: Long) {
-            ObjectAnimator.ofFloat(findViewById<View>(id), View.TRANSLATION_Y, 0f, -22f).apply {
-                duration = ms
-                startDelay = delay
-                repeatMode = ValueAnimator.REVERSE
-                repeatCount = ValueAnimator.INFINITE
-                start()
-            }
-        }
         spin(R.id.hero_orbit1, 30000, false)
         spin(R.id.hero_orbit2, 30000, true)
-        float(R.id.hero_icon, 2500, 0)
-        float(R.id.float1, 3000, 0)
-        float(R.id.float2, 3000, 1200)
+        ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_icon), View.TRANSLATION_Y, 0f, -10f).apply {
+            duration = 2500
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
         ObjectAnimator.ofFloat(findViewById<View>(R.id.hero_glow), View.ALPHA, 0.6f, 1f).apply {
             duration = 2800
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
             start()
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("page", curPage)
     }
 
     override fun onResume() {
@@ -166,9 +195,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPage(id: Int) {
+        curPage = id
         pageGame.visibility = if (id == R.id.nav_game) View.VISIBLE else View.GONE
         pageMods.visibility = if (id == R.id.nav_mods) View.VISIBLE else View.GONE
         pageLog.visibility = if (id == R.id.nav_log) View.VISIBLE else View.GONE
+        pageSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
+        pageHelp.visibility = if (id == R.id.nav_help) View.VISIBLE else View.GONE
+        for (n in navIds) findViewById<View>(n).isSelected = n == id
+        if (id == R.id.nav_log) refreshLog()
+        if (id == R.id.nav_settings) refreshSettings()
+    }
+
+    private fun refreshSettings() {
+        findViewById<TextView>(R.id.settings_info).text =
+            "Папка модов:\n${mods.modsDir.absolutePath}\n\nДанные лаунчера:\n${filesDir.absolutePath}"
     }
 
     private fun refreshAll() {
