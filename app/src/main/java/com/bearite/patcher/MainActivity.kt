@@ -131,9 +131,7 @@ class MainActivity : AppCompatActivity() {
         }, at, at + "Оригинальная игра".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         findViewById<TextView>(R.id.hero_sub).apply { text = sub; movementMethod = android.text.method.LinkMovementMethod.getInstance(); highlightColor = 0 }
         val info = try { packageManager.getPackageInfo(packageName, 0) } catch (_: Throwable) { null }
-        // номер сборки CI (versionCode = 1000 + запуск): по нему видно, что установлена свежая сборка
-        val build = ((info?.longVersionCode ?: 0L) - 1000).takeIf { it > 0 }
-        findViewById<TextView>(R.id.header_chip).text = (info?.versionName ?: "") + (if (build != null) " · сборка $build" else "")
+        findViewById<TextView>(R.id.header_chip).text = info?.versionName ?: ""
 
         fun spin(id: Int, ms: Long, reverse: Boolean) {
             ObjectAnimator.ofFloat(findViewById<View>(id), View.ROTATION, if (reverse) 360f else 0f, if (reverse) 0f else 360f).apply {
