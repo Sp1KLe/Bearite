@@ -38,28 +38,66 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Ник в мультиплеере"
-                    android:textColor="@color/bear_cream"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="Мод ставит его перед подключением к комнатам. Тот же ник используется в чате."
-                    android:textColor="@color/bear_muted"
-                    android:textSize="12sp" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:hint="Ник">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_icon_tonal"
+                        android:contentDescription="@null"
+                        android:padding="8dp"
+                        android:src="@drawable/ic_person"
+                        app:tint="@color/md_on_primary_container" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Ник в мультиплеере"
+                            android:textColor="@color/bear_cream"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Мод ставит его перед подключением к комнатам. Тот же ник используется в чате."
+                            android:textColor="@color/bear_muted"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.FilledBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:hint="Ник"
+                    app:boxBackgroundColor="@color/bear_surface3"
+                    app:boxCornerRadiusBottomEnd="0dp"
+                    app:boxCornerRadiusBottomStart="0dp"
+                    app:boxCornerRadiusTopEnd="16dp"
+                    app:boxCornerRadiusTopStart="16dp"
+                    app:boxStrokeColor="@color/bear_tan"
+                    app:counterEnabled="true"
+                    app:counterMaxLength="24"
+                    app:counterTextColor="@color/bear_muted"
+                    app:endIconMode="clear_text"
+                    app:endIconTint="@color/bear_muted"
+                    app:hintTextColor="@color/bear_tan"
+                    app:startIconDrawable="@drawable/ic_person"
+                    app:startIconTint="@color/bear_muted">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/edit_nick"
@@ -68,7 +106,8 @@
                         android:imeOptions="actionDone"
                         android:inputType="text"
                         android:maxLength="24"
-                        android:singleLine="true" />
+                        android:singleLine="true"
+                        android:textColor="@color/bear_cream" />
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
 
