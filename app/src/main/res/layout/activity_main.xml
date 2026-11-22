@@ -3,7 +3,16 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bear_bg">
+    android:background="@color/bear_bg"
+    android:fitsSystemWindows="true">
+
+    <com.bearite.patcher.DesignFrame
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
     <!-- мягкие круги в правом нижнем углу, как в макете -->
     <View
@@ -26,21 +35,20 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fitsSystemWindows="true"
         android:orientation="vertical">
 
         <!-- шапка: иконка, название, метка и версия -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="60dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="14dp"
+            android:paddingStart="16dp"
             android:paddingEnd="18dp">
 
             <ImageView
-                android:layout_width="38dp"
-                android:layout_height="38dp"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
                 android:contentDescription="@null"
                 android:src="@drawable/bear_hero" />
 
@@ -50,7 +58,7 @@
                 android:layout_marginStart="14dp"
                 android:text="@string/app_name"
                 android:textColor="@color/bear_cream"
-                android:textSize="21sp"
+                android:textSize="24sp"
                 android:textStyle="bold" />
 
             <View
@@ -112,9 +120,9 @@
 
             <!-- вертикальная панель вкладок -->
             <ScrollView
-                android:layout_width="72dp"
+                android:layout_width="80dp"
                 android:layout_height="match_parent"
-                android:layout_marginStart="10dp"
+                android:layout_marginStart="12dp"
                 android:layout_marginBottom="10dp"
                 android:background="@drawable/bg_rail"
                 android:overScrollMode="never"
@@ -129,7 +137,7 @@
             <LinearLayout
                 android:id="@+id/nav_game"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -138,8 +146,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_play"
                     app:tint="@color/rail_item" />
@@ -150,13 +158,13 @@
                     android:maxLines="1"
                     android:text="Игра"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
             <LinearLayout
                 android:id="@+id/nav_mods"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -165,8 +173,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_extension"
                     app:tint="@color/rail_item" />
@@ -177,13 +185,13 @@
                     android:maxLines="1"
                     android:text="Моды"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
             <LinearLayout
                 android:id="@+id/nav_log"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -192,8 +200,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_log"
                     app:tint="@color/rail_item" />
@@ -204,14 +212,14 @@
                     android:maxLines="1"
                     android:text="Лог"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
             <View android:layout_width="28dp" android:layout_height="1dp" android:layout_gravity="center_horizontal" android:layout_marginTop="3dp" android:layout_marginBottom="3dp" android:background="@color/bear_line" />
             <LinearLayout
                 android:id="@+id/nav_settings"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -220,8 +228,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_settings"
                     app:tint="@color/rail_item" />
@@ -232,13 +240,13 @@
                     android:maxLines="1"
                     android:text="Настройки"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
             <LinearLayout
                 android:id="@+id/nav_help"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -247,8 +255,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_help"
                     app:tint="@color/rail_item" />
@@ -259,14 +267,14 @@
                     android:maxLines="1"
                     android:text="Помощь"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
             <View android:layout_width="28dp" android:layout_height="1dp" android:layout_gravity="center_horizontal" android:layout_marginTop="3dp" android:layout_marginBottom="3dp" android:background="@color/bear_line" />
             <LinearLayout
                 android:id="@+id/nav_exit"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="56dp"
                 android:layout_marginTop="1dp"
                 android:background="@drawable/bg_rail_item"
                 android:clickable="true"
@@ -275,8 +283,8 @@
                 android:orientation="vertical">
 
                 <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_exit"
                     app:tint="@color/rail_item" />
@@ -287,7 +295,7 @@
                     android:maxLines="1"
                     android:text="Выход"
                     android:textColor="@color/rail_item"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textStyle="bold" />
             </LinearLayout>
                 </LinearLayout>
@@ -320,4 +328,6 @@
             </FrameLayout>
         </LinearLayout>
     </LinearLayout>
+    </FrameLayout>
+    </com.bearite.patcher.DesignFrame>
 </FrameLayout>

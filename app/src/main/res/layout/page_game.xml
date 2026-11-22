@@ -39,7 +39,7 @@
                     android:letterSpacing="-0.03"
                     android:lineSpacingMultiplier="0.92"
                     android:textColor="@color/bear_cream"
-                    android:textSize="34sp"
+                    android:textSize="40sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -49,12 +49,12 @@
                     android:layout_marginTop="10dp"
                     android:lineSpacingMultiplier="1.25"
                     android:textColor="@color/bear_muted"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
 
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="22dp"
                     android:background="@drawable/bg_card"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
@@ -96,35 +96,35 @@
             <FrameLayout
                 android:id="@+id/hero_visual"
                 android:layout_width="0dp"
-                android:layout_height="210dp"
+                android:layout_height="270dp"
                 android:layout_weight="0.9"
                 android:clipChildren="false">
 
                 <View
                     android:id="@+id/hero_glow"
-                    android:layout_width="190dp"
-                    android:layout_height="190dp"
+                    android:layout_width="270dp"
+                    android:layout_height="270dp"
                     android:layout_gravity="center"
                     android:background="@drawable/bg_glow" />
 
                 <View
                     android:id="@+id/hero_orbit1"
-                    android:layout_width="190dp"
-                    android:layout_height="190dp"
+                    android:layout_width="250dp"
+                    android:layout_height="250dp"
                     android:layout_gravity="center"
                     android:background="@drawable/bg_orbit" />
 
                 <View
                     android:id="@+id/hero_orbit2"
-                    android:layout_width="150dp"
-                    android:layout_height="150dp"
+                    android:layout_width="195dp"
+                    android:layout_height="195dp"
                     android:layout_gravity="center"
                     android:background="@drawable/bg_orbit_inner" />
 
                 <ImageView
                     android:id="@+id/hero_icon"
-                    android:layout_width="110dp"
-                    android:layout_height="110dp"
+                    android:layout_width="140dp"
+                    android:layout_height="140dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:elevation="10dp"
@@ -162,7 +162,7 @@
                         android:layout_marginTop="2dp"
                         android:text="Super Bear Adventure"
                         android:textColor="@color/bear_cream"
-                        android:textSize="16sp"
+                        android:textSize="18sp"
                         android:textStyle="bold" />
                 </LinearLayout>
 
@@ -170,10 +170,10 @@
                     android:id="@+id/btn_play"
                     style="@style/Widget.Bearite.Button.Light"
                     android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginTop="8dp"
+                    android:layout_height="58dp"
+                    android:layout_marginTop="10dp"
                     android:text="@string/play"
-                    android:textSize="15sp"
+                    android:textSize="16sp"
                     app:icon="@drawable/ic_play"
                     app:iconGravity="textStart" />
 
@@ -181,29 +181,29 @@
                     android:id="@+id/btn_load_save"
                     style="@style/Widget.Bearite.Button.Dark"
                     android:layout_width="match_parent"
-                    android:layout_height="46dp"
-                    android:layout_marginTop="8dp"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="10dp"
                     android:text="Загрузить сохранение"
-                    android:textSize="14sp"
+                    android:textSize="15sp"
                     app:icon="@drawable/ic_download"
                     app:iconGravity="textStart" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:background="@drawable/bg_card"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:paddingStart="12dp"
-                    android:paddingTop="8dp"
-                    android:paddingEnd="12dp"
-                    android:paddingBottom="8dp">
+                    android:paddingStart="14dp"
+                    android:paddingTop="10dp"
+                    android:paddingEnd="14dp"
+                    android:paddingBottom="10dp">
 
                     <ImageView
                         android:id="@+id/status_icon"
-                        android:layout_width="34dp"
-                        android:layout_height="34dp"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
                         android:contentDescription="@null"
                         android:src="@drawable/ic_ok" />
 
@@ -219,7 +219,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:textColor="@color/bear_cream"
-                            android:textSize="13sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
@@ -237,7 +237,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="14dp"
             android:background="@drawable/bg_note"
             android:gravity="center_vertical"
             android:orientation="horizontal"
