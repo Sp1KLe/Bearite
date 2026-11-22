@@ -113,7 +113,7 @@ class ModManager(private val ctx: Context) {
             bundles = emptyList(),
             libs = if (lib.isFile) listOf(lib) else emptyList(),
             settings = builtinSettings,
-            enabled = prefs.getBoolean("enabled_$BUILTIN_ID", true),
+            enabled = true,   // основной мод отключить нельзя
             icon = icon.takeIf { it.isFile },
             builtin = true,
         )
@@ -274,6 +274,7 @@ class ModManager(private val ctx: Context) {
     }
 
     fun setEnabled(id: String, enabled: Boolean) {
+        if (id == BUILTIN_ID) { prefs.edit().putBoolean("enabled_$id", true).apply(); return }
         prefs.edit().putBoolean("enabled_$id", enabled).apply()
     }
 

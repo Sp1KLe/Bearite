@@ -62,6 +62,7 @@ object ModListUi {
                 guard = false
             }
             sw.isChecked = m.enabled
+            if (m.builtin) { sw.isChecked = true; sw.isEnabled = false }   // основной мод всегда включён
             sw.setOnCheckedChangeListener { _, on ->
                 if (guard) return@setOnCheckedChangeListener
                 if (on && m.libs.isNotEmpty() && !mods.isNativeAccepted(m.id)) {

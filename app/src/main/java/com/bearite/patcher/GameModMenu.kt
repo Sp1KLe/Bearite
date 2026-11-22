@@ -686,6 +686,7 @@ class GameModMenu(private val act: Activity, private val mods: ModManager) {
     }
 
     private fun toggleMod(m: Mod, on: Boolean) {
+        if (m.builtin) { refresh(); return }   // основной мод отключить нельзя
         if (on && m.libs.isNotEmpty() && !mods.isNativeAccepted(m.id)) {
             ui.dialog(
                 "Нативный код",
