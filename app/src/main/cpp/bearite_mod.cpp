@@ -4226,7 +4226,24 @@ void* w_anchor(void* playerTr, const std::string& slot) {
         uint8_t inc = 1; void* a[2] = {ty, &inc};
         void* arr = inv(F.get_comps_children, go, a);
         if (!arr || !arr_len(arr)) continue;
+        // Под общим корнем могут оказаться и чужие медведи (статуя Пьера за золото/алмаз): берём ближайшего к игроку, а не первого в массиве.
         void* comp = *(void**)arr_elem(arr, sizeof(void*), 0);
+        if (arr_len(arr) > 1 && F.get_position && F.get_transform) {
+            void* pp = inv(F.get_position, playerTr);
+            if (pp) {
+                float p3[3]; memcpy(p3, obj_unbox(pp), sizeof p3);
+                float bestD = 1e30f;
+                for (uintptr_t i = 0; i < arr_len(arr); ++i) {
+                    void* c = *(void**)arr_elem(arr, sizeof(void*), i);
+                    void* ct = c ? inv(F.get_transform, c) : nullptr;
+                    void* cv = ct ? inv(F.get_position, ct) : nullptr;
+                    if (!cv) continue;
+                    float q[3]; memcpy(q, obj_unbox(cv), sizeof q);
+                    float d = (q[0] - p3[0]) * (q[0] - p3[0]) + (q[1] - p3[1]) * (q[1] - p3[1]) + (q[2] - p3[2]) * (q[2] - p3[2]);
+                    if (d < bestD) { bestD = d; comp = c; }
+                }
+            }
+        }
         const char* fn = (slot == "back" || slot == "body") ? "bodyTransform" : (wantRef ? (slot == "hand_l" ? "leftHand" : slot == "hand_r" ? "rightHand" : slot == "foot_l" ? "leftFoot" : "rightFoot") : "headTransform");
         if (void* t = field_obj(comp, fn)) return t;
     }
