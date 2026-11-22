@@ -4326,6 +4326,13 @@ void w_tick(long long now) {
     void* ptr = g_player ? target(g_player) : nullptr;
     if (!ptr) ptr = pick_player(now);
     if (!ptr) return;
+    {   // Пока никто не двигался, pick_player берёт первого кандидата — им бывает NPC (DJ Пьер). Крепим только к подтверждённому игроку:
+        // с тегом Player либо тому, кто реально прошёл хоть немного; иначе ждём и не вешаем ничего на чужих.
+        int pid = inst_id(ptr);
+        bool ok = false;
+        for (auto& c : g_cands) if (c.id == pid && (c.how == "тег Player" || c.path > 1.0f)) { ok = true; break; }
+        if (!ok) return;
+    }
     static void *mLP = nullptr, *mLE = nullptr, *mLS = nullptr, *mSP = nullptr;
     if (!mLP) if (void* trk = bearite_find_class("UnityEngine", "Transform")) {
         mLP = bearite_il2.class_get_method_from_name(trk, "set_localPosition", 1);
