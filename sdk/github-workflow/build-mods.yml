@@ -1,7 +1,8 @@
 # Сборка модов в облаке, без компьютера и NDK у тебя.
-# Положи этот файл в .github/workflows/ своего репозитория, а рядом с ним (в корне репозитория)
-# файлы набора: build-mod.sh, bearite_api.h, bearite_il2cpp.h и папку mods/ с твоими модами.
-# После пуша открой вкладку Actions: готовые zip будут в Artifacts.
+# В этом репозитории файл не запускается (лежит не в .github/workflows/). Чтобы он заработал,
+# скопируй его в свой форк как .github/workflows/build-mods.yml: моды берутся из sdk/mods/<имя>/,
+# сборочный скрипт и заголовки из sdk/ (раскладка форка Bearite, ничего переносить не надо).
+# После пуша открой вкладку Actions: готовые zip будут в Artifacts (Bearite-mods).
 name: Build mods
 
 on:
@@ -21,14 +22,14 @@ jobs:
           "$SDKM" "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> "$GITHUB_ENV"
 
-      - name: Build all mods
+      - name: Build mods from sdk/mods
         run: |
           mkdir -p dist
-          for d in mods/*/; do
-            if [ -f "${d}mod.json" ]; then bash build-mod.sh "$d" dist; fi
+          for d in sdk/mods/*/; do
+            if [ -f "${d}mod.json" ]; then bash sdk/build-mod.sh "$d" dist; fi
           done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mods
+          name: Bearite-mods
           path: dist/*.zip
