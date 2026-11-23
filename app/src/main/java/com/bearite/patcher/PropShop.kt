@@ -188,6 +188,8 @@ class PropShop(private val dir: File, private val store: MapStore) {
                 val stampFile = File(propsDir, ".acc_stamps")
                 val stamps = HashMap<String, String>()
                 try { if (stampFile.isFile) stampFile.readLines().forEach { l -> val k = l.indexOf('='); if (k > 0) stamps[l.substring(0, k)] = l.substring(k + 1) } } catch (_: Throwable) {}
+                // формат файла .acc менялся (добавилось поле fit): после смены формата перекачиваем все архивы, иначе у уже скачанных вещей новые поля не появятся
+                if (stamps["_fmt"] != ACC_FMT) { stamps.clear(); stamps["_fmt"] = ACC_FMT }
                 if (assets != null) for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
                     val name = a.optString("name")
@@ -218,6 +220,8 @@ class PropShop(private val dir: File, private val store: MapStore) {
 
     companion object {
         val SLOTS = listOf("head", "face", "back", "body", "hand_l", "hand_r", "foot_l", "foot_r")
+        /** Версия формата сохранённых параметров аксессуаров (.acc): 2 — добавлено поле fit. */
+        const val ACC_FMT = "2"
         /** Отдельный релиз «accessories»: index.json со списком и .zip-архивы (внутри index.json и .glb) или просто .glb. */
         const val ACC_API = "https://api.github.com/repos/Sp1KLe/Bearite/releases/tags/accessories"
         const val ACC_BASE = "https://github.com/Sp1KLe/Bearite/releases/download/accessories"
