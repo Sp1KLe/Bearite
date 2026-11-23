@@ -4282,6 +4282,10 @@ bool w_head_fit(void* tr, void* anchor, const float off[3]) {
         float b[6]; memcpy(b, obj_unbox(bv), sizeof b);   // Bounds: center xyz, extents xyz
         float v = b[3] * b[4] * b[5];
         { RInfo ri; ri.name = name_of(rt); memcpy(ri.c, b, 12); memcpy(ri.e, b + 3, 12); infos.push_back(ri); }
+        std::string ln = infos.back().name;
+        for (auto& ch : ln) ch = (char)tolower((unsigned char)ch);
+        if (ln.find("cosmetic") != std::string::npos || ln.find("silhouette") != std::string::npos) continue;   // косметика игры и силуэт — не череп
+        if (ln == "head") v *= 1000.f;   // настоящий череп важнее любого большего рендерера
         if (v > bestV) { bestV = v; memcpy(bc, b, 12); memcpy(be, b + 3, 12); bestTr = rt; }
     }
     if (!bestTr) return false;
