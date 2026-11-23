@@ -4271,6 +4271,8 @@ bool w_head_fit(void* tr, void* anchor, const float off[3]) {
     std::vector<int> mine;   // свои аксессуары в измерении не участвуют
     for (auto& l : g_wLive) { void* lg = l.h ? target(l.h) : nullptr; void* lt = lg ? inv(F.go_transform, lg) : nullptr; if (lt) mine.push_back(inst_id(lt)); }
     float bestV = 0, bc[3] = {0, 0, 0}, be[3] = {0, 0, 0}; void* bestTr = nullptr;
+    struct RInfo { std::string name; float c[3], e[3]; };
+    std::vector<RInfo> infos;   // для диагностики: все части головы с размерами
     for (uintptr_t i = 0; i < arr_len(arr) && i < 64; ++i) {
         void* r = *(void**)arr_elem(arr, sizeof(void*), i);
         void* rt = r ? inv(F.get_transform, r) : nullptr;
@@ -4279,6 +4281,7 @@ bool w_head_fit(void* tr, void* anchor, const float off[3]) {
         if (!bv) continue;
         float b[6]; memcpy(b, obj_unbox(bv), sizeof b);   // Bounds: center xyz, extents xyz
         float v = b[3] * b[4] * b[5];
+        { RInfo ri; ri.name = name_of(rt); memcpy(ri.c, b, 12); memcpy(ri.e, b + 3, 12); infos.push_back(ri); }
         if (v > bestV) { bestV = v; memcpy(bc, b, 12); memcpy(be, b + 3, 12); bestTr = rt; }
     }
     if (!bestTr) return false;
@@ -4295,6 +4298,9 @@ bool w_head_fit(void* tr, void* anchor, const float off[3]) {
     if (bid != lastId || fabsf(be[0] - lastE) > 0.01f) {   // в лог — только когда голова сменилась (диагностика размеров)
         lastId = bid; lastE = be[0];
         logf_("гардероб: подгонка под голову «%s»: центр %.2f %.2f %.2f, полуразмеры %.2f %.2f %.2f", name_of(bestTr).c_str(), bc[0], bc[1], bc[2], be[0], be[1], be[2]);
+        logf_("гардероб: верх головы в мире %.2f %.2f %.2f, в координатах якоря %.2f %.2f %.2f, итоговая позиция %.2f %.2f %.2f", top[0], top[1], top[2], l3[0], l3[1], l3[2], pos[0], pos[1], pos[2]);
+        for (size_t k = 0; k < infos.size() && k < 12; ++k)
+            logf_("  часть головы «%s»: центр %.2f %.2f %.2f, полуразмеры %.2f %.2f %.2f", infos[k].name.c_str(), infos[k].c[0], infos[k].c[1], infos[k].c[2], infos[k].e[0], infos[k].e[1], infos[k].e[2]);
     }
     return true;
 }
