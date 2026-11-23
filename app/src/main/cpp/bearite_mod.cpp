@@ -4348,6 +4348,25 @@ void w_tick(long long now) {
         int pid = inst_id(ptr);
         bool ok = false;
         for (auto& c : g_cands) if (c.id == pid && (c.how == "тег Player" || c.path > 1.0f)) { ok = true; break; }
+        if (!ok && F.cam_main && F.get_transform && F.get_position) {
+            // Игрок стоит (например, в гардеробе): камера всегда смотрит на него, поэтому берём ближайшего к камере кандидата.
+            void* cam = inv(F.cam_main, nullptr);
+            void* ct = cam ? inv(F.get_transform, cam) : nullptr;
+            void* cv = ct ? inv(F.get_position, ct) : nullptr;
+            if (cv) {
+                float c3[3]; memcpy(c3, obj_unbox(cv), sizeof c3);
+                float bestD = 1e30f; void* bestTr = nullptr;
+                for (auto& c : g_cands) {
+                    void* tr = target(c.h);
+                    void* pv = tr ? inv(F.get_position, tr) : nullptr;
+                    if (!pv) continue;
+                    float q[3]; memcpy(q, obj_unbox(pv), sizeof q);
+                    float d = (q[0] - c3[0]) * (q[0] - c3[0]) + (q[1] - c3[1]) * (q[1] - c3[1]) + (q[2] - c3[2]) * (q[2] - c3[2]);
+                    if (d < bestD) { bestD = d; bestTr = tr; }
+                }
+                if (bestTr && bestD < 12.f * 12.f) { ptr = bestTr; ok = true; }
+            }
+        }
         if (!ok) return;
     }
     static void *mLP = nullptr, *mLE = nullptr, *mLS = nullptr, *mSP = nullptr;
