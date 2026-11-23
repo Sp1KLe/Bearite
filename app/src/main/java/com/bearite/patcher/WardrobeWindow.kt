@@ -33,7 +33,7 @@ class WardrobeStore(private val ctx: android.content.Context, private val shop: 
             val sb = StringBuilder()
             for (id in ids) {
                 val a = shop.accOf(id) ?: continue
-                sb.append(listOf(id, id, a.slot, a.off[0], a.off[1], a.off[2], a.scale, "%06X".format(a.color and 0xFFFFFF), a.rot[0], a.rot[1], a.rot[2]).joinToString("\t")).append('\n')
+                sb.append(listOf(id, id, a.slot, a.off[0], a.off[1], a.off[2], a.scale, "%06X".format(a.color and 0xFFFFFF), a.rot[0], a.rot[1], a.rot[2], if (a.fit) 1 else 0).joinToString("\t")).append('\n')
             }
             cfg.writeText(sb.toString())
         } catch (_: Throwable) {}

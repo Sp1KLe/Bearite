@@ -17,19 +17,19 @@ class PropShop(private val dir: File, private val store: MapStore) {
     class Entry(val id: String, val name: String, val author: String, val file: String, val size: Long, val acc: Acc? = null)
 
     /** Аксессуар для гардероба: слот (head, face, back, hand_l, hand_r, foot_l, foot_r), смещение, масштаб, поворот, цвет. */
-    class Acc(val slot: String, val off: FloatArray, val scale: Float, val rot: FloatArray, val color: Int) {
-        fun toLine(): String = listOf(slot, off[0], off[1], off[2], scale, rot[0], rot[1], rot[2], "%06X".format(color and 0xFFFFFF)).joinToString("|")
+    class Acc(val slot: String, val off: FloatArray, val scale: Float, val rot: FloatArray, val color: Int, val fit: Boolean = false) {
+        fun toLine(): String = listOf(slot, off[0], off[1], off[2], scale, rot[0], rot[1], rot[2], "%06X".format(color and 0xFFFFFF), if (fit) "1" else "0").joinToString("|")
         companion object {
             fun fromLine(l: String): Acc? = try {
                 val p = l.trim().split('|')
-                Acc(p[0], floatArrayOf(p[1].toFloat(), p[2].toFloat(), p[3].toFloat()), p[4].toFloat(), floatArrayOf(p[5].toFloat(), p[6].toFloat(), p[7].toFloat()), p[8].toInt(16))
+                Acc(p[0], floatArrayOf(p[1].toFloat(), p[2].toFloat(), p[3].toFloat()), p[4].toFloat(), floatArrayOf(p[5].toFloat(), p[6].toFloat(), p[7].toFloat()), p[8].toInt(16), p.getOrNull(9) == "1")
             } catch (_: Throwable) { null }
             fun fromJson(o: JSONObject): Acc? {
                 val slot = o.optString("slot")
                 if (slot !in SLOTS) return null
                 fun v3(k: String): FloatArray { val a = o.optJSONArray(k); return floatArrayOf(a?.optDouble(0, 0.0)?.toFloat() ?: 0f, a?.optDouble(1, 0.0)?.toFloat() ?: 0f, a?.optDouble(2, 0.0)?.toFloat() ?: 0f) }
                 val col = try { o.optString("color", "FFFFFF").trimStart('#').toInt(16) } catch (_: Throwable) { 0xFFFFFF }
-                return Acc(slot, v3("offset"), o.optDouble("scale", 1.0).toFloat(), v3("rot"), col)
+                return Acc(slot, v3("offset"), o.optDouble("scale", 1.0).toFloat(), v3("rot"), col, o.optBoolean("fit", false))
             }
         }
     }

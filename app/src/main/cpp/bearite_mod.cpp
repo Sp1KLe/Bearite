@@ -4161,7 +4161,7 @@ std::string g_lastCam;
 // ------------------------------------------------------------------ гардероб: свои аксессуары на медведе
 // Лаунчер пишет filesDir/wardrobe.cfg: по строке на аксессуар «id<TAB>meshId<TAB>слот<TAB>ox<TAB>oy<TAB>oz<TAB>масштаб<TAB>цвет<TAB>rx<TAB>ry<TAB>rz».
 // Слоты: head, face, back, hand_l, hand_r, foot_l, foot_r. Меш — как у пропов сообщества (maps/props/<meshId>.mesh).
-struct WAcc { std::string id, mesh, slot; float off[3], sc, rot[3]; unsigned color; uintptr_t h = 0; int parentId = 0; };
+struct WAcc { std::string id, mesh, slot; float off[3], sc, rot[3]; unsigned color; bool fit = false; uintptr_t h = 0; int parentId = 0; };
 std::vector<WAcc> g_wDesired;
 std::vector<WAcc> g_wLive;
 long long g_wMtime = -1, g_wLast = 0;
@@ -4203,6 +4203,7 @@ void w_read_cfg() {
             a.sc = (float)atof(f[6].c_str()); if (a.sc <= 0) a.sc = 1;
             a.color = (unsigned)strtoul(f[7].c_str(), nullptr, 16);
             for (int i = 0; i < 3; ++i) a.rot[i] = f.size() > 8 + i ? (float)atof(f[8 + i].c_str()) : 0.f;
+            a.fit = f.size() > 11 && f[11].rfind("1", 0) == 0;
             g_wDesired.push_back(a);
         }
     }
@@ -4251,6 +4252,52 @@ void* w_anchor(void* playerTr, const std::string& slot) {
 }
 
 
+
+/** Подгонка под форму головы (аксессуар с fit=true, слот head): берём самый большой рендерер под головой (это сама голова),
+ *  ставим аксессуар в центр её верха; offset тогда считается от верха головы (нулевой offset = модель стоит основанием на голове). */
+bool w_head_fit(void* tr, void* anchor, const float off[3]) {
+    static void *mBounds = nullptr, *mITP = nullptr, *mSLP = nullptr;
+    if (!mBounds) if (void* k = bearite_find_class("UnityEngine", "Renderer")) mBounds = bearite_il2.class_get_method_from_name(k, "get_bounds", 0);
+    if (!mITP || !mSLP) if (void* k = bearite_find_class("UnityEngine", "Transform")) {
+        mITP = bearite_il2.class_get_method_from_name(k, "InverseTransformPoint", 1);
+        mSLP = bearite_il2.class_get_method_from_name(k, "set_localPosition", 1);
+    }
+    if (!tr || !anchor || !mBounds || !mITP || !mSLP || !F.type_renderer || !F.get_comps_children || !F.get_gameobject || !F.get_transform || !F.go_transform) return false;
+    void* ago = inv(F.get_gameobject, anchor);
+    if (!ago) return false;
+    uint8_t inc = 1; void* ga[2] = {F.type_renderer, &inc};
+    void* arr = inv(F.get_comps_children, ago, ga);
+    if (!arr || !arr_len(arr)) return false;
+    std::vector<int> mine;   // свои аксессуары в измерении не участвуют
+    for (auto& l : g_wLive) { void* lg = l.h ? target(l.h) : nullptr; void* lt = lg ? inv(F.go_transform, lg) : nullptr; if (lt) mine.push_back(inst_id(lt)); }
+    float bestV = 0, bc[3] = {0, 0, 0}, be[3] = {0, 0, 0}; void* bestTr = nullptr;
+    for (uintptr_t i = 0; i < arr_len(arr) && i < 64; ++i) {
+        void* r = *(void**)arr_elem(arr, sizeof(void*), i);
+        void* rt = r ? inv(F.get_transform, r) : nullptr;
+        if (!rt || std::find(mine.begin(), mine.end(), inst_id(rt)) != mine.end()) continue;
+        void* bv = inv(mBounds, r);
+        if (!bv) continue;
+        float b[6]; memcpy(b, obj_unbox(bv), sizeof b);   // Bounds: center xyz, extents xyz
+        float v = b[3] * b[4] * b[5];
+        if (v > bestV) { bestV = v; memcpy(bc, b, 12); memcpy(be, b + 3, 12); bestTr = rt; }
+    }
+    if (!bestTr) return false;
+    float top[3] = {bc[0], bc[1] + be[1], bc[2]};
+    void* a1[1] = {top};
+    void* lp = inv(mITP, anchor, a1);
+    if (!lp) return false;
+    float l3[3]; memcpy(l3, obj_unbox(lp), sizeof l3);
+    float pos[3] = {l3[0] + off[0], l3[1] + off[1], l3[2] + off[2]};
+    void* a2[1] = {pos};
+    inv(mSLP, tr, a2);
+    static int lastId = 0; static float lastE = 0;
+    int bid = inst_id(bestTr);
+    if (bid != lastId || fabsf(be[0] - lastE) > 0.01f) {   // в лог — только когда голова сменилась (диагностика размеров)
+        lastId = bid; lastE = be[0];
+        logf_("гардероб: подгонка под голову «%s»: центр %.2f %.2f %.2f, полуразмеры %.2f %.2f %.2f", name_of(bestTr).c_str(), bc[0], bc[1], bc[2], be[0], be[1], be[2]);
+    }
+    return true;
+}
 
 /** Разведка экрана гардероба: дерево объектов от корня холста StudioUI (имя, активность, есть ли кнопка), чтобы встроить свою кнопку и вкладку прямо в игру. */
 void w_dump_studio() {
@@ -4422,6 +4469,7 @@ void w_tick(long long now) {
             if (mLE) { void* b[1] = {const_cast<float*>(d.rot)}; inv(mLE, tr, b); }
             float sc3[3] = {d.sc, d.sc, d.sc}; void* b3[1] = {sc3}; inv(mLS, tr, b3);
         }
+        if (d.fit && d.slot == "head") w_head_fit(tr, anchor, d.off);   // форма головы могла смениться: подгоняем на каждом шаге
     }
     // убрать то, чего больше нет в конфиге (конфиг при изменении и так пересоздаётся целиком)
 }
@@ -4455,7 +4503,7 @@ void* ws_button(void* go) {
     return (arr && arr_len(arr) > 0) ? *(void**)arr_elem(arr, sizeof(void*), 0) : nullptr;
 }
 
-struct WsItem { std::string id, name, slot; float off[3]; float sc; float rot[3]; unsigned color; };
+struct WsItem { std::string id, name, slot; float off[3]; float sc; float rot[3]; unsigned color; bool fit = false; };
 
 std::vector<WsItem> ws_items() {
     std::vector<WsItem> out;
@@ -4477,6 +4525,7 @@ std::vector<WsItem> ws_items() {
                 for (int i = 0; i < 3; ++i) { it.off[i] = (float)atof(f[1 + i].c_str()); it.rot[i] = (float)atof(f[5 + i].c_str()); }
                 it.sc = (float)atof(f[4].c_str()); if (it.sc <= 0) it.sc = 1;
                 it.color = (unsigned)strtoul(f[8].c_str(), nullptr, 16);
+                it.fit = f.size() > 9 && f[9].rfind("1", 0) == 0;
             }
         }
         {   // одна и та же модель, установленная под разными id (файлом и из релиза), — показываем один раз
@@ -4519,7 +4568,7 @@ void ws_toggle(const std::string& id) {
         for (auto& i : items) if (i.id == w) {
             sel += w + "\n";
             char line[512];
-            snprintf(line, sizeof line, "%s\t%s\t%s\t%g\t%g\t%g\t%g\t%06X\t%g\t%g\t%g\n", w.c_str(), w.c_str(), i.slot.c_str(), i.off[0], i.off[1], i.off[2], i.sc, i.color & 0xFFFFFF, i.rot[0], i.rot[1], i.rot[2]);
+            snprintf(line, sizeof line, "%s\t%s\t%s\t%g\t%g\t%g\t%g\t%06X\t%g\t%g\t%g\t%d\n", w.c_str(), w.c_str(), i.slot.c_str(), i.off[0], i.off[1], i.off[2], i.sc, i.color & 0xFFFFFF, i.rot[0], i.rot[1], i.rot[2], i.fit ? 1 : 0);
             cfg += line;
         }
     }
