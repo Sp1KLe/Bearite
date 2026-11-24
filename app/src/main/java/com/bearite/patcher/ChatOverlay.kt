@@ -86,8 +86,10 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun build() {
         bubble = TextView(act).apply {
-            text = "💬"; textSize = 22f; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2E86DE.toInt()); setStroke(dp(3), GameUi.OUTLINE) }
+            // голубой пузырь с тремя точками, как кнопка чата в самой игре
+            text = "•••"; textSize = 17f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0x99000000.toInt())
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF9EDDF2.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
         }
         bubble.visibility = View.GONE   // покажем, когда игрок окажется в настоящей комнате
         parent.addView(bubble, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)); topMargin = prefs.getInt("by", dp(72)) })
@@ -140,19 +142,20 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val h = (dm.heightPixels * 0.62f).toInt()
         panel = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            background = ui.panelBg(16)
+            // плоское тёмное полупрозрачное окно, как чат в Minecraft Bedrock
+            background = GradientDrawable().apply { setColor(0xB8000000.toInt()); cornerRadius = dp(3).toFloat(); setStroke(dp(2), 0x66FFFFFF) }
             setPadding(dp(10), dp(8), dp(10), dp(8))
             visibility = View.GONE; isClickable = true
         }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        title = ui.label("Чат", 15f, GameUi.CREAM)
+        title = txt("Чат", 15f, Color.WHITE, true)
         head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(ui.label("⚙", 20f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(8), 0); setOnClickListener { settings() } })
-        head.addView(ui.label("✕", 18f, GameUi.MUTED).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
+        head.addView(txt("⚙", 20f, 0xFFDDDDDD.toInt()).apply { setPadding(dp(8), 0, dp(8), 0); setOnClickListener { settings() } })
+        head.addView(txt("✕", 18f, 0xFFDDDDDD.toInt()).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
         panel.addView(head)
         val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        tabChat = ui.outlined("Чат", 13f).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
-        tabPlayers = ui.outlined("Игроки", 13f).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
+        tabChat = txt("Чат", 13f, Color.WHITE, true).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
+        tabPlayers = txt("Игроки", 13f, Color.WHITE, true).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
         tabs.addView(tabChat, LinearLayout.LayoutParams(0, dp(30), 1f).apply { rightMargin = dp(3) })
         tabs.addView(tabPlayers, LinearLayout.LayoutParams(0, dp(30), 1f).apply { leftMargin = dp(3) })
         panel.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
@@ -164,22 +167,23 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         panel.addView(playersScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6); bottomMargin = dp(6) })
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         input = EditText(act).apply {
-            hint = "Сообщение…"; setHintTextColor(GameUi.DIM); setTextColor(GameUi.CREAM); textSize = 14f
+            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); textSize = 14f
             maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            background = GradientDrawable().apply { setColor(GameUi.SURFACE2); cornerRadius = dp(12).toFloat() }
+            background = GradientDrawable().apply { setColor(0xFF161616.toInt()); cornerRadius = dp(2).toFloat(); setStroke(dp(2), 0xFF8B8B8B.toInt()) }
             setPadding(dp(10), dp(6), dp(10), dp(6))
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEND) { send(); true } else false }
         }
         row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(ui.label("➤", 22f, GameUi.CREAM).apply { gravity = Gravity.CENTER; setOnClickListener { send() } }, LinearLayout.LayoutParams(dp(44), dp(40)))
+        row.addView(txt("➤", 20f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { send() } },
+            LinearLayout.LayoutParams(dp(44), dp(40)).apply { leftMargin = dp(4) })
         inputRow = row
         panel.addView(row)
         setTab(false)
         main.post(object : Runnable { override fun run() { if (running) { updateCount(); if (winOpen && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
         win = ResizableFrame(act).apply { visibility = View.GONE }
         win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(GameUi.DIM); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
+        win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(0xFF9A9A9A.toInt()); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val sw = prefs.getInt("w", w); val sh = prefs.getInt("h", h)
         parent.addView(win, FrameLayout.LayoutParams(sw, sh, Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("x", dp(64)); topMargin = prefs.getInt("y", dp(60)) })
@@ -279,7 +283,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         playersScroll.visibility = if (players) View.VISIBLE else View.GONE
         for ((t, on) in listOf(tabChat to !players, tabPlayers to players)) {
             t.setTextColor(0xFFFFFFFF.toInt())
-            t.background = ui.chunky(if (on) GameUi.YELLOW else GameUi.SURFACE3, 12, 2)
+            t.background = flatBtn(on)
         }
         if (players) renderPlayers()
     }
@@ -288,17 +292,17 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private fun renderPlayers() {
         val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
         playersBox.removeAllViews()
-        if (lines.isEmpty()) { playersBox.addView(ui.label("Ты не в игровой комнате.", 13f, GameUi.MUTED, bold = false)); tabPlayers.text = "Игроки"; return }
+        if (lines.isEmpty()) { playersBox.addView(txt("Ты не в игровой комнате.", 13f, 0xFFC8C8C8.toInt())); tabPlayers.text = "Игроки"; return }
         val head = lines[0].split('\t')
         val n = head.getOrNull(0)?.toIntOrNull() ?: (lines.size - 1)
         val mx = head.getOrNull(1)?.toIntOrNull() ?: 0
         tabPlayers.text = "Игроки ($n)"
-        playersBox.addView(ui.label("Онлайн: $n" + (if (mx > 0) " из $mx" else ""), 13f, GameUi.MUTED, bold = false))
+        playersBox.addView(txt("Онлайн: $n" + (if (mx > 0) " из $mx" else ""), 13f, 0xFFC8C8C8.toInt()))
         for (l in lines.drop(1)) {
             val p = l.split('\t')
             val nm = p.getOrElse(1) { "" }.ifBlank { "игрок ${p.getOrElse(0) { "?" }}" }
             val mine = p.getOrElse(2) { "0" } == "1"
-            playersBox.addView(ui.label("• $nm" + (if (mine) "  (ты)" else ""), 14f, if (mine) 0xFFB9D58A.toInt() else GameUi.CREAM, bold = mine).apply { setPadding(0, dp(3), 0, dp(3)) })
+            playersBox.addView(txt("• $nm" + (if (mine) "  (ты)" else ""), 14f, if (mine) 0xFFB9D58A.toInt() else Color.WHITE, mine).apply { setPadding(0, dp(3), 0, dp(3)) })
         }
     }
 
@@ -338,6 +342,27 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     // ------------------------------------------------------------------ лента сообщений
 
+    /** Текст чата: белый, с тенью, чтобы читался поверх игры. */
+    private fun txt(t: String, sp: Float, color: Int = Color.WHITE, bold: Boolean = false) = TextView(act).apply {
+        text = t; textSize = sp; setTextColor(color)
+        if (bold) typeface = Typeface.DEFAULT_BOLD
+        setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
+    }
+
+    /** Плоская кнопка в духе Bedrock: серая, с рамкой; выбранная подсвечена белой рамкой. */
+    private fun flatBtn(on: Boolean) = GradientDrawable().apply {
+        setColor(if (on) 0xFF7A7A7A.toInt() else 0xFF2E2E2E.toInt())
+        cornerRadius = dp(2).toFloat()
+        setStroke(dp(2), if (on) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
+    }
+
+    /** «Ник: текст», ник жирным и своим цветом, свои сообщения зелёные. */
+    private fun chatSpan(who: String, text: String, mine: Boolean) = android.text.SpannableStringBuilder().apply {
+        append(who); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
+        setSpan(android.text.style.ForegroundColorSpan(if (mine) 0xFFB9D58A.toInt() else nickColor(who)), 0, length, 0)
+        append(": "); append(text)
+    }
+
     private fun nickColor(who: String): Int {
         val colors = intArrayOf(0xFF6FE06F.toInt(), 0xFFF2A93B.toInt(), 0xFF55D6F2.toInt(), 0xFFB07CFF.toInt(), 0xFFFF7B7B.toInt(), 0xFFF2E25A.toInt())
         return colors[Math.abs(who.hashCode()) % colors.size]
@@ -350,14 +375,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         lp.leftMargin = bl.leftMargin + bl.width + dp(8); lp.topMargin = bl.topMargin
         lp.width = minOf(dp(300), maxOf(dp(120), parent.width - lp.leftMargin - dp(8)))
         feed.layoutParams = lp
-        val tv = TextView(act).apply {
-            this.text = android.text.SpannableStringBuilder().apply {
-                append(who); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
-                setSpan(android.text.style.ForegroundColorSpan(if (mine) 0xFFB9D58A.toInt() else nickColor(who)), 0, length, 0)
-                append(": "); append(text)
-            }
-            textSize = 13f; setTextColor(Color.WHITE); setPadding(0, dp(1), 0, dp(1))
-            setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
+        val tv = txt("", 13f).apply {
+            this.text = chatSpan(who, text, mine)
+            setPadding(0, dp(1), 0, dp(1))
             isClickable = false
             alpha = 0f; translationY = dp(8).toFloat()
         }
@@ -383,21 +403,14 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     }
 
     private fun line(who: String, text: String, own: Boolean) {
-        val tv = TextView(act).apply {
-            this.text = android.text.SpannableStringBuilder().apply {
-                append(who); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
-                setSpan(android.text.style.ForegroundColorSpan(if (own) 0xFFB9D58A.toInt() else 0xFFF2C58E.toInt()), 0, length, 0)
-                append(": "); append(text)
-            }
-            textSize = 14f; setTextColor(GameUi.CREAM); setPadding(0, dp(2), 0, dp(2))
-        }
+        val tv = txt("", 14f).apply { this.text = chatSpan(who, text, own); setPadding(0, dp(2), 0, dp(2)) }
         list.addView(tv)
         if (list.childCount > 120) list.removeViewAt(0)
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun sys(text: String) {
-        list.addView(TextView(act).apply { this.text = text; textSize = 12f; setTextColor(GameUi.MUTED); setPadding(0, dp(2), 0, dp(2)) })
+        list.addView(txt(text, 12f, 0xFFC8C8C8.toInt()).apply { setPadding(0, dp(2), 0, dp(2)) })
     }
 
     private fun settings() {
