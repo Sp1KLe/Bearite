@@ -31,7 +31,8 @@ import java.net.URLEncoder
  * держит фиктивную комнату offlineMode) кнопка и окно чата скрыты.
  */
 class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
-    private val d = UiScale.density(act)
+    /** Единица размера = 1/360 меньшей стороны экрана. Чат выглядит одинаково на любом телефоне, dpi и «размер интерфейса» мода не используются. */
+    private val d = act.resources.displayMetrics.let { minOf(it.widthPixels, it.heightPixels) / 360f }
     private fun dp(v: Int) = (v * d).toInt()
     private val prefs = act.getSharedPreferences("chat", Context.MODE_PRIVATE)
     private val roomFile = File(File(act.filesDir, "maps"), "_room")
@@ -65,11 +66,34 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         val h = java.security.MessageDigest.getInstance("SHA-256").digest(room.toByteArray()).joinToString("") { "%02x".format(it) }
         return "bearite-" + h.take(32)
     }
-    private var nick: String get() = prefs.getString("nick", "") ?: ""; set(v) { prefs.edit().putString("nick", v.trim().take(24)).apply() }
+    private var nick: String get() = prefs.getString("nick", "") ?: ""; set(v) { prefs.edit().putString("nick", v.trim().take(24)).apply(); main.removeCallbacks(nickApply); main.postDelayed(nickApply, 700L) }
     private var key: String get() = prefs.getString("key", "") ?: ""; set(v) { prefs.edit().putString("key", v.trim()).apply() }
+
+    private val nickApply = Runnable { applyNick(true) }
+
+    /**
+     * Ник для мультиплеера: файл maps/_nick мод читает при подключении к Photon, а команда «nick» ставит его сразу,
+     * если игрок уже в комнате. Раньше файл писал только лаунчер при запуске, поэтому ник из ⚙ чата до игры не доходил.
+     */
+    private fun applyNick(sendNow: Boolean) {
+        try {
+            val dir = File(act.filesDir, "maps").also { it.mkdirs() }
+            val n = nick
+            if (n.isEmpty()) { File(dir, "_nick").delete(); return }
+            File(dir, "_nick").writeText(n)
+            if (sendNow) {
+                val cmd = File(dir, "_cmd")
+                val old = if (cmd.exists()) cmd.readText() else ""
+                val t = File(dir, "_cmd.tmp")
+                t.writeText(old + "nick\t$n\n")
+                t.renameTo(cmd)
+            }
+        } catch (_: Throwable) {}
+    }
 
     fun start() {
         build()
+        applyNick(false)
         running = true
         Thread { loop() }.apply { isDaemon = true; name = "bearite-chat" }.start()
     }
@@ -80,42 +104,50 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun build() {
         val dm = act.resources.displayMetrics
-        val bs = dp(50)
+        val bs = dp(54)
 
         // лента и поле ввода: левый верхний угол, как на видео; без окна и рамки
         box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(2), dp(4), dp(4)); isClickable = false }
         feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
         box.addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         input = EditText(act).apply {
-            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); textSize = 14f
+            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 12f * d)
             maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             background = GradientDrawable().apply { setColor(0xCC161616.toInt()); cornerRadius = dp(2).toFloat(); setStroke(dp(2), 0xFF8B8B8B.toInt()) }
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setPadding(dp(6), dp(4), dp(6), dp(4))
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEND) { sendAndClose(); true } else false }
         }
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
         row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(txt("➤", 20f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { sendAndClose() } },
-            LinearLayout.LayoutParams(dp(44), dp(40)).apply { leftMargin = dp(4) })
-        row.addView(txt("⚙", 18f, 0xFFDDDDDD.toInt()).apply { gravity = Gravity.CENTER; background = flatBtn(false); setOnClickListener { settings() } },
-            LinearLayout.LayoutParams(dp(36), dp(40)).apply { leftMargin = dp(4) })
+        row.addView(txt("➤", 16f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { sendAndClose() } },
+            LinearLayout.LayoutParams(dp(34), dp(30)).apply { leftMargin = dp(3) })
+        row.addView(txt("⚙", 15f, 0xFFDDDDDD.toInt()).apply { gravity = Gravity.CENTER; background = flatBtn(false); setOnClickListener { settings() } },
+            LinearLayout.LayoutParams(dp(30), dp(30)).apply { leftMargin = dp(3) })
         inputRow = row
         box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-        parent.addView(box, FrameLayout.LayoutParams(minOf(dp(380), (dm.widthPixels * 0.5f).toInt()), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+        parent.addView(box, FrameLayout.LayoutParams((dm.widthPixels * 0.46f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
             .apply { leftMargin = dp(6); topMargin = (dm.heightPixels * 0.115f).toInt() })
 
         // кнопка чата: голубой пузырь с тремя точками, лежит на месте родной кнопки чата игры (справа сверху)
         bubble = TextView(act).apply {
-            text = "•••"; textSize = 17f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            text = "•••"; setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 14f * d); gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
             setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0x99000000.toInt())
-            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0xFFA6E3F7.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFFA6E3F7.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
         }
         bubble.visibility = View.GONE   // покажем, когда игрок окажется в настоящей комнате
         parent.addView(bubble, FrameLayout.LayoutParams(bs, bs, Gravity.TOP or Gravity.START).apply {
-            leftMargin = prefs.getInt("cbx", (dm.widthPixels * 0.959f - bs / 2f).toInt())
-            topMargin = prefs.getInt("cby", (dm.heightPixels * 0.245f - bs / 2f).toInt())
+            leftMargin = prefs.getInt("pbx", (dm.widthPixels * 0.959f - bs / 2f).toInt())
+            topMargin = prefs.getInt("pby", (dm.heightPixels * 0.247f - bs / 2f).toInt())
         })
+        // когда размер родителя известен, ставим кнопку точно на родную кнопку чата игры (если игрок её не двигал)
+        parent.post {
+            if (!prefs.contains("pbx")) {
+                val bl = bubble.layoutParams as FrameLayout.LayoutParams
+                bl.leftMargin = (parent.width * 0.959f - bs / 2f).toInt(); bl.topMargin = (parent.height * 0.247f - bs / 2f).toInt()
+                bubble.layoutParams = bl
+            }
+        }
         // кнопку можно перетащить; короткое касание открывает и закрывает поле ввода
         bubble.setOnTouchListener(object : View.OnTouchListener {
             var sx = 0f; var sy = 0f; var l = 0; var t = 0; var moved = false
@@ -138,7 +170,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                     android.view.MotionEvent.ACTION_UP -> {
                         bubble.animate().cancel()
                         bubble.animate().scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
-                        if (moved) prefs.edit().putInt("cbx", lp.leftMargin).putInt("cby", lp.topMargin).apply() else toggle()
+                        if (moved) prefs.edit().putInt("pbx", lp.leftMargin).putInt("pby", lp.topMargin).apply() else toggle()
                     }
                     android.view.MotionEvent.ACTION_CANCEL -> {
                         bubble.animate().cancel()
@@ -167,9 +199,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private fun openChat() {
         chatOpen = true
         feed.removeAllViews()
-        for (m in history.takeLast(8)) addLine(m, false)
+        for (m in history.takeLast(MAX_LINES)) addLine(m, false)
         if (nick.isBlank()) sys("Нажми ⚙ и впиши ник. «/игроки» покажет, кто в комнате.")
-        box.background = GradientDrawable().apply { setColor(0x80000000.toInt()); cornerRadius = dp(3).toFloat() }
         inputRow.animate().cancel()
         inputRow.alpha = 0f; inputRow.translationY = -dp(6).toFloat(); inputRow.visibility = View.VISIBLE
         inputRow.animate().alpha(1f).translationY(0f).setDuration(180).start()
@@ -183,7 +214,6 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         chatOpen = false
         (act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
         input.clearFocus()
-        box.background = null
         inputRow.animate().cancel()
         inputRow.animate().alpha(0f).setDuration(120).withEndAction { if (!chatOpen) inputRow.visibility = View.GONE }.start()
         clearFeed()
@@ -214,7 +244,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     /** Текст чата: белый, с тенью, чтобы читался поверх игры. */
     private fun txt(t: String, sp: Float, color: Int = Color.WHITE, bold: Boolean = false) = TextView(act).apply {
-        text = t; textSize = sp; setTextColor(color)
+        text = t; setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sp * d); setTextColor(color)
         if (bold) typeface = Typeface.DEFAULT_BOLD
         setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
     }
@@ -248,19 +278,20 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     /** Строка в ленте: плавно выезжает. Если [fading], держится около 6 секунд и гаснет (видно максимум 3 строки). */
     private fun addLine(m: Msg, fading: Boolean) {
-        val tv = txt("", 13f, if (m.sys) 0xFFC8C8C8.toInt() else Color.WHITE).apply {
+        val tv = txt("", 12f, if (m.sys) 0xFFC8C8C8.toInt() else Color.WHITE).apply {
             text = if (m.sys) m.text else chatSpan(m.who, m.text, m.mine)
-            setPadding(0, dp(1), 0, dp(1)); isClickable = false
+            setBackgroundColor(0x80000000.toInt())   // чёрная полупрозрачная полоса за каждой строкой, строки идут сплошной стопкой
+            setPadding(dp(3), dp(1), dp(3), dp(1)); isClickable = false
             alpha = 0f; translationY = dp(8).toFloat()
         }
         feed.addView(tv)
         tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
         if (fading) {
             val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
-            for (v in live.dropLast(3)) feedFade(v, 180L)
-            main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 700L) }, 6000L)
+            for (v in live.dropLast(MAX_LINES)) feedFade(v, 180L)
+            main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 800L) }, 8000L)
         } else {
-            while (feed.childCount > 8) feed.removeViewAt(0)
+            while (feed.childCount > MAX_LINES) feed.removeViewAt(0)
         }
     }
 
@@ -346,6 +377,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                     main.post {
                         history.clear(); feed.removeAllViews()
                         applyVisible(r.isNotEmpty())
+                        if (r.isNotEmpty()) applyNick(true)
                         if (r.isNotEmpty()) sys("Ты в комнате «$r».")
                     }
                 }
@@ -402,5 +434,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
         /** Имя фиктивной комнаты Photon в одиночной игре. */
         const val OFFLINE_ROOM = "offlineMode"
+
+        /** Сколько строк чата видно одновременно. */
+        const val MAX_LINES = 8
     }
 }
