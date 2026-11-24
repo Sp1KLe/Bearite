@@ -39,21 +39,15 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private val main = Handler(Looper.getMainLooper())
 
     private lateinit var bubble: TextView
-    private lateinit var badge: TextView
-    private lateinit var panel: LinearLayout
-    private lateinit var win: ResizableFrame
+    /** Всё, что лежит в левом верхнем углу: лента сообщений и под ней поле ввода. */
+    private lateinit var box: LinearLayout
     private lateinit var feed: LinearLayout
     private lateinit var inputRow: View
-    private lateinit var playersScroll: ScrollView
-    private lateinit var playersBox: LinearLayout
-    private lateinit var tabChat: TextView
-    private lateinit var tabPlayers: TextView
-    private var showPlayers = false
-    private lateinit var list: LinearLayout
-    private lateinit var scroll: ScrollView
-    private lateinit var title: TextView
     private lateinit var input: EditText
-    private var unread = 0
+    private var chatOpen = false
+
+    private class Msg(val who: String, val text: String, val mine: Boolean, val sys: Boolean)
+    private val history = ArrayList<Msg>()
 
     @Volatile private var running = false
     /** Сырое имя комнаты из файла (в одиночной игре там offlineMode): нужно проверке паузы. */
@@ -85,15 +79,44 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     // ------------------------------------------------------------------ интерфейс
 
     private fun build() {
+        val dm = act.resources.displayMetrics
+        val bs = dp(50)
+
+        // лента и поле ввода: левый верхний угол, как на видео; без окна и рамки
+        box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(2), dp(4), dp(4)); isClickable = false }
+        feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
+        box.addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        input = EditText(act).apply {
+            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); textSize = 14f
+            maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            background = GradientDrawable().apply { setColor(0xCC161616.toInt()); cornerRadius = dp(2).toFloat(); setStroke(dp(2), 0xFF8B8B8B.toInt()) }
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEND) { sendAndClose(); true } else false }
+        }
+        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
+        row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(txt("➤", 20f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { sendAndClose() } },
+            LinearLayout.LayoutParams(dp(44), dp(40)).apply { leftMargin = dp(4) })
+        row.addView(txt("⚙", 18f, 0xFFDDDDDD.toInt()).apply { gravity = Gravity.CENTER; background = flatBtn(false); setOnClickListener { settings() } },
+            LinearLayout.LayoutParams(dp(36), dp(40)).apply { leftMargin = dp(4) })
+        inputRow = row
+        box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        parent.addView(box, FrameLayout.LayoutParams(minOf(dp(380), (dm.widthPixels * 0.5f).toInt()), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
+            .apply { leftMargin = dp(6); topMargin = (dm.heightPixels * 0.115f).toInt() })
+
+        // кнопка чата: голубой пузырь с тремя точками, лежит на месте родной кнопки чата игры (справа сверху)
         bubble = TextView(act).apply {
-            // голубой пузырь с тремя точками, как кнопка чата в самой игре
             text = "•••"; textSize = 17f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
             setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0x99000000.toInt())
-            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFF9EDDF2.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
+            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0xFFA6E3F7.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
         }
         bubble.visibility = View.GONE   // покажем, когда игрок окажется в настоящей комнате
-        parent.addView(bubble, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)); topMargin = prefs.getInt("by", dp(72)) })
-        // кнопку чата можно перетащить в любое место; короткое касание открывает окно
+        parent.addView(bubble, FrameLayout.LayoutParams(bs, bs, Gravity.TOP or Gravity.START).apply {
+            leftMargin = prefs.getInt("cbx", (dm.widthPixels * 0.959f - bs / 2f).toInt())
+            topMargin = prefs.getInt("cby", (dm.heightPixels * 0.245f - bs / 2f).toInt())
+        })
+        // кнопку можно перетащить; короткое касание открывает и закрывает поле ввода
         bubble.setOnTouchListener(object : View.OnTouchListener {
             var sx = 0f; var sy = 0f; var l = 0; var t = 0; var moved = false
             override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
@@ -110,14 +133,12 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                             lp.leftMargin = (l + e.rawX - sx).toInt().coerceIn(0, maxOf(0, parent.width - lp.width))
                             lp.topMargin = (t + e.rawY - sy).toInt().coerceIn(0, maxOf(0, parent.height - lp.height))
                             bubble.layoutParams = lp
-                            val bl = badge.layoutParams as FrameLayout.LayoutParams
-                            bl.leftMargin = lp.leftMargin + dp(30); bl.topMargin = lp.topMargin - dp(4); badge.layoutParams = bl
                         }
                     }
                     android.view.MotionEvent.ACTION_UP -> {
                         bubble.animate().cancel()
                         bubble.animate().scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
-                        if (moved) prefs.edit().putInt("bx", lp.leftMargin).putInt("by", lp.topMargin).apply() else toggle()
+                        if (moved) prefs.edit().putInt("cbx", lp.leftMargin).putInt("cby", lp.topMargin).apply() else toggle()
                     }
                     android.view.MotionEvent.ACTION_CANCEL -> {
                         bubble.animate().cancel()
@@ -127,216 +148,65 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 return true
             }
         })
-        badge = TextView(act).apply {
-            textSize = 11f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFE5483A.toInt()) }
-            visibility = View.GONE; isClickable = false
-        }
-        parent.addView(badge, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)) + dp(30); topMargin = prefs.getInt("by", dp(72)) - dp(4) })
-        // лента новых сообщений поверх игры (пока окно закрыто): строки плавно появляются и гаснут сами
-        feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
-        parent.addView(feed, FrameLayout.LayoutParams(dp(300), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)) + dp(54); topMargin = prefs.getInt("by", dp(72)) })
-
-        val dm = act.resources.displayMetrics
-        val w = minOf(dp(340), (dm.widthPixels * 0.5f).toInt())
-        val h = (dm.heightPixels * 0.62f).toInt()
-        panel = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            // плоское тёмное полупрозрачное окно, как чат в Minecraft Bedrock
-            background = GradientDrawable().apply { setColor(0xB8000000.toInt()); cornerRadius = dp(3).toFloat(); setStroke(dp(2), 0x66FFFFFF) }
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            visibility = View.GONE; isClickable = true
-        }
-        val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        title = txt("Чат", 15f, Color.WHITE, true)
-        head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(txt("⚙", 20f, 0xFFDDDDDD.toInt()).apply { setPadding(dp(8), 0, dp(8), 0); setOnClickListener { settings() } })
-        head.addView(txt("✕", 18f, 0xFFDDDDDD.toInt()).apply { setPadding(dp(8), 0, dp(4), 0); setOnClickListener { toggle() } })
-        panel.addView(head)
-        val tabs = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-        tabChat = txt("Чат", 13f, Color.WHITE, true).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(false) } }
-        tabPlayers = txt("Игроки", 13f, Color.WHITE, true).apply { gravity = Gravity.CENTER; setOnClickListener { setTab(true) } }
-        tabs.addView(tabChat, LinearLayout.LayoutParams(0, dp(30), 1f).apply { rightMargin = dp(3) })
-        tabs.addView(tabPlayers, LinearLayout.LayoutParams(0, dp(30), 1f).apply { leftMargin = dp(3) })
-        panel.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        scroll = ScrollView(act).apply { addView(list); isVerticalScrollBarEnabled = false }
-        panel.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6); bottomMargin = dp(6) })
-        playersBox = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        playersScroll = ScrollView(act).apply { addView(playersBox); isVerticalScrollBarEnabled = false; visibility = View.GONE }
-        panel.addView(playersScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6); bottomMargin = dp(6) })
-        val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        input = EditText(act).apply {
-            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); textSize = 14f
-            maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            background = GradientDrawable().apply { setColor(0xFF161616.toInt()); cornerRadius = dp(2).toFloat(); setStroke(dp(2), 0xFF8B8B8B.toInt()) }
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEND) { send(); true } else false }
-        }
-        row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(txt("➤", 20f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { send() } },
-            LinearLayout.LayoutParams(dp(44), dp(40)).apply { leftMargin = dp(4) })
-        inputRow = row
-        panel.addView(row)
-        setTab(false)
-        main.post(object : Runnable { override fun run() { if (running) { updateCount(); if (winOpen && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
-        win = ResizableFrame(act).apply { visibility = View.GONE }
-        win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(0xFF9A9A9A.toInt()); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val sw = prefs.getInt("w", w); val sh = prefs.getInt("h", h)
-        parent.addView(win, FrameLayout.LayoutParams(sw, sh, Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("x", dp(64)); topMargin = prefs.getInt("y", dp(60)) })
-        // перетаскивание окна за заголовок
-        head.setOnTouchListener(object : View.OnTouchListener {
-            var sx = 0f; var sy = 0f; var l = 0; var t = 0
-            override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
-                val lp = win.layoutParams as FrameLayout.LayoutParams
-                when (e.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin }
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        lp.leftMargin = (l + e.rawX - sx).toInt().coerceIn(0, maxOf(0, parent.width - lp.width))
-                        lp.topMargin = (t + e.rawY - sy).toInt().coerceIn(0, maxOf(0, parent.height - lp.height))
-                        win.layoutParams = lp
-                    }
-                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> saveWin()
-                }
-                return true
-            }
-        })
-        sys("Нажми ⚙ и впиши ник. Тяни окно за заголовок, размер меняй за края и углы.")
     }
 
-    /** Кнопка и окно чата видны только в настоящей комнате. */
+    /** Кнопка и лента чата видны только в настоящей комнате. */
     private fun applyVisible(inRealRoom: Boolean) {
         bubble.visibility = if (inRealRoom) View.VISIBLE else View.GONE
         if (!inRealRoom) {
-            badge.visibility = View.GONE
-            clearFeed()
-            if (winOpen) toggle()
-        } else updateBadge()
-    }
-
-    private fun saveWin() {
-        val lp = win.layoutParams as FrameLayout.LayoutParams
-        prefs.edit().putInt("w", lp.width).putInt("h", lp.height).putInt("x", lp.leftMargin).putInt("y", lp.topMargin).apply()
-    }
-
-    /** Окно с изменением размера «как в Windows»: тяни за любой край или угол. */
-    private inner class ResizableFrame(ctx: Context) : FrameLayout(ctx) {
-        private var edge = 0   // 1 слева, 2 сверху, 4 справа, 8 снизу
-        private var sx = 0f; private var sy = 0f
-        private var l = 0; private var t = 0; private var w0 = 0; private var h0 = 0
-        private val grip = dp(18)
-        override fun onInterceptTouchEvent(e: android.view.MotionEvent): Boolean {
-            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-                var ed = 0
-                if (e.x < grip) ed = ed or 1
-                if (e.y < grip && e.x > dp(120)) ed = ed or 2   // верхний край не мешает заголовку с кнопками
-                if (e.x > width - grip) ed = ed or 4
-                if (e.y > height - grip) ed = ed or 8
-                edge = ed
-                if (ed != 0) {
-                    val lp = layoutParams as LayoutParams
-                    sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin; w0 = lp.width; h0 = lp.height
-                    return true
-                }
-            }
-            return false
-        }
-        override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
-            if (edge == 0) return false
-            val lp = layoutParams as LayoutParams
-            val minW = dp(220); val minH = dp(150)
-            when (e.actionMasked) {
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val dx = (e.rawX - sx).toInt(); val dy = (e.rawY - sy).toInt()
-                    var nl = l; var nt = t; var nw = w0; var nh = h0
-                    if (edge and 4 != 0) nw = (w0 + dx).coerceIn(minW, this@ChatOverlay.parent.width - l)
-                    if (edge and 8 != 0) nh = (h0 + dy).coerceIn(minH, this@ChatOverlay.parent.height - t)
-                    if (edge and 1 != 0) { nw = (w0 - dx).coerceIn(minW, l + w0); nl = l + w0 - nw }
-                    if (edge and 2 != 0) { nh = (h0 - dy).coerceIn(minH, t + h0); nt = t + h0 - nh }
-                    lp.leftMargin = nl; lp.topMargin = nt; lp.width = nw; lp.height = nh
-                    layoutParams = lp
-                }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { edge = 0; saveWin() }
-            }
-            return true
+            if (chatOpen) closeChat()
+            feed.removeAllViews()
         }
     }
 
-    /** Число игроков комнаты в заголовке чата и на вкладке. */
-    private fun updateCount() {
+    // ------------------------------------------------------------------ открыть и закрыть ввод
+
+    private fun toggle() { if (chatOpen) closeChat() else openChat() }
+
+    /** Под лентой выезжает поле ввода, показывается история (последние 8 строк, не гаснут), открывается клавиатура. */
+    private fun openChat() {
+        chatOpen = true
+        feed.removeAllViews()
+        for (m in history.takeLast(8)) addLine(m, false)
+        if (nick.isBlank()) sys("Нажми ⚙ и впиши ник. «/игроки» покажет, кто в комнате.")
+        box.background = GradientDrawable().apply { setColor(0x80000000.toInt()); cornerRadius = dp(3).toFloat() }
+        inputRow.animate().cancel()
+        inputRow.alpha = 0f; inputRow.translationY = -dp(6).toFloat(); inputRow.visibility = View.VISIBLE
+        inputRow.animate().alpha(1f).translationY(0f).setDuration(180).start()
+        input.requestFocus()
+        main.postDelayed({
+            if (chatOpen) (act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input, 0)
+        }, 150L)
+    }
+
+    private fun closeChat() {
+        chatOpen = false
+        (act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
+        input.clearFocus()
+        box.background = null
+        inputRow.animate().cancel()
+        inputRow.animate().alpha(0f).setDuration(120).withEndAction { if (!chatOpen) inputRow.visibility = View.GONE }.start()
+        clearFeed()
+    }
+
+    private fun sendAndClose() {
+        if (input.text.toString().trim() == "/игроки") { input.setText(""); showPlayers(); return }
+        send()
+        closeChat()
+    }
+
+    /** Список игроков комнаты, как TAB в Minecraft. Данные пишет мод в maps/_players. */
+    private fun showPlayers() {
         val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
-        if (lines.isEmpty()) { tabPlayers.text = "Игроки"; return }
-        val h = lines[0].split('\t')
-        val n = h.getOrNull(0)?.toIntOrNull() ?: 0
-        val mx = h.getOrNull(1)?.toIntOrNull() ?: 0
-        tabPlayers.text = "Игроки ($n" + (if (mx > 0) "/$mx" else "") + ")"
-        title.text = "Чат · $n " + (if (mx > 0) "из $mx" else "онлайн")
-    }
-
-    private fun setTab(players: Boolean) {
-        showPlayers = players
-        scroll.visibility = if (players) View.GONE else View.VISIBLE
-        inputRow.visibility = if (players) View.GONE else View.VISIBLE
-        playersScroll.visibility = if (players) View.VISIBLE else View.GONE
-        for ((t, on) in listOf(tabChat to !players, tabPlayers to players)) {
-            t.setTextColor(0xFFFFFFFF.toInt())
-            t.background = flatBtn(on)
-        }
-        if (players) renderPlayers()
-    }
-
-    /** Список игроков комнаты, как TAB в Minecraft: ник и номер, ты отмечен. Данные пишет мод в maps/_players. */
-    private fun renderPlayers() {
-        val lines = try { File(File(act.filesDir, "maps"), "_players").readText().lines().filter { it.isNotBlank() } } catch (_: Throwable) { emptyList() }
-        playersBox.removeAllViews()
-        if (lines.isEmpty()) { playersBox.addView(txt("Ты не в игровой комнате.", 13f, 0xFFC8C8C8.toInt())); tabPlayers.text = "Игроки"; return }
+        if (lines.isEmpty()) { sys("Ты не в игровой комнате."); return }
         val head = lines[0].split('\t')
         val n = head.getOrNull(0)?.toIntOrNull() ?: (lines.size - 1)
         val mx = head.getOrNull(1)?.toIntOrNull() ?: 0
-        tabPlayers.text = "Игроки ($n)"
-        playersBox.addView(txt("Онлайн: $n" + (if (mx > 0) " из $mx" else ""), 13f, 0xFFC8C8C8.toInt()))
+        sys("Онлайн: $n" + (if (mx > 0) " из $mx" else ""))
         for (l in lines.drop(1)) {
             val p = l.split('\t')
             val nm = p.getOrElse(1) { "" }.ifBlank { "игрок ${p.getOrElse(0) { "?" }}" }
-            val mine = p.getOrElse(2) { "0" } == "1"
-            playersBox.addView(txt("• $nm" + (if (mine) "  (ты)" else ""), 14f, if (mine) 0xFFB9D58A.toInt() else Color.WHITE, mine).apply { setPadding(0, dp(3), 0, dp(3)) })
-        }
-    }
-
-    /** Окно чата открыто или открывается (сама анимация может ещё идти). */
-    private var winOpen = false
-
-    /** Открыть или закрыть окно: оно вырастает из кнопки чата и уменьшается обратно. */
-    private fun toggle() {
-        val open = !winOpen
-        winOpen = open
-        panel.visibility = View.VISIBLE
-        win.animate().cancel()
-        if (open) {
-            clearFeed()
-            unread = 0; updateBadge()
-            if (win.visibility != View.VISIBLE) {
-                val bl = bubble.layoutParams as FrameLayout.LayoutParams
-                val wl = win.layoutParams as FrameLayout.LayoutParams
-                win.pivotX = (bl.leftMargin + bl.width / 2f - wl.leftMargin).coerceIn(0f, wl.width.toFloat())
-                win.pivotY = (bl.topMargin + bl.height / 2f - wl.topMargin).coerceIn(0f, wl.height.toFloat())
-                win.alpha = 0f; win.scaleX = 0.7f; win.scaleY = 0.7f
-                win.visibility = View.VISIBLE
-            }
-            win.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220)
-                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
-            scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-        } else {
-            val imm = act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.hideSoftInputFromWindow(input.windowToken, 0)
-            win.animate().alpha(0f).scaleX(0.8f).scaleY(0.8f).setDuration(160)
-                .setInterpolator(android.view.animation.AccelerateInterpolator())
-                .withEndAction {
-                    if (!winOpen) { win.visibility = View.GONE; win.alpha = 1f; win.scaleX = 1f; win.scaleY = 1f }
-                }.start()
+            sys("• $nm" + (if (p.getOrElse(2) { "0" } == "1") "  (ты)" else ""))
         }
     }
 
@@ -349,7 +219,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
     }
 
-    /** Плоская кнопка в духе Bedrock: серая, с рамкой; выбранная подсвечена белой рамкой. */
+    /** Плоская кнопка в духе Bedrock: серая, с рамкой. */
     private fun flatBtn(on: Boolean) = GradientDrawable().apply {
         setColor(if (on) 0xFF7A7A7A.toInt() else 0xFF2E2E2E.toInt())
         cornerRadius = dp(2).toFloat()
@@ -368,24 +238,30 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         return colors[Math.abs(who.hashCode()) % colors.size]
     }
 
-    /** Новая строка в ленте: плавно выезжает, держится около 6 секунд и гаснет. Видно максимум 3 строки. */
-    private fun feedAdd(who: String, text: String, mine: Boolean) {
-        val lp = feed.layoutParams as FrameLayout.LayoutParams
-        val bl = bubble.layoutParams as FrameLayout.LayoutParams
-        lp.leftMargin = bl.leftMargin + bl.width + dp(8); lp.topMargin = bl.topMargin
-        lp.width = minOf(dp(300), maxOf(dp(120), parent.width - lp.leftMargin - dp(8)))
-        feed.layoutParams = lp
-        val tv = txt("", 13f).apply {
-            this.text = chatSpan(who, text, mine)
-            setPadding(0, dp(1), 0, dp(1))
-            isClickable = false
+    /** Новое сообщение (только в главном потоке): в историю и на экран. */
+    private fun addMsg(m: Msg) {
+        history.add(m)
+        if (history.size > 60) history.removeAt(0)
+        if (chatOpen) addLine(m, false)
+        else if (bubble.visibility == View.VISIBLE) addLine(m, true)
+    }
+
+    /** Строка в ленте: плавно выезжает. Если [fading], держится около 6 секунд и гаснет (видно максимум 3 строки). */
+    private fun addLine(m: Msg, fading: Boolean) {
+        val tv = txt("", 13f, if (m.sys) 0xFFC8C8C8.toInt() else Color.WHITE).apply {
+            text = if (m.sys) m.text else chatSpan(m.who, m.text, m.mine)
+            setPadding(0, dp(1), 0, dp(1)); isClickable = false
             alpha = 0f; translationY = dp(8).toFloat()
         }
         feed.addView(tv)
         tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
-        val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
-        for (v in live.dropLast(3)) feedFade(v, 180L)
-        main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 700L) }, 6000L)
+        if (fading) {
+            val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
+            for (v in live.dropLast(3)) feedFade(v, 180L)
+            main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 700L) }, 6000L)
+        } else {
+            while (feed.childCount > 8) feed.removeViewAt(0)
+        }
     }
 
     private fun feedFade(v: View, ms: Long) {
@@ -397,21 +273,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         for (v in (0 until feed.childCount).map { feed.getChildAt(it) }) if (v.tag != "x") feedFade(v, 120L)
     }
 
-    private fun updateBadge() {
-        badge.visibility = if (unread > 0) View.VISIBLE else View.GONE
-        badge.text = if (unread > 9) "9+" else unread.toString()
-    }
-
-    private fun line(who: String, text: String, own: Boolean) {
-        val tv = txt("", 14f).apply { this.text = chatSpan(who, text, own); setPadding(0, dp(2), 0, dp(2)) }
-        list.addView(tv)
-        if (list.childCount > 120) list.removeViewAt(0)
-        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun sys(text: String) {
-        list.addView(txt(text, 12f, 0xFFC8C8C8.toInt()).apply { setPadding(0, dp(2), 0, dp(2)) })
-    }
+    private fun sys(text: String) = addMsg(Msg("", text, false, true))
 
     private fun settings() {
         val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
@@ -464,11 +326,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         return c
     }
 
-    private fun show(who: String, text: String, mine: Boolean) = main.post {
-        line(who, text, mine)
-        if (!winOpen) feedAdd(who, text, mine)
-        if (!winOpen && !mine) { unread++; updateBadge() }
-    }
+    private fun show(who: String, text: String, mine: Boolean) = main.post { addMsg(Msg(who, text, mine, false)) }
 
     private fun loop() {
         var shownRoom = "?"
@@ -486,9 +344,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                 if (r != shownRoom) {
                     shownRoom = r; after = 0; ntfySince = "5m"; seen.clear()
                     main.post {
+                        history.clear(); feed.removeAllViews()
                         applyVisible(r.isNotEmpty())
-                        title.text = if (r.isEmpty()) "Чат" else "Чат · $r"
-                        list.removeAllViews()
                         if (r.isNotEmpty()) sys("Ты в комнате «$r».")
                     }
                 }
