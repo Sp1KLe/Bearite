@@ -42,6 +42,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     private lateinit var badge: TextView
     private lateinit var panel: LinearLayout
     private lateinit var win: ResizableFrame
+    private lateinit var feed: LinearLayout
     private lateinit var inputRow: View
     private lateinit var playersScroll: ScrollView
     private lateinit var playersBox: LinearLayout
@@ -96,7 +97,11 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
             override fun onTouch(v: View, e: android.view.MotionEvent): Boolean {
                 val lp = bubble.layoutParams as FrameLayout.LayoutParams
                 when (e.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin; moved = false }
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        sx = e.rawX; sy = e.rawY; l = lp.leftMargin; t = lp.topMargin; moved = false
+                        bubble.animate().cancel()
+                        bubble.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).start()   // кнопка «вдавливается»
+                    }
                     android.view.MotionEvent.ACTION_MOVE -> {
                         if (Math.abs(e.rawX - sx) > dp(6) || Math.abs(e.rawY - sy) > dp(6)) moved = true
                         if (moved) {
@@ -107,7 +112,15 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
                             bl.leftMargin = lp.leftMargin + dp(30); bl.topMargin = lp.topMargin - dp(4); badge.layoutParams = bl
                         }
                     }
-                    android.view.MotionEvent.ACTION_UP -> { if (moved) prefs.edit().putInt("bx", lp.leftMargin).putInt("by", lp.topMargin).apply() else toggle() }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        bubble.animate().cancel()
+                        bubble.animate().scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+                        if (moved) prefs.edit().putInt("bx", lp.leftMargin).putInt("by", lp.topMargin).apply() else toggle()
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        bubble.animate().cancel()
+                        bubble.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                    }
                 }
                 return true
             }
@@ -118,6 +131,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
             visibility = View.GONE; isClickable = false
         }
         parent.addView(badge, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)) + dp(30); topMargin = prefs.getInt("by", dp(72)) - dp(4) })
+        // лента новых сообщений поверх игры (пока окно закрыто): строки плавно появляются и гаснут сами
+        feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
+        parent.addView(feed, FrameLayout.LayoutParams(dp(300), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = prefs.getInt("bx", dp(10)) + dp(54); topMargin = prefs.getInt("by", dp(72)) })
 
         val dm = act.resources.displayMetrics
         val w = minOf(dp(340), (dm.widthPixels * 0.5f).toInt())
@@ -160,7 +176,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         inputRow = row
         panel.addView(row)
         setTab(false)
-        main.post(object : Runnable { override fun run() { if (running) { updateCount(); if (win.visibility == View.VISIBLE && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
+        main.post(object : Runnable { override fun run() { if (running) { updateCount(); if (winOpen && showPlayers) renderPlayers(); main.postDelayed(this, 1000) } } })
         win = ResizableFrame(act).apply { visibility = View.GONE }
         win.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         win.addView(TextView(act).apply { text = "\u25E2"; textSize = 14f; setTextColor(GameUi.DIM); gravity = Gravity.END or Gravity.BOTTOM; setPadding(0, 0, dp(4), 0); isClickable = false },
@@ -192,7 +208,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         bubble.visibility = if (inRealRoom) View.VISIBLE else View.GONE
         if (!inRealRoom) {
             badge.visibility = View.GONE
-            if (win.visibility == View.VISIBLE) toggle()
+            clearFeed()
+            if (winOpen) toggle()
         } else updateBadge()
     }
 
@@ -285,17 +302,79 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         }
     }
 
+    /** Окно чата открыто или открывается (сама анимация может ещё идти). */
+    private var winOpen = false
+
+    /** Открыть или закрыть окно: оно вырастает из кнопки чата и уменьшается обратно. */
     private fun toggle() {
-        val open = win.visibility != View.VISIBLE
-        win.visibility = if (open) View.VISIBLE else View.GONE
+        val open = !winOpen
+        winOpen = open
         panel.visibility = View.VISIBLE
+        win.animate().cancel()
         if (open) {
+            clearFeed()
             unread = 0; updateBadge()
+            if (win.visibility != View.VISIBLE) {
+                val bl = bubble.layoutParams as FrameLayout.LayoutParams
+                val wl = win.layoutParams as FrameLayout.LayoutParams
+                win.pivotX = (bl.leftMargin + bl.width / 2f - wl.leftMargin).coerceIn(0f, wl.width.toFloat())
+                win.pivotY = (bl.topMargin + bl.height / 2f - wl.topMargin).coerceIn(0f, wl.height.toFloat())
+                win.alpha = 0f; win.scaleX = 0.7f; win.scaleY = 0.7f
+                win.visibility = View.VISIBLE
+            }
+            win.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
             scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
         } else {
             val imm = act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(input.windowToken, 0)
+            win.animate().alpha(0f).scaleX(0.8f).scaleY(0.8f).setDuration(160)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
+                .withEndAction {
+                    if (!winOpen) { win.visibility = View.GONE; win.alpha = 1f; win.scaleX = 1f; win.scaleY = 1f }
+                }.start()
         }
+    }
+
+    // ------------------------------------------------------------------ лента сообщений
+
+    private fun nickColor(who: String): Int {
+        val colors = intArrayOf(0xFF6FE06F.toInt(), 0xFFF2A93B.toInt(), 0xFF55D6F2.toInt(), 0xFFB07CFF.toInt(), 0xFFFF7B7B.toInt(), 0xFFF2E25A.toInt())
+        return colors[Math.abs(who.hashCode()) % colors.size]
+    }
+
+    /** Новая строка в ленте: плавно выезжает, держится около 6 секунд и гаснет. Видно максимум 3 строки. */
+    private fun feedAdd(who: String, text: String, mine: Boolean) {
+        val lp = feed.layoutParams as FrameLayout.LayoutParams
+        val bl = bubble.layoutParams as FrameLayout.LayoutParams
+        lp.leftMargin = bl.leftMargin + bl.width + dp(8); lp.topMargin = bl.topMargin
+        lp.width = minOf(dp(300), maxOf(dp(120), parent.width - lp.leftMargin - dp(8)))
+        feed.layoutParams = lp
+        val tv = TextView(act).apply {
+            this.text = android.text.SpannableStringBuilder().apply {
+                append(who); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
+                setSpan(android.text.style.ForegroundColorSpan(if (mine) 0xFFB9D58A.toInt() else nickColor(who)), 0, length, 0)
+                append(": "); append(text)
+            }
+            textSize = 13f; setTextColor(Color.WHITE); setPadding(0, dp(1), 0, dp(1))
+            setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
+            isClickable = false
+            alpha = 0f; translationY = dp(8).toFloat()
+        }
+        feed.addView(tv)
+        tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
+        val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
+        for (v in live.dropLast(3)) feedFade(v, 180L)
+        main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 700L) }, 6000L)
+    }
+
+    private fun feedFade(v: View, ms: Long) {
+        v.tag = "x"
+        v.animate().alpha(0f).setDuration(ms).withEndAction { feed.removeView(v) }.start()
+    }
+
+    private fun clearFeed() {
+        for (v in (0 until feed.childCount).map { feed.getChildAt(it) }) if (v.tag != "x") feedFade(v, 120L)
     }
 
     private fun updateBadge() {
@@ -374,7 +453,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun show(who: String, text: String, mine: Boolean) = main.post {
         line(who, text, mine)
-        if (win.visibility != View.VISIBLE && !mine) { unread++; updateBadge() }
+        if (!winOpen) feedAdd(who, text, mine)
+        if (!winOpen && !mine) { unread++; updateBadge() }
     }
 
     private fun loop() {
