@@ -464,8 +464,8 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         /** Сколько строк чата видно одновременно. */
         const val MAX_LINES = 8
 
-        /** Сколько миллисекунд строка висит на экране при закрытом чате, потом гаснет. */
-        const val HOLD_MS = 30000L
+        /** Сколько миллисекунд строка висит на экране при закрытом чате, потом секунду гаснет (всего около 5,5 секунды). */
+        const val HOLD_MS = 4500L
 
         /** Кривые движения Material 3: «emphasized decelerate» для появления и «emphasized accelerate» для исчезновения. */
         private val EMPH_IN = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
