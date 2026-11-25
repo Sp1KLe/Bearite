@@ -43,6 +43,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
     /** Всё, что лежит в левом верхнем углу: лента сообщений и под ней поле ввода. */
     private lateinit var box: LinearLayout
     private lateinit var feed: LinearLayout
+    private lateinit var scroll: ScrollView
     private lateinit var inputRow: View
     private lateinit var input: EditText
     private var chatOpen = false
@@ -109,7 +110,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         // лента и поле ввода: левый верхний угол, как на видео; без окна и рамки
         box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(2), dp(4), dp(4)); isClickable = false }
         feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
-        box.addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        scroll = ChatScroll(act).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER; isClickable = false }
+        scroll.addView(feed, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        box.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         input = EditText(act).apply {
             hint = "Нажми, чтобы написать…"; setHintTextColor(M3.VARIANT); setTextColor(M3.ON_SURF); setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 12f * d)
             maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
@@ -196,12 +199,13 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun toggle() { if (chatOpen) closeChat() else openChat() }
 
-    /** Под лентой выезжает поле ввода, показывается история (последние 8 строк, не гаснут), открывается клавиатура. */
+    /** Под лентой выезжает поле ввода, показывается вся история (до 60 сообщений, листается пальцем), открывается клавиатура. */
     private fun openChat() {
         chatOpen = true
         feed.removeAllViews()
-        for (m in history.takeLast(MAX_LINES)) addLine(m, false)
+        for (m in history) addLine(m, false, false)
         if (nick.isBlank()) sys("Нажми ⚙ и впиши ник. «/игроки» покажет, кто в комнате.")
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
         inputRow.animate().cancel()
         inputRow.pivotX = 0f; inputRow.pivotY = 0f
         inputRow.alpha = 0f; inputRow.translationY = -dp(8).toFloat(); inputRow.scaleX = 0.92f; inputRow.scaleY = 0.92f; inputRow.visibility = View.VISIBLE
@@ -221,7 +225,11 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         inputRow.animate().alpha(0f).translationY(-dp(6).toFloat()).setDuration(180).setInterpolator(EMPH_OUT)
             .withEndAction { if (!chatOpen) inputRow.visibility = View.GONE }.start()
         bubble.text = "•••"
-        clearFeed()
+        // стопка остаётся на экране: последние MAX_LINES строк, каждая гаснет сама через HOLD_MS
+        val kids = (0 until feed.childCount).map { feed.getChildAt(it) }
+        for (v in kids.dropLast(MAX_LINES)) feed.removeView(v)
+        scroll.scrollTo(0, 0)
+        for (v in kids.takeLast(MAX_LINES)) if (v.tag != "x") armFade(v)
     }
 
     private fun sendAndClose() {
@@ -276,34 +284,50 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         else if (bubble.visibility == View.VISIBLE) addLine(m, true)
     }
 
-    /** Строка в ленте: плавно выезжает. Если [fading], держится 8 секунд и гаснет (видно максимум [MAX_LINES] строк). */
-    private fun addLine(m: Msg, fading: Boolean) {
+    /**
+     * Строка в ленте: плавно выезжает ([animate]). Если [fading] (чат закрыт), стопка из [MAX_LINES] строк держится на экране,
+     * каждая строка гаснет через [HOLD_MS]. В открытом чате строки не гаснут, ленту можно листать.
+     */
+    private fun addLine(m: Msg, fading: Boolean, animate: Boolean = true) {
         val tv = txt("", 12f, if (m.sys) M3.VARIANT else M3.ON_SURF).apply {
             text = if (m.sys) m.text else chatSpan(m.who, m.text, m.mine)
             // тональный скруглённый пузырь за каждой строкой; строки идут стопкой, новые снизу
             background = GradientDrawable().apply { setColor(0xE61E1F25.toInt()); cornerRadius = dp(10).toFloat() }
             setPadding(dp(9), dp(4), dp(9), dp(4)); isClickable = false
             pivotX = 0f
-            alpha = 0f; translationY = dp(10).toFloat(); scaleX = 0.94f; scaleY = 0.94f
+            if (animate) { alpha = 0f; translationY = dp(10).toFloat(); scaleX = 0.94f; scaleY = 0.94f }
         }
+        // если читатель уже внизу ленты, новые сообщения прокручивают её сами; если он листает историю вверх, не мешаем
+        val atBottom = scroll.scrollY + scroll.height >= feed.height - dp(24)
         feed.addView(tv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(2) })
-        tv.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(EMPH_IN).start()
+        if (animate) tv.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(EMPH_IN).start()
         if (fading) {
             val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
             for (v in live.dropLast(MAX_LINES)) feedFade(v, 180L)
-            main.postDelayed({ if (tv.tag != "x" && tv.parent != null) feedFade(tv, 800L) }, 8000L)
+            armFade(tv)
         } else {
-            while (feed.childCount > MAX_LINES) feed.removeViewAt(0)
+            while (feed.childCount > 60) feed.removeViewAt(0)
+            if (animate && atBottom) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
         }
+    }
+
+    /** Через [HOLD_MS] строка плавно гаснет, если чат закрыт. */
+    private fun armFade(v: View) {
+        main.postDelayed({ if (v.tag != "x" && v.parent != null && !chatOpen) feedFade(v, 1000L) }, HOLD_MS)
+    }
+
+    /** Лента с прокруткой: листается только при открытом чате, иначе касания проходят в игру. Высота не больше 58% экрана. */
+    private inner class ChatScroll(c: Context) : ScrollView(c) {
+        override fun onMeasure(w: Int, h: Int) {
+            super.onMeasure(w, View.MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.58f).toInt(), View.MeasureSpec.AT_MOST))
+        }
+        override fun onTouchEvent(e: android.view.MotionEvent): Boolean = chatOpen && super.onTouchEvent(e)
+        override fun onInterceptTouchEvent(e: android.view.MotionEvent): Boolean = chatOpen && super.onInterceptTouchEvent(e)
     }
 
     private fun feedFade(v: View, ms: Long) {
         v.tag = "x"
         v.animate().alpha(0f).setDuration(ms).setInterpolator(EMPH_OUT).withEndAction { feed.removeView(v) }.start()
-    }
-
-    private fun clearFeed() {
-        for (v in (0 until feed.childCount).map { feed.getChildAt(it) }) if (v.tag != "x") feedFade(v, 120L)
     }
 
     private fun sys(text: String) = addMsg(Msg("", text, false, true))
@@ -439,6 +463,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
         /** Сколько строк чата видно одновременно. */
         const val MAX_LINES = 8
+
+        /** Сколько миллисекунд строка висит на экране при закрытом чате, потом гаснет. */
+        const val HOLD_MS = 30000L
 
         /** Кривые движения Material 3: «emphasized decelerate» для появления и «emphasized accelerate» для исчезновения. */
         private val EMPH_IN = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
