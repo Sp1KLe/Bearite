@@ -351,6 +351,9 @@ std::string utf8(void* il2str) {
     return out;
 }
 
+std::string read_wanted_nick();               // ник игрока из maps/_nick, пусто если не задан (определено рядом с photon_nick)
+void photon_nick(const std::string& nick);
+
 // Методы Unity
 struct Fns {
     void *create_primitive, *get_transform, *go_transform, *set_position, *set_scale, *set_euler, *get_position, *get_forward;
@@ -2543,6 +2546,12 @@ void publish_players() {
             if (gL) if (void* r = inv(gL, pl)) local = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
             if (gM) if (void* r = inv(gM, pl)) master = *(const uint8_t*)obj_unbox(r) ? 1 : 0;
             std::string nick = gN ? utf8(inv(gN, pl)) : "";
+            if (local) {
+                // игра сама ставит имя вида «bear#1234»; если оно не наше, возвращаем ник игрока (не чаще раза в 2 секунды)
+                static time_t lastFix = 0;
+                std::string want = read_wanted_nick();
+                if (!want.empty() && nick != want && time(nullptr) - lastFix >= 2) { lastFix = time(nullptr); photon_nick(want); }
+            }
             for (auto& ch : nick) if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
             body += std::to_string(actor) + "\t" + nick + "\t" + std::to_string(local) + "\t" + std::to_string(master) + "\n";
         }
@@ -2597,6 +2606,14 @@ void publish_positions(long long now) {
 }
 
 /** Команды лаунчера (maps/_cmd): «enter\tid» — войти в мир-арену в текущей сцене, «exit», «tp\tx\ty\tz» — в координатах активного мира. */
+
+/** Ник, который игрок задал в лаунчере или в ⚙ чата (maps/_nick); пусто, если не задан. */
+std::string read_wanted_nick() {
+    std::string nick;
+    if (FILE* f = fopen((g_mapsDir + "/_nick").c_str(), "r")) { char b[64] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); nick = b; }
+    while (!nick.empty() && (nick.back() == '\n' || nick.back() == '\r' || nick.back() == ' ')) nick.pop_back();
+    return nick;
+}
 
 /** Команды из лаунчера: «nick\tник», «create\tкод\tлимит», «join\tкод». Выполняются в потоке Unity (как и остальной мод). */
 void photon_nick(const std::string& nick) {
@@ -3130,6 +3147,25 @@ uint8_t h_connect_settings(const void* mi) {
         if (!nick.empty()) photon_nick(nick);
     } catch (...) {}
     return o_connect_settings ? o_connect_settings(mi) : 0;
+}
+
+/**
+ * Игра сама ставит имя вида «bear#1234» (PhotonNetwork.NickName) уже после подключения и перебивает ник игрока:
+ * его видно в списке игроков и над медведем у других. Подменяем значение на ник из maps/_nick.
+ */
+void (*o_set_nick)(void*, const void*) = nullptr;
+void h_set_nick(void* value, const void* mi) {
+    try {
+        std::string want = read_wanted_nick();
+        if (!want.empty()) {
+            std::string got = utf8(value);
+            if (got != want) {
+                logf_("ник: игра ставила «%s», ставлю «%s»", got.c_str(), want.c_str());
+                value = bearite_il2.string_new(want.c_str());
+            }
+        }
+    } catch (...) {}
+    if (o_set_nick) o_set_nick(value, mi);
 }
 
 int read_room_limit();
@@ -5415,6 +5451,10 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
     {
         int rc = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "ConnectUsingSettings", 0, (void*)h_connect_settings, (void**)&o_connect_settings);
         logf_("Photon: перехват ConnectUsingSettings: %s", rc == 0 ? "готово" : "не вышло");
+    }
+    {
+        int rc = bearite_hook_method(A, ID, "Photon.Pun", "PhotonNetwork", "set_NickName", 1, (void*)h_set_nick, (void**)&o_set_nick);
+        logf_("Photon: перехват set_NickName: %s", rc == 0 ? "готово" : "не вышло");
     }
     dump_class("Photon.Pun", "PhotonServerSettings");
     dump_class("Photon.Realtime", "AppSettings");
