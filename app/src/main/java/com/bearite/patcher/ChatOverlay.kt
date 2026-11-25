@@ -111,29 +111,30 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         feed = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; isClickable = false }
         box.addView(feed, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         input = EditText(act).apply {
-            hint = "Нажми, чтобы написать…"; setHintTextColor(0xFF9A9A9A.toInt()); setTextColor(Color.WHITE); setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 12f * d)
+            hint = "Нажми, чтобы написать…"; setHintTextColor(M3.VARIANT); setTextColor(M3.ON_SURF); setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 12f * d)
             maxLines = 2; imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            background = GradientDrawable().apply { setColor(0xCC161616.toInt()); cornerRadius = dp(2).toFloat(); setStroke(dp(2), 0xFF8B8B8B.toInt()) }
-            setPadding(dp(6), dp(4), dp(6), dp(4))
+            background = GradientDrawable().apply { setColor(M3.HIGH); cornerRadius = dp(20).toFloat() }
+            elevation = dp(2).toFloat(); minHeight = dp(36)
+            setPadding(dp(14), dp(6), dp(14), dp(6))
             setOnEditorActionListener { _, a, _ -> if (a == EditorInfo.IME_ACTION_SEND) { sendAndClose(); true } else false }
         }
         val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE }
         row.addView(input, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(txt("➤", 16f, Color.WHITE, true).apply { gravity = Gravity.CENTER; background = flatBtn(true); setOnClickListener { sendAndClose() } },
-            LinearLayout.LayoutParams(dp(34), dp(30)).apply { leftMargin = dp(3) })
-        row.addView(txt("⚙", 15f, 0xFFDDDDDD.toInt()).apply { gravity = Gravity.CENTER; background = flatBtn(false); setOnClickListener { settings() } },
-            LinearLayout.LayoutParams(dp(30), dp(30)).apply { leftMargin = dp(3) })
+        row.addView(txt("➤", 15f, M3.ON_PRIMARY, true).apply { gravity = Gravity.CENTER; background = circle(M3.PRIMARY); elevation = dp(2).toFloat(); setOnClickListener { sendAndClose() } },
+            LinearLayout.LayoutParams(dp(36), dp(36)).apply { leftMargin = dp(6) })
+        row.addView(txt("⚙", 15f, M3.ON_TONAL).apply { gravity = Gravity.CENTER; background = circle(M3.TONAL); elevation = dp(2).toFloat(); setOnClickListener { settings() } },
+            LinearLayout.LayoutParams(dp(36), dp(36)).apply { leftMargin = dp(6) })
         inputRow = row
         box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
         parent.addView(box, FrameLayout.LayoutParams((dm.widthPixels * 0.46f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START)
             .apply { leftMargin = dp(6); topMargin = (dm.heightPixels * 0.115f).toInt() })
 
-        // кнопка чата: голубой пузырь с тремя точками, лежит на месте родной кнопки чата игры (справа сверху)
+        // кнопка чата: большая FAB Material 3, лежит на месте родной кнопки чата игры (справа сверху)
         bubble = TextView(act).apply {
-            text = "•••"; setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 14f * d); gravity = Gravity.CENTER; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
-            setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0x99000000.toInt())
-            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(0xFFA6E3F7.toInt()); setStroke(dp(3), 0xFF3C7FA8.toInt()) }
+            text = "•••"; setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 14f * d); gravity = Gravity.CENTER; setTextColor(M3.ON_PRIMARY); typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(M3.PRIMARY) }
+            elevation = dp(4).toFloat()
         }
         bubble.visibility = View.GONE   // покажем, когда игрок окажется в настоящей комнате
         parent.addView(bubble, FrameLayout.LayoutParams(bs, bs, Gravity.TOP or Gravity.START).apply {
@@ -202,8 +203,10 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         for (m in history.takeLast(MAX_LINES)) addLine(m, false)
         if (nick.isBlank()) sys("Нажми ⚙ и впиши ник. «/игроки» покажет, кто в комнате.")
         inputRow.animate().cancel()
-        inputRow.alpha = 0f; inputRow.translationY = -dp(6).toFloat(); inputRow.visibility = View.VISIBLE
-        inputRow.animate().alpha(1f).translationY(0f).setDuration(180).start()
+        inputRow.pivotX = 0f; inputRow.pivotY = 0f
+        inputRow.alpha = 0f; inputRow.translationY = -dp(8).toFloat(); inputRow.scaleX = 0.92f; inputRow.scaleY = 0.92f; inputRow.visibility = View.VISIBLE
+        inputRow.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(EMPH_IN).start()
+        bubble.text = "✕"
         input.requestFocus()
         main.postDelayed({
             if (chatOpen) (act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input, 0)
@@ -215,7 +218,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         (act.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
         input.clearFocus()
         inputRow.animate().cancel()
-        inputRow.animate().alpha(0f).setDuration(120).withEndAction { if (!chatOpen) inputRow.visibility = View.GONE }.start()
+        inputRow.animate().alpha(0f).translationY(-dp(6).toFloat()).setDuration(180).setInterpolator(EMPH_OUT)
+            .withEndAction { if (!chatOpen) inputRow.visibility = View.GONE }.start()
+        bubble.text = "•••"
         clearFeed()
     }
 
@@ -242,29 +247,24 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     // ------------------------------------------------------------------ лента сообщений
 
-    /** Текст чата: белый, с тенью, чтобы читался поверх игры. */
-    private fun txt(t: String, sp: Float, color: Int = Color.WHITE, bold: Boolean = false) = TextView(act).apply {
+    /** Текст чата в цветах Material 3 (палитра в M3.kt). */
+    private fun txt(t: String, sp: Float, color: Int = M3.ON_SURF, bold: Boolean = false) = TextView(act).apply {
         text = t; setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sp * d); setTextColor(color)
         if (bold) typeface = Typeface.DEFAULT_BOLD
-        setShadowLayer(dp(2).toFloat(), dp(1).toFloat(), dp(1).toFloat(), 0xCC000000.toInt())
     }
 
-    /** Плоская кнопка в духе Bedrock: серая, с рамкой. */
-    private fun flatBtn(on: Boolean) = GradientDrawable().apply {
-        setColor(if (on) 0xFF7A7A7A.toInt() else 0xFF2E2E2E.toInt())
-        cornerRadius = dp(2).toFloat()
-        setStroke(dp(2), if (on) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
-    }
+    /** Круглая кнопка Material 3 (заливка [color]). */
+    private fun circle(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
 
-    /** «Ник: текст», ник жирным и своим цветом, свои сообщения зелёные. */
+    /** «Ник: текст», ник жирным и своим пастельным цветом, свой ник цветом primary. */
     private fun chatSpan(who: String, text: String, mine: Boolean) = android.text.SpannableStringBuilder().apply {
         append(who); setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, length, 0)
-        setSpan(android.text.style.ForegroundColorSpan(if (mine) 0xFFB9D58A.toInt() else nickColor(who)), 0, length, 0)
+        setSpan(android.text.style.ForegroundColorSpan(if (mine) M3.PRIMARY else nickColor(who)), 0, length, 0)
         append(": "); append(text)
     }
 
     private fun nickColor(who: String): Int {
-        val colors = intArrayOf(0xFF6FE06F.toInt(), 0xFFF2A93B.toInt(), 0xFF55D6F2.toInt(), 0xFFB07CFF.toInt(), 0xFFFF7B7B.toInt(), 0xFFF2E25A.toInt())
+        val colors = intArrayOf(0xFFA8DAB5.toInt(), 0xFFF2BC73.toInt(), 0xFF9ECAFF.toInt(), 0xFFE2B5F0.toInt(), 0xFFFFB4AB.toInt(), 0xFFEBDE9C.toInt())
         return colors[Math.abs(who.hashCode()) % colors.size]
     }
 
@@ -276,16 +276,18 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
         else if (bubble.visibility == View.VISIBLE) addLine(m, true)
     }
 
-    /** Строка в ленте: плавно выезжает. Если [fading], держится около 6 секунд и гаснет (видно максимум 3 строки). */
+    /** Строка в ленте: плавно выезжает. Если [fading], держится 8 секунд и гаснет (видно максимум [MAX_LINES] строк). */
     private fun addLine(m: Msg, fading: Boolean) {
-        val tv = txt("", 12f, if (m.sys) 0xFFC8C8C8.toInt() else Color.WHITE).apply {
+        val tv = txt("", 12f, if (m.sys) M3.VARIANT else M3.ON_SURF).apply {
             text = if (m.sys) m.text else chatSpan(m.who, m.text, m.mine)
-            setBackgroundColor(0x80000000.toInt())   // чёрная полупрозрачная полоса за каждой строкой, строки идут сплошной стопкой
-            setPadding(dp(3), dp(1), dp(3), dp(1)); isClickable = false
-            alpha = 0f; translationY = dp(8).toFloat()
+            // тональный скруглённый пузырь за каждой строкой; строки идут стопкой, новые снизу
+            background = GradientDrawable().apply { setColor(0xE61E1F25.toInt()); cornerRadius = dp(10).toFloat() }
+            setPadding(dp(9), dp(4), dp(9), dp(4)); isClickable = false
+            pivotX = 0f
+            alpha = 0f; translationY = dp(10).toFloat(); scaleX = 0.94f; scaleY = 0.94f
         }
-        feed.addView(tv)
-        tv.animate().alpha(1f).translationY(0f).setDuration(220).start()
+        feed.addView(tv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(2) })
+        tv.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(EMPH_IN).start()
         if (fading) {
             val live = (0 until feed.childCount).map { feed.getChildAt(it) }.filter { it.tag != "x" }
             for (v in live.dropLast(MAX_LINES)) feedFade(v, 180L)
@@ -297,7 +299,7 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
     private fun feedFade(v: View, ms: Long) {
         v.tag = "x"
-        v.animate().alpha(0f).setDuration(ms).withEndAction { feed.removeView(v) }.start()
+        v.animate().alpha(0f).setDuration(ms).setInterpolator(EMPH_OUT).withEndAction { feed.removeView(v) }.start()
     }
 
     private fun clearFeed() {
@@ -437,5 +439,9 @@ class ChatOverlay(private val act: Activity, private val parent: FrameLayout) {
 
         /** Сколько строк чата видно одновременно. */
         const val MAX_LINES = 8
+
+        /** Кривые движения Material 3: «emphasized decelerate» для появления и «emphasized accelerate» для исчезновения. */
+        private val EMPH_IN = android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+        private val EMPH_OUT = android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f)
     }
 }
