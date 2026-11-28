@@ -2610,6 +2610,33 @@ void photon_nick(const std::string& nick) {
     logf_("команда: ник в Photon «%s»", nick.c_str());
 }
 
+/** Ник из лаунчера (maps/_nick) держим всё время: игра сама ставит свой «bear#цифры» уже после подключения и при входе в комнату,
+ *  поэтому одной установки перед ConnectUsingSettings мало. Раз в ~500 мс сверяем PhotonNetwork.NickName и, если он другой, возвращаем наш:
+ *  Photon сам разошлёт новый ник остальным игрокам (в списке игроков и над медведем, даже у тех, у кого нет Bearite). */
+void nick_tick() {
+    static bool loaded = false;
+    static std::string want;
+    static void *getM = nullptr, *setM = nullptr;
+    static int fixes = 0;
+    if (!loaded) {
+        loaded = true;
+        if (FILE* f = fopen((g_mapsDir + "/_nick").c_str(), "r")) { char b[64] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); want = b; }
+        while (!want.empty() && (want.back() == '\n' || want.back() == '\r' || want.back() == ' ')) want.pop_back();
+        void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
+        if (pnK) {
+            getM = bearite_il2.class_get_method_from_name(pnK, "get_NickName", 0);
+            setM = bearite_il2.class_get_method_from_name(pnK, "set_NickName", 1);
+        }
+        logf_("ник: следим за PhotonNetwork.NickName (%s), метод чтения=%d записи=%d", want.empty() ? "ник не задан" : want.c_str(), getM != nullptr, setM != nullptr);
+    }
+    if (want.empty() || !getM || !setM) return;
+    void* cur = inv(getM, nullptr);
+    if (cur && utf8(cur) == want) return;
+    void* a[1] = {bearite_il2.string_new(want.c_str())};
+    inv(setM, nullptr, a);
+    if (++fixes <= 6) logf_("ник: игра поставила «%s», вернул «%s»", cur ? utf8(cur).c_str() : "", want.c_str());
+}
+
 void rp_command(const std::vector<std::string>& p);  // реплей: определён ниже, рядом с update()
 
 // ---- материалы сцены для редактора карт: цвет и текстура (копия в PNG через RenderTexture, оригиналы не читаются)
@@ -5093,8 +5120,97 @@ void tp_materials() {
     }
 }
 
+/** Копия текстуры игры в PNG (полный размер, но не больше cap). Оригинал не трогаем: копируем через RenderTexture, поэтому работает и для закрытых от чтения. */
+void* tp_png_bytes(void* tex, int cap) {
+    static bool init = false;
+    static void *getW, *getH, *getTmp, *relTmp, *blit, *setActive, *getActive, *readPx, *encode, *ctor2;
+    if (!init) {
+        init = true;
+        void* texK = bearite_find_class("UnityEngine", "Texture");
+        void* rtK = bearite_find_class("UnityEngine", "RenderTexture");
+        void* grK = bearite_find_class("UnityEngine", "Graphics");
+        void* icK = bearite_find_class("UnityEngine", "ImageConversion");
+        getW = sc_method(texK, "get_width", 0);
+        getH = sc_method(texK, "get_height", 0);
+        getTmp = rtK ? find_method_types(rtK, "GetTemporary", {"Int32", "Int32"}) : nullptr;
+        relTmp = rtK ? find_method_types(rtK, "ReleaseTemporary", {"RenderTexture"}) : nullptr;
+        setActive = rtK ? find_method_types(rtK, "set_active", {"RenderTexture"}) : nullptr;
+        getActive = sc_method(rtK, "get_active", 0);
+        blit = grK ? find_method_types(grK, "Blit", {"Texture", "RenderTexture"}) : nullptr;
+        readPx = F.tex2d ? find_method_types(F.tex2d, "ReadPixels", {"Rect", "Int32", "Int32"}) : nullptr;
+        ctor2 = F.tex2d ? find_method_types(F.tex2d, ".ctor", {"Int32", "Int32"}) : nullptr;
+        encode = icK ? find_method_types(icK, "EncodeToPNG", {"Texture2D"}) : nullptr;
+        logf_("выгрузка текстур: w=%d h=%d tmp=%d blit=%d read=%d png=%d", getW != 0, getH != 0, getTmp != 0, blit != 0, readPx != 0, encode != 0);
+    }
+    if (!getW || !getH || !getTmp || !relTmp || !blit || !setActive || !getActive || !readPx || !ctor2 || !encode || !obj_new || !F.tex2d) return nullptr;
+    void* wv = inv(getW, tex);
+    void* hv = inv(getH, tex);
+    if (!wv || !hv) return nullptr;
+    int w = *(const int*)obj_unbox(wv), h = *(const int*)obj_unbox(hv);
+    if (w < 4 || h < 4) return nullptr;
+    int sw = w < cap ? w : cap, sh = h < cap ? h : cap;
+    void* ga[2] = {&sw, &sh};
+    void* rt = inv(getTmp, nullptr, ga);
+    if (!rt) return nullptr;
+    void* ba[2] = {tex, rt};
+    inv(blit, nullptr, ba);
+    void* prev = inv(getActive, nullptr);
+    void* sa[1] = {rt};
+    inv(setActive, nullptr, sa);
+    bool ok = false;
+    void* t2 = obj_new(F.tex2d);
+    void* bytes = nullptr;
+    if (t2) {
+        void* ca[2] = {&sw, &sh};
+        inv(ctor2, t2, ca, &ok);
+        if (ok) {
+            struct { float x, y, w, h; } rc{0.f, 0.f, (float)sw, (float)sh};
+            int z = 0;
+            void* pa[3] = {&rc, &z, &z};
+            inv(readPx, t2, pa, &ok);
+            if (ok) { void* ea[1] = {t2}; bytes = inv(encode, nullptr, ea); }
+        }
+    }
+    void* ra[1] = {prev};
+    inv(setActive, nullptr, ra);
+    void* la[1] = {rt};
+    inv(relTmp, nullptr, la);
+    if (t2 && F.destroy) { void* da[1] = {t2}; inv(F.destroy, nullptr, da); }
+    return bytes;
+}
+
+/** Выгрузка оригинала в maps/texturepacks/original/<имя>.png. Уже выгруженные не трогаем. */
+bool tp_export_one(void* tex, const std::string& nm) {
+    std::string dir = g_mapsDir + "/texturepacks/original";
+    static bool madeDir = false;
+    if (!madeDir) {
+        madeDir = true;
+        mkdir((g_mapsDir + "/texturepacks").c_str(), 0775);
+        mkdir(dir.c_str(), 0775);
+        std::string pj = dir + "/pack.json";
+        if (access(pj.c_str(), F_OK) != 0) if (FILE* f = fopen(pj.c_str(), "w")) {
+            fputs("{\"name\":\"Оригинальные текстуры\",\"description\":\"Выгружено из игры. Правь нужные PNG, остальные можно удалить\"}", f);
+            fclose(f);
+        }
+    }
+    std::string fn;
+    for (unsigned char c : nm) fn += (c < 32 || strchr("/\\:*?\"<>|", c)) ? '_' : (char)c;
+    if (fn.empty() || fn[0] == '.') return false;
+    std::string path = dir + "/" + fn + ".png";
+    if (access(path.c_str(), F_OK) == 0) return false;
+    void* bytes = tp_png_bytes(tex, 2048);
+    if (!bytes) return false;
+    uintptr_t n = arr_len(bytes);
+    if (n < 16 || n > 40000000) return false;
+    FILE* fp = fopen(path.c_str(), "wb");
+    if (!fp) return false;
+    fwrite(arr_elem(bytes, 1, 0), 1, n, fp);
+    fclose(fp);
+    return true;
+}
+
 /** Один проход по загруженным текстурам. dump=true: заодно пишет список имён. Возвращает true, если не успели всё (продолжим на следующем тике). */
-bool tp_apply(bool dump) {
+bool tp_apply(bool dump, bool exportOn) {
     if (!g_tp.type2d) g_tp.type2d = type_of("UnityEngine", "Texture2D");
     if (!g_tp.type2d || !F.find_all) return false;
     void* a[1] = {g_tp.type2d};
@@ -5113,7 +5229,7 @@ bool tp_apply(bool dump) {
     std::map<std::string, std::pair<int, int>> names;   // для списка: имя -> размер
     std::string guard = g_mapsDir + "/_tp_guard";
     long long t0 = now_ms();
-    int rep = 0, fail = 0;
+    int rep = 0, fail = 0, exported = 0;
     bool more = false;
     for (uintptr_t i = 0; i < n; ++i) {
         void* t = *(void**)arr_elem(arr, sizeof(void*), i);
@@ -5134,6 +5250,10 @@ bool tp_apply(bool dump) {
             if (!names.count(nm) || names[nm].first < w) names[nm] = {w, h};
         }
         if (!fresh) continue;
+        if (exportOn && nm != "?" && !nm.empty()) {   // оригинал выгружаем до подмены
+            if (FILE* gf = fopen(guard.c_str(), "w")) { fputs(nm.c_str(), gf); fclose(gf); }
+            if (tp_export_one(t, nm)) ++exported;
+        }
         if (g_tp.on) {
             auto it = g_tp.files.find(tp_lower(nm));
             if (it != g_tp.files.end()) {
@@ -5143,11 +5263,12 @@ bool tp_apply(bool dump) {
             }
         }
         g_tp.done.insert(id);
-        if (!dump && now_ms() - t0 > 30) { more = true; break; }   // не держим кадр дольше ~30 мс, остальное на следующем тике
+        if (!dump && now_ms() - t0 > (exportOn ? 25 : 30)) { more = true; break; }   // не держим кадр дольше ~30 мс, остальное на следующем тике
     }
-    if (g_tp.on) unlink(guard.c_str());
+    if (g_tp.on || exportOn) unlink(guard.c_str());
     g_tp.replaced += rep;
     g_tp.failedN += fail;
+    if (exported) logf_("выгрузка текстур: записано %d новых PNG", exported);
     if (rep || fail) logf_("текстур-паки: заменено %d, не вышло на месте %d (всего %d и %d)", rep, fail, g_tp.replaced, g_tp.failedN);
     if (dump) {
         FILE* fp = fopen((g_mapsDir + "/texture_names.txt").c_str(), "w");
@@ -5163,14 +5284,21 @@ bool tp_apply(bool dump) {
 
 /** Вызывается из update() раз в ~500 мс. После смены сцены проходим несколько раз (текстуры подгружаются не сразу), потом редко. */
 void tp_tick(long long now) {
-    bool dump = access((g_mapsDir + "/_dump_textures").c_str(), F_OK) == 0;
-    if (!g_tp.on && !dump) return;
+    static long long flagAt = 0;
+    static bool dump = false, exportOn = false;
+    if (now - flagAt >= 500) {   // файлы-флаги проверяем не чаще раза в полсекунды
+        flagAt = now;
+        dump = access((g_mapsDir + "/_dump_textures").c_str(), F_OK) == 0;
+        exportOn = access((g_mapsDir + "/_export_textures").c_str(), F_OK) == 0;
+    }
+    if (!g_tp.on && !dump && !exportOn) return;
     if (g_scene != g_tp.scene) { g_tp.scene = g_scene; g_tp.burst = 0; g_tp.nextScan = now + 1500; }
     if (now < g_tp.nextScan && !dump) return;
     static const int gaps[3] = {2500, 6000, 20000};
-    bool more = tp_apply(dump);
-    if (more) g_tp.nextScan = now + 500;
-    else { g_tp.nextScan = now + (g_tp.burst < 3 ? gaps[g_tp.burst] : 30000); ++g_tp.burst; }
+    bool more = tp_apply(dump, exportOn);
+    if (dump) dump = false;
+    if (more) g_tp.nextScan = now + (exportOn ? 100 : 500);
+    else { g_tp.nextScan = now + (g_tp.burst < 3 ? gaps[g_tp.burst] : (exportOn ? 8000 : 30000)); ++g_tp.burst; }
     if (g_tp.on) tp_materials();
 }
 
@@ -5213,7 +5341,8 @@ void update() {
             g_dirty = true;
         }
     }
-    if (slow) { try { tp_tick(now); } catch (...) {} }
+    try { tp_tick(now); } catch (...) {}
+    if (slow) { try { nick_tick(); } catch (...) {} }
     if (g_dirty && g_engineOk) {
         g_dirty = false;
         if (g_status != "ok") { g_status = "ok"; g_msg.clear(); }

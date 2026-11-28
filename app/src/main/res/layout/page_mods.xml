@@ -59,7 +59,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:lineSpacingMultiplier="1.15"
-                android:text="Как в Minecraft: пак — это zip или папка с PNG, имя файла = имя текстуры в игре. Пак выше в списке главнее. Изменения применяются после перезапуска игры."
+                android:text="Как в Minecraft: пак — это zip или папка с PNG, имя файла = имя текстуры в игре. Проще всего начать с кнопки «Выгрузить текстуры игры в пак»: запусти игру, походи по сценам, и пак «Оригинальные текстуры» наполнится готовыми PNG. Значок загрузки у пака кладёт его zip в «Загрузки», правь нужные файлы и добавляй обратно. Пак выше в списке главнее. Изменения применяются после перезапуска игры."
                 android:textColor="@color/bear_muted"
                 android:textSize="12sp" />
 
@@ -114,6 +114,15 @@
                     android:text="Добавить папку"
                     android:textSize="13sp" />
             </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pack_export"
+                style="@style/Widget.Bearite.Button.Dark"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:text="Выгрузить текстуры игры в пак"
+                android:textSize="13sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_pack_names"

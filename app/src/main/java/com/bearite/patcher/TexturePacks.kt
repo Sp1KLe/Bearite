@@ -1,12 +1,20 @@
 package com.bearite.patcher
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class TexPack(
     val id: String,
@@ -118,6 +126,53 @@ class TexturePacks(private val ctx: Context) {
     /** Просит мод обновить список при следующем запуске игры. */
     fun requestNames() {
         try { mapsDir.mkdirs(); File(mapsDir, "_dump_textures").writeText("1") } catch (_: Throwable) {}
+    }
+
+    /** Выгрузка оригинальных текстур игры в пак «original»: пока файл-флаг есть, мод пишет PNG каждой загруженной текстуры. */
+    fun exportActive(): Boolean = File(mapsDir, "_export_textures").exists()
+
+    fun setExport(on: Boolean) {
+        val f = File(mapsDir, "_export_textures")
+        mapsDir.mkdirs()
+        if (on) {
+            f.writeText("1")
+            // оригиналы заменять незачем: пак выключен, пока сам его не включишь
+            saveDisabled(disabled().also { it.add("original") })
+            writeConfig()
+        } else f.delete()
+    }
+
+    /** Кладёт пак одним zip в «Загрузки», чтобы править текстуры на телефоне или ПК. Возвращает, куда положили. */
+    fun exportZip(id: String): String {
+        val dir = File(root, id)
+        if (!dir.isDirectory) error("пака нет")
+        val name = "$id.zip"
+        val out: OutputStream
+        val where: String
+        if (Build.VERSION.SDK_INT >= 29) {
+            val v = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val u = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v) ?: error("не удалось создать файл в «Загрузки»")
+            out = ctx.contentResolver.openOutputStream(u) ?: error("не удалось записать файл")
+            where = "Загрузки/$name"
+        } else {
+            val f = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name)
+            f.parentFile?.mkdirs()
+            out = FileOutputStream(f)
+            where = f.path
+        }
+        ZipOutputStream(out.buffered()).use { z ->
+            z.setLevel(1)   // PNG и так сжаты
+            for (f in dir.walkTopDown().filter { it.isFile }) {
+                z.putNextEntry(ZipEntry(f.relativeTo(dir).path.replace('\\', '/')))
+                f.inputStream().use { it.copyTo(z) }
+                z.closeEntry()
+            }
+        }
+        return where
     }
 
     // ------------------------------------------------------------- установка

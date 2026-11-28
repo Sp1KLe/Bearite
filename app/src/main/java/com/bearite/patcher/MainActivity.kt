@@ -88,6 +88,12 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<MaterialButton>(R.id.btn_pack_dir).setOnClickListener { pickPackDir.launch(null) }
         findViewById<MaterialButton>(R.id.btn_pack_names).setOnClickListener { copyTextureNames() }
+        findViewById<MaterialButton>(R.id.btn_pack_export).setOnClickListener {
+            val on = !packs.exportActive()
+            packs.setExport(on)
+            refreshPacks()
+            Toast.makeText(this, if (on) "Включено: запусти игру и походи по сценам, пак «Оригинальные текстуры» наполнится" else "Выгрузка выключена", Toast.LENGTH_LONG).show()
+        }
         findViewById<MaterialButton>(R.id.btn_log_refresh).setOnClickListener { refreshLog() }
         findViewById<MaterialButton>(R.id.btn_log_copy).setOnClickListener {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -339,6 +345,12 @@ class MainActivity : AppCompatActivity() {
             val sw = row.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.pack_switch)
             sw.isChecked = p.enabled
             sw.setOnCheckedChangeListener { _, on -> packs.setEnabled(p.id, on); refreshPacks() }
+            row.findViewById<View>(R.id.pack_export).setOnClickListener {
+                Thread {
+                    val msg = try { "Сохранено: " + packs.exportZip(p.id) } catch (t: Throwable) { "Ошибка: ${t.message}" }
+                    runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+                }.start()
+            }
             val up = row.findViewById<View>(R.id.pack_up)
             if (list.indexOf(p) == 0) up.visibility = View.INVISIBLE
             else up.setOnClickListener { packs.moveUp(p.id); refreshPacks() }
@@ -353,6 +365,8 @@ class MainActivity : AppCompatActivity() {
             box.addView(row)
         }
         findViewById<View>(R.id.packs_empty).visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        findViewById<MaterialButton>(R.id.btn_pack_export).text =
+            if (packs.exportActive()) "Остановить выгрузку текстур игры" else "Выгрузить текстуры игры в пак"
         val warn = findViewById<TextView>(R.id.packs_warn)
         val crashed = packs.crashedOn()
         if (crashed != null) {
