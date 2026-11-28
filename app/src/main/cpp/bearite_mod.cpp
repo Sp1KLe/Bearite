@@ -2608,6 +2608,38 @@ void photon_nick(const std::string& nick) {
     logf_("команда: ник в Photon «%s»", nick.c_str());
 }
 
+/**
+ * Ник игрока (maps/_nick) держим всё время. Игра сама ставит свой «bear#цифры» уже после подключения и при входе в комнату,
+ * а игрок может сменить ник в настройках уже во время игры (файл _nick тогда переписывает чат). Поэтому файл читаем на каждом тике
+ * (раз в ~500 мс), сверяем PhotonNetwork.NickName и, если он другой, возвращаем наш: Photon сам разошлёт новый ник остальным игрокам
+ * (в списке игроков и над медведем, даже у тех, у кого нет Bearite). Если файла нет или он пуст, ничего не трогаем.
+ */
+void nick_tick() {
+    static bool resolved = false;
+    static void *getM = nullptr, *setM = nullptr;
+    static std::string last;
+    static int fixes = 0;
+    std::string want;
+    if (FILE* f = fopen((g_mapsDir + "/_nick").c_str(), "r")) { char b[64] = {0}; fread(b, 1, sizeof b - 1, f); fclose(f); want = b; }
+    while (!want.empty() && (want.back() == '\n' || want.back() == '\r' || want.back() == ' ')) want.pop_back();
+    if (!resolved) {
+        resolved = true;
+        void* pnK = bearite_find_class("Photon.Pun", "PhotonNetwork");
+        if (pnK) {
+            getM = bearite_il2.class_get_method_from_name(pnK, "get_NickName", 0);
+            setM = bearite_il2.class_get_method_from_name(pnK, "set_NickName", 1);
+        }
+        logf_("ник: слежу за PhotonNetwork.NickName, метод чтения=%d записи=%d", getM != nullptr, setM != nullptr);
+    }
+    if (want != last) { last = want; logf_("ник: из файла «%s»", want.empty() ? "(не задан)" : want.c_str()); }
+    if (want.empty() || !getM || !setM) return;
+    void* cur = inv(getM, nullptr);
+    if (cur && utf8(cur) == want) return;
+    void* a[1] = {bearite_il2.string_new(want.c_str())};
+    inv(setM, nullptr, a);
+    if (++fixes <= 6) logf_("ник: у игры «%s», вернул «%s»", cur ? utf8(cur).c_str() : "", want.c_str());
+}
+
 void rp_command(const std::vector<std::string>& p);  // реплей: определён ниже, рядом с update()
 
 // ---- материалы сцены для редактора карт: цвет и текстура (копия в PNG через RenderTexture, оригиналы не читаются)
@@ -4997,6 +5029,7 @@ void update() {
             g_dirty = true;
         }
     }
+    if (slow) { try { nick_tick(); } catch (...) {} }
     if (g_dirty && g_engineOk) {
         g_dirty = false;
         if (g_status != "ok") { g_status = "ok"; g_msg.clear(); }
