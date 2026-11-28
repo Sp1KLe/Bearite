@@ -19,6 +19,7 @@
 #include <dlfcn.h>
 #include <algorithm>
 #include <dirent.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -32,6 +33,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <functional>
 #include <vector>
@@ -4958,6 +4960,220 @@ void ws_poll() {
     }
 }
 
+// ------------------------------------------------------------------ текстур-паки
+// Пак — папка maps/texturepacks/<id>/ с PNG-файлами; имя файла без .png = имя текстуры в игре (регистр не важен, вложенные папки можно).
+// Список включённых паков лаунчер пишет в maps/texturepacks.txt (по id в строке, первый главнее). Текстуры игры подменяются на месте
+// через ImageConversion.LoadImage; если игра не даёт (текстура закрыта от чтения), материалам ставится копия из PNG.
+// Если игра упала на подмене, остаётся maps/_tp_guard с именем текстуры: паки отключены, пока в лаунчере не поменяют набор.
+// Файл maps/_dump_textures просит записать список всех текстур игры в maps/texture_names.txt.
+struct TpState {
+    bool on = false;
+    std::unordered_map<std::string, std::string> files;  // имя маленькими буквами -> путь к PNG
+    std::unordered_set<int> done;                         // instance id текстур, которые уже обработали
+    std::map<int, std::string> failed;                    // подменить на месте не вышло: instance id -> имя
+    std::map<std::string, uintptr_t> own;                 // запасной путь: готовые текстуры из PNG (gc-handle, 0 = не вышло)
+    long long nextScan = 0;
+    int burst = 0, replaced = 0, failedN = 0, swapped = 0;
+    std::string scene;
+    void *type2d = nullptr, *typeMat = nullptr;
+} g_tp;
+
+std::string tp_lower(std::string s) {
+    for (auto& c : s) c = (char)tolower((unsigned char)c);
+    return s;
+}
+
+void tp_scan_dir(const std::string& dir, int depth) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    while (dirent* e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n == "." || n == "..") continue;
+        std::string p = dir + "/" + n;
+        struct stat st;
+        if (stat(p.c_str(), &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) { if (depth < 6) tp_scan_dir(p, depth + 1); continue; }
+        if (n.size() < 5 || strcasecmp(n.c_str() + n.size() - 4, ".png") != 0) continue;
+        std::string key = tp_lower(n.substr(0, n.size() - 4));
+        if (key == "pack") continue;                    // pack.png — значок пака, не текстура
+        g_tp.files.emplace(key, p);                     // emplace не перезаписывает: пак выше в списке главнее
+    }
+    closedir(d);
+}
+
+void tp_init() {
+    g_tp.on = false;
+    g_tp.files.clear();
+    std::string guard = g_mapsDir + "/_tp_guard";
+    std::vector<unsigned char> raw;
+    if (!read_file(g_mapsDir + "/texturepacks.txt", raw)) return;
+    if (access(guard.c_str(), F_OK) == 0) {
+        std::vector<unsigned char> gv;
+        std::string what = read_file(guard, gv) ? std::string((const char*)gv.data(), gv.size()) : std::string("?");
+        logf_("текстур-паки отключены: в прошлый раз игра упала на текстуре «%s». Поменяй набор паков в лаунчере, чтобы попробовать снова", what.c_str());
+        return;
+    }
+    std::string txt((const char*)raw.data(), raw.size());
+    size_t pos = 0;
+    int packs = 0;
+    while (pos <= txt.size()) {
+        size_t nl = txt.find('\n', pos);
+        if (nl == std::string::npos) nl = txt.size();
+        std::string id = txt.substr(pos, nl - pos);
+        pos = nl + 1;
+        while (!id.empty() && (id.back() == '\r' || id.back() == ' ')) id.pop_back();
+        if (id.empty() || id.find('/') != std::string::npos || id.find("..") != std::string::npos) continue;
+        size_t before = g_tp.files.size();
+        tp_scan_dir(g_mapsDir + "/texturepacks/" + id, 0);
+        logf_("текстур-пак «%s»: текстур %zu", id.c_str(), g_tp.files.size() - before);
+        ++packs;
+    }
+    g_tp.on = packs > 0 && !g_tp.files.empty();
+    logf_("текстур-паки: %s, всего имён %zu", g_tp.on ? "включены" : "выключены", g_tp.files.size());
+}
+
+/** Загружает PNG в существующую Texture2D (размер и пиксели заменяются). */
+bool tp_load_png(void* tex, const std::string& path) {
+    static bool inited = false;
+    static void* m = nullptr;
+    if (!inited) { inited = true; m = F.image_conv ? find_method_types(F.image_conv, "LoadImage", {"Texture2D", "Byte[]"}) : nullptr; }
+    if (!m || !tex) return false;
+    std::vector<unsigned char> png;
+    if (!read_file(path, png)) return false;
+    void* arr = byte_array(png.data(), png.size());
+    if (!arr) return false;
+    void* a[2] = {tex, arr};
+    bool ok = false;
+    void* r = inv(m, nullptr, a, &ok);
+    return ok && r && *(const uint8_t*)obj_unbox(r) != 0;
+}
+
+/** Запасной путь: новая Texture2D из PNG, живёт всю игру. */
+void* tp_own_texture(const std::string& key) {
+    auto it = g_tp.own.find(key);
+    if (it != g_tp.own.end()) return it->second ? target(it->second) : nullptr;
+    void* tex = nullptr;
+    auto f = g_tp.files.find(key);
+    void* c2 = F.tex2d ? find_method_types(F.tex2d, ".ctor", {"Int32", "Int32"}) : nullptr;
+    if (f != g_tp.files.end() && c2 && obj_new) {
+        tex = obj_new(F.tex2d);
+        int w = 2, h = 2;
+        bool ok = false;
+        void* a[2] = {&w, &h};
+        inv(c2, tex, a, &ok);
+        if (!ok || !tp_load_png(tex, f->second)) tex = nullptr;
+        if (tex && F.set_hideflags) { int hf = 61; void* ha[1] = {&hf}; inv(F.set_hideflags, tex, ha); }
+    }
+    g_tp.own[key] = tex ? gch_new(tex, 0) : 0;
+    return tex;
+}
+
+/** Материалы, у которых главная текстура не поддалась замене на месте, получают копию из PNG. */
+void tp_materials() {
+    if (g_tp.failed.empty() || !F.find_all || !F.mat_get_main_tex || !F.set_main_tex) return;
+    if (!g_tp.typeMat) g_tp.typeMat = type_of("UnityEngine", "Material");
+    if (!g_tp.typeMat) return;
+    void* a[1] = {g_tp.typeMat};
+    void* arr = inv(F.find_all, nullptr, a);
+    if (!arr) return;
+    uintptr_t n = arr_len(arr);
+    if (n > 50000) n = 50000;
+    for (uintptr_t i = 0; i < n; ++i) {
+        void* mat = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!mat || !(mat_has(mat, "_MainTex") || mat_has(mat, "_BaseMap"))) continue;
+        void* t = inv(F.mat_get_main_tex, mat);
+        if (!t) continue;
+        auto f = g_tp.failed.find(inst_id(t));
+        if (f == g_tp.failed.end()) continue;
+        void* ot = tp_own_texture(tp_lower(f->second));
+        if (!ot) continue;
+        void* sa[1] = {ot};
+        inv(F.set_main_tex, mat, sa);
+        ++g_tp.swapped;
+    }
+}
+
+/** Один проход по загруженным текстурам. dump=true: заодно пишет список имён. Возвращает true, если не успели всё (продолжим на следующем тике). */
+bool tp_apply(bool dump) {
+    if (!g_tp.type2d) g_tp.type2d = type_of("UnityEngine", "Texture2D");
+    if (!g_tp.type2d || !F.find_all) return false;
+    void* a[1] = {g_tp.type2d};
+    void* arr = inv(F.find_all, nullptr, a);
+    if (!arr) return false;
+    uintptr_t n = arr_len(arr);
+    if (n > 100000) n = 100000;
+    static void *getW = nullptr, *getH = nullptr;
+    static bool dimsInit = false;
+    if (dump && !dimsInit) {
+        dimsInit = true;
+        void* texK = bearite_find_class("UnityEngine", "Texture");
+        getW = sc_method(texK, "get_width", 0);
+        getH = sc_method(texK, "get_height", 0);
+    }
+    std::map<std::string, std::pair<int, int>> names;   // для списка: имя -> размер
+    std::string guard = g_mapsDir + "/_tp_guard";
+    long long t0 = now_ms();
+    int rep = 0, fail = 0;
+    bool more = false;
+    for (uintptr_t i = 0; i < n; ++i) {
+        void* t = *(void**)arr_elem(arr, sizeof(void*), i);
+        if (!t) continue;
+        int id = inst_id(t);
+        if (!id) continue;
+        bool fresh = g_tp.done.find(id) == g_tp.done.end();
+        if (!fresh && !dump) continue;
+        std::string nm = name_of(t);
+        if (dump && nm != "?" && !nm.empty()) {
+            int w = 0, h = 0;
+            if (getW && getH) {
+                void* wv = inv(getW, t);
+                void* hv = inv(getH, t);
+                if (wv) w = *(const int*)obj_unbox(wv);
+                if (hv) h = *(const int*)obj_unbox(hv);
+            }
+            if (!names.count(nm) || names[nm].first < w) names[nm] = {w, h};
+        }
+        if (!fresh) continue;
+        if (g_tp.on) {
+            auto it = g_tp.files.find(tp_lower(nm));
+            if (it != g_tp.files.end()) {
+                if (FILE* gf = fopen(guard.c_str(), "w")) { fputs(nm.c_str(), gf); fclose(gf); }
+                if (tp_load_png(t, it->second)) ++rep;
+                else { g_tp.failed[id] = nm; ++fail; }
+            }
+        }
+        g_tp.done.insert(id);
+        if (!dump && now_ms() - t0 > 30) { more = true; break; }   // не держим кадр дольше ~30 мс, остальное на следующем тике
+    }
+    if (g_tp.on) unlink(guard.c_str());
+    g_tp.replaced += rep;
+    g_tp.failedN += fail;
+    if (rep || fail) logf_("текстур-паки: заменено %d, не вышло на месте %d (всего %d и %d)", rep, fail, g_tp.replaced, g_tp.failedN);
+    if (dump) {
+        FILE* fp = fopen((g_mapsDir + "/texture_names.txt").c_str(), "w");
+        if (fp) {
+            for (auto& kv : names) fprintf(fp, "%s\t%dx%d\n", kv.first.c_str(), kv.second.first, kv.second.second);
+            fclose(fp);
+        }
+        unlink((g_mapsDir + "/_dump_textures").c_str());
+        logf_("список текстур игры записан: %zu имён (maps/texture_names.txt)", names.size());
+    }
+    return more;
+}
+
+/** Вызывается из update() раз в ~500 мс. После смены сцены проходим несколько раз (текстуры подгружаются не сразу), потом редко. */
+void tp_tick(long long now) {
+    bool dump = access((g_mapsDir + "/_dump_textures").c_str(), F_OK) == 0;
+    if (!g_tp.on && !dump) return;
+    if (g_scene != g_tp.scene) { g_tp.scene = g_scene; g_tp.burst = 0; g_tp.nextScan = now + 1500; }
+    if (now < g_tp.nextScan && !dump) return;
+    static const int gaps[3] = {2500, 6000, 20000};
+    bool more = tp_apply(dump);
+    if (more) g_tp.nextScan = now + 500;
+    else { g_tp.nextScan = now + (g_tp.burst < 3 ? gaps[g_tp.burst] : 30000); ++g_tp.burst; }
+    if (g_tp.on) tp_materials();
+}
+
 void update() {
     long long now = now_ms();
     reload_maps();
@@ -4997,6 +5213,7 @@ void update() {
             g_dirty = true;
         }
     }
+    if (slow) { try { tp_tick(now); } catch (...) {} }
     if (g_dirty && g_engineOk) {
         g_dirty = false;
         if (g_status != "ok") { g_status = "ok"; g_msg.clear(); }
@@ -5351,6 +5568,7 @@ extern "C" __attribute__((visibility("default"))) void bearite_mod_init(const Be
         return;
     }
     bind_unity();
+    tp_init();
 
     std::string missing;
     if (!F.create_primitive) missing += " GameObject.CreatePrimitive";

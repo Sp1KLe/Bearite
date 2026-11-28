@@ -43,6 +43,86 @@
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:textIsSelectable="true" />
+
+            <!-- текстур-паки -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:text="Текстур-паки"
+                android:textColor="@color/bear_cream"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:lineSpacingMultiplier="1.15"
+                android:text="Как в Minecraft: пак — это zip или папка с PNG, имя файла = имя текстуры в игре. Пак выше в списке главнее. Изменения применяются после перезапуска игры."
+                android:textColor="@color/bear_muted"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/packs_warn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/bear_tan"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/packs_list"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/packs_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:paddingBottom="12dp"
+                android:text="Паков пока нет."
+                android:textColor="@color/bear_dim"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_pack_zip"
+                    style="@style/Widget.Bearite.Button.Dark"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="Добавить zip"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_pack_dir"
+                    style="@style/Widget.Bearite.Button.Dark"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="Добавить папку"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pack_names"
+                style="@style/Widget.Bearite.Button.Dark"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:text="Скопировать список текстур игры"
+                android:textSize="13sp" />
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 

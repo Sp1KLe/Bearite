@@ -39,6 +39,14 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) installMod(uri)
     }
 
+    private lateinit var packs: TexturePacks
+    private val pickPackZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) installPack { packs.installZip(uri) }
+    }
+    private val pickPackDir = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) installPack { packs.installTree(uri) }
+    }
+
     private val saves = SaveImport(this)
     private val pickSave = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) saves.handle(uri)
@@ -48,6 +56,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         BLog.init(this)
         mods = ModManager(this)
+        packs = TexturePacks(this)
         setContentView(R.layout.activity_main)
 
         pageGame = findViewById(R.id.page_game)
@@ -74,6 +83,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<ExtendedFloatingActionButton>(R.id.fab_install).setOnClickListener {
             pickZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         }
+        findViewById<MaterialButton>(R.id.btn_pack_zip).setOnClickListener {
+            pickPackZip.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        }
+        findViewById<MaterialButton>(R.id.btn_pack_dir).setOnClickListener { pickPackDir.launch(null) }
+        findViewById<MaterialButton>(R.id.btn_pack_names).setOnClickListener { copyTextureNames() }
         findViewById<MaterialButton>(R.id.btn_log_refresh).setOnClickListener { refreshLog() }
         findViewById<MaterialButton>(R.id.btn_log_copy).setOnClickListener {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -274,6 +288,8 @@ class MainActivity : AppCompatActivity() {
         val game = Game.find(packageManager) ?: return
         BLog.i("запуск из лаунчера, пакет ${game.pkg}")
         mods.writeConfig()
+        packs.writeConfig()
+        packs.requestNames()   // мод обновит список текстур игры (для кнопки «Скопировать список текстур игры»)
         // ник с главной страницы: мод читает его из maps/_nick и ставит перед подключением к Photon
         try {
             val nick = getSharedPreferences("chat", Context.MODE_PRIVATE).getString("nick", "")?.trim().orEmpty()
@@ -300,6 +316,72 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.mods_empty).visibility =
             if (container.childCount == 0) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.mods_path).text = "Папка модов:\n${mods.modsDir.absolutePath}"
+        refreshPacks()
+    }
+
+    // ------------------------------------------------------------ текстур-паки
+
+    private fun refreshPacks() {
+        val box = findViewById<LinearLayout>(R.id.packs_list)
+        box.removeAllViews()
+        val list = packs.list()
+        val inflater = layoutInflater
+        for (p in list) {
+            val row = inflater.inflate(R.layout.item_pack, box, false)
+            row.findViewById<TextView>(R.id.pack_name).text = p.name
+            row.findViewById<TextView>(R.id.pack_meta).text = buildString {
+                append("Текстур: ").append(p.count)
+                if (p.description.isNotEmpty()) append(" · ").append(p.description)
+            }
+            val iv = row.findViewById<ImageView>(R.id.pack_icon)
+            val bmp = p.icon?.let { android.graphics.BitmapFactory.decodeFile(it.path) }
+            if (bmp != null) { iv.setImageBitmap(bmp); iv.visibility = View.VISIBLE }
+            val sw = row.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.pack_switch)
+            sw.isChecked = p.enabled
+            sw.setOnCheckedChangeListener { _, on -> packs.setEnabled(p.id, on); refreshPacks() }
+            val up = row.findViewById<View>(R.id.pack_up)
+            if (list.indexOf(p) == 0) up.visibility = View.INVISIBLE
+            else up.setOnClickListener { packs.moveUp(p.id); refreshPacks() }
+            row.findViewById<View>(R.id.pack_delete).setOnClickListener {
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                    .setTitle("Удалить пак?")
+                    .setMessage("«${p.name}» будет удалён вместе с файлами.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ -> packs.delete(p.id); refreshPacks() }
+                    .show()
+            }
+            box.addView(row)
+        }
+        findViewById<View>(R.id.packs_empty).visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        val warn = findViewById<TextView>(R.id.packs_warn)
+        val crashed = packs.crashedOn()
+        if (crashed != null) {
+            warn.text = "Игра упала на текстуре «$crashed», паки отключены. Выключи пак с этой текстурой или поменяй набор — тогда они включатся снова."
+            warn.visibility = View.VISIBLE
+        } else warn.visibility = View.GONE
+    }
+
+    private fun installPack(work: () -> String) {
+        Thread {
+            val msg = try { "Пак установлен: " + work() } catch (t: Throwable) {
+                BLog.e("установка текстур-пака не удалась", t)
+                "Ошибка: ${t.message}"
+            }
+            runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); refreshPacks() }
+        }.start()
+    }
+
+    private fun copyTextureNames() {
+        val f = packs.namesFile()
+        packs.requestNames()
+        if (f == null) {
+            Toast.makeText(this, "Списка ещё нет: запусти игру с модами, зайди в любую сцену и нажми кнопку ещё раз", Toast.LENGTH_LONG).show()
+            return
+        }
+        val text = try { f.readText() } catch (_: Throwable) { "" }
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Bearite textures", text))
+        Toast.makeText(this, "Список скопирован: ${text.lines().count { it.isNotBlank() }} текстур. Формат: имя, размер", Toast.LENGTH_LONG).show()
     }
 
     private fun installMod(uri: Uri) {
